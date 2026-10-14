@@ -26,9 +26,10 @@ that external contributors contribute to it.
 - **Repository contents are public.** Every file, including content in the
   history of any branch, is readable by anyone. Adding a file is therefore a
   disclosure decision and not only a code change.
-- **Binary files are opaque to tooling.** The formats declared in
-  `.gitattributes` as binary are not read by linters, formatters, or review
-  diffs, so nothing inside such a file is surfaced by review tooling.
+- **Binary contents are omitted from Git diffs.** Git treats the formats
+  declared in `.gitattributes` as binary and omits their contents from diffs.
+  `.githooks/pre-commit` skips content checks for these files; its size check
+  still applies.
 - **External pull requests.** Fork pull requests are not covered by this
   repository's branch rulesets and run with the fork's permissions. They are
   reviewed before merge, which is the control that matters here.
