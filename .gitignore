@@ -1,0 +1,94 @@
+# Path-level exclusions only.
+#
+# Line endings, encoding and binary-vs-text classification are defined in
+# .gitattributes. This file does not duplicate them.
+#
+# Entries cover two kinds of path: state that a tool generates, and directories
+# that stay local to one machine. Keep the list to paths whose purpose is
+# evident from the name alone.
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node / TypeScript
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment and secrets
+# `.env*` is matched broadly because the failure modes are asymmetric: a
+# missed variant leaks a credential, a redundant one costs nothing.
+.env
+.env.*
+*.pem
+*.key
+!.env.example
+!.env.sample
+
+# Office and LibreOffice lock files. These are created next to a document
+# while it is open and are removed when it is closed.
+~$*
+.~lock.*
+
+# Editor and IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.bak
+*~
+.orig
+.rej
+
+# Operating system
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local working notes
+docs-local/
+
+# Local agent state
+.zcode/
+.zcodeignore
+.claude/
+.kilo/
+AGENTS.local.md
+CLAUDE.local.md
+
+# Scratch output from ad-hoc audit scripts
+_test_*.mjs
+_cjk_*
+_tmp_*.py
+
+# Browser automation captures
+.playwright-mcp/
+.playwright-cli/
+
+# Logs and process files from local servers
+logs/
+*.log
+*.pid
+
+# Rewritten history is not a source commit
+.git.backup-*/
