@@ -1,0 +1,90 @@
+# Normalise line endings at the git layer, not per-developer machine.
+#
+# core.autocrlf=true rewrites LF blobs to CRLF in the Windows working tree.
+# That is harmless for git, but it makes LF-only gates (.editorconfig,
+# endOfLine=lf) unable to pass locally - a formatter reports every file as
+# unformatted, forever, because writing the file immediately puts CRLF back.
+# Committing the normalisation here makes the checkout match the blob on
+# every platform, so the gates mean the same thing locally and in CI.
+* text=auto eol=lf
+
+# Everything below is marked binary so that no translation or diff heuristic
+# ever touches it. Two reasons, both independent of what the file contains:
+#
+#   1. These formats are containers. The Office formats are ZIP archives,
+#      and most others are already compressed. Line-ending translation
+#      corrupts them, and git's text detection would otherwise classify some
+#      of them as text based on a NUL byte in the first 8000 bytes only.
+#   2. Treating them as binary keeps git out of the content entirely, which
+#      is the correct behaviour for generated output regardless of the
+#      compression used.
+
+# Documents (ZIP containers)
+*.docx binary
+*.pptx binary
+*.xlsx binary
+*.odt binary
+*.ods binary
+
+# Documents (not containers, but not text either)
+*.pdf binary
+*.epub binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.bmp binary
+*.tiff binary
+*.psd binary
+*.svg text eol=lf
+
+# Fonts
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.eot binary
+
+# Audio and video
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.mp3 binary
+*.wav binary
+*.flac binary
+
+# Archives
+*.zip binary
+*.gz binary
+*.tgz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.tar binary
+
+# Executables and object code
+*.exe binary
+*.msi binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.bin binary
+*.dat binary
+*.o binary
+*.a binary
+*.class binary
+*.wasm binary
+
+# Python bytecode and model weights
+*.pyc binary
+*.pyo binary
+*.onnx binary
+*.safetensors binary
+*.pt binary
+*.pth binary
+*.ckpt binary

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Fast staged-only checks. Zero dependencies: bash, git, and coreutils only -
+# this hook must run before the repository has a toolchain installed, because
+# the tech stack is still being chosen.
+#
+# Scope is deliberately narrow. This hook guards invariants that are cheap,
+# deterministic, and impossible to fix later without rewriting history:
+# conflict markers, line endings, whitespace, final newline, file size.
+# Anything that needs a language toolchain or a judgement call (lint, types,
+# page-fit, secret scanning) belongs in CI - the hook is a convenience, not a
+# gate.
+#
+# Every check reads the STAGED blob (the git index), never the working tree:
+# an unstaged fix sitting in the worktree must not let an unformatted commit
+# pass.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+fail() {
+  echo "" >&2
+  echo "pre-commit: $*" >&2
+  echo "pre-commit: fix it, then 'git add' the file and retry." >&2
+  exit 1
+}
+
+# ------------------------------------------------------- staged file set ----
+staged=()
+while IFS= read -r -d '' f; do
+  staged+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+[ "${#staged[@]}" -gt 0 ] || exit 0
+
+# Markdown authors may legitimately use trailing double-spaces as hard line
+# breaks; .editorconfig disables trimming for *.md to allow it.
+is_md() { case "$1" in *.md) return 0 ;; *) return 1 ;; esac; }
+
+# ------------------------------------------------------ content checks ------
+for f in "${staged[@]}"; do
+  # Symlinks carry no content worth inspecting here.
+  [ "$(git ls-files -s -- "$f" | awk 'NR==1 {print $1}')" = "120000" ] && continue
+
+  # numstat reports "-" in place of the add/delete counts for anything git
+  # considers binary - the same classification the index and GitHub use.
+  # Sniffing for a NUL byte instead would misread a UTF-16 text file as
+  # binary and silently skip its checks.
+  #
+  # NOTE: no grep in this hook may use -q. Under `set -o pipefail`, `-q` makes
+  # grep exit on first match, the upstream `git cat-file` dies of SIGPIPE, and
+  # the pipeline reports non-zero - which reads as "clean" and silently skips
+  # the check. Redirecting instead of `-q` lets grep drain its input.
+  if git diff --cached --numstat --diff-filter=ACMR -- "$f" \
+       | head -1 | cut -f1 | grep '^-$' >/dev/null; then
+    continue
+  fi
+
+  blob() { git cat-file blob ":$f"; }
+
+  if blob | grep -E '^(<{7}|={7}|>{7})( |$)' >/dev/null; then
+    fail "merge conflict marker in $f"
+  fi
+
+  # CRLF backstop. In normal operation this check can never fire:
+  # .gitattributes (`* text=auto eol=lf`) already rewrites CR at `git add`
+  # time, so the index blob handed to a pre-commit hook is always LF. It stays
+  # here for the cases where that normalisation is switched off for a path
+  # (a `-text` or `binary` attribute, or a file added with --no-renormalize),
+  # where the failure would otherwise be silent and permanent.
+  if blob | grep $'\r$' >/dev/null; then
+    fail "CRLF line ending in $f (.gitattributes pins text blobs to LF)"
+  fi
+
+  if [ "$(blob | wc -c)" -gt 0 ] && [ "$(blob | tail -c 1 | wc -l)" -eq 0 ]; then
+    fail "$f does not end with a newline"
+  fi
+
+  if ! is_md "$f"; then
+    # [[:blank:]] is space or tab. `[ \t]` would be wrong: inside a POSIX
+    # bracket expression the backslash is literal, so that class matches
+    # space, backslash and the letter "t" - every line ending in "t" would
+    # be reported as trailing whitespace.
+    if blob | grep -E '[[:blank:]]+$' >/dev/null; then
+      fail "trailing whitespace in $f"
+    fi
+  fi
+done
+
+# ------------------------------------------------------------ size check ----
+# GitHub warns above 50 MB and hard-rejects above 100 MB. Generated PDFs and
+# page-preview PNGs are exactly the kind of file that creeps past that, so
+# catch it before the push rather than at it.
+MAX_BYTES=$((50 * 1024 * 1024))
+for f in "${staged[@]}"; do
+  # A read failure must not be mistaken for a zero-byte file: that would let an
+  # oversized blob through uncaught. Fail closed instead. git's own error is
+  # left on stderr so the cause is visible next to the hook's message.
+  size="$(git cat-file -s ":$f")" || fail "cannot read size of $f"
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    fail "$f is $size bytes, over the 50 MB GitHub push warning threshold"
+  fi
+done
+
+exit 0
