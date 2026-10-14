@@ -42,6 +42,8 @@ Rules:
 - No WIP, debug output, commented-out code, or placeholder values.
 - No secrets, `.env` files, or credentials.
 - Revert with `git revert`, keeping the original subject prefixed with `Revert: `.
+  Revert commits are exempt from the format and subject rules above; the body
+  remains required.
 
 ### Workflow
 
