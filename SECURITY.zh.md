@@ -21,8 +21,9 @@
 
 - **仓库内容公开。** 每个文件都可被任何人读到，包括任何分支历史中的内容。
   因此新增文件是一次公开披露决定，而不只是代码改动。
-- **二进制文件对工具不可读。** `.gitattributes` 中标记为 binary 的格式无法被
-  linter、格式化工具或评审 diff 读取，因此其中的内容不会被评审工具呈现。
+- **二进制文件对 Git diff 和 pre-commit 钩子不可见。** `.gitattributes` 中标记
+  为 binary 的格式会被 Git 按二进制处理，因此 Git diff 不显示其内容，
+  `.githooks/pre-commit` 也会跳过这些文件。
 - **外部 pull request。** fork 发起的 PR 不受本仓库分支规则集覆盖，并以 fork
   自身的权限运行。真正的控制手段是合并前的人工评审。
 - **分支保护。** `main` 拒绝直接推送、强推与删除，且只接受经 pull request 的

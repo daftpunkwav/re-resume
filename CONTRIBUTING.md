@@ -54,11 +54,17 @@ git config core.hooksPath .githooks
 The hook is a convenience, not a gate. The rules above hold whether or not it
 is installed.
 
-The hook has a self-test covering each check in both directions:
+The hook has a self-test. It exercises the conflict-marker, trailing-whitespace,
+final-newline and binary-skip checks in both directions, and asserts the
+invariant `.gitattributes` actually guarantees: that no CR reaches a stored
+blob.
 
 ```bash
 bash .githooks/test-pre-commit.sh
 ```
+
+Not covered: the size check, which would need a staged blob above 50 MB, and
+the hook's own CRLF check, which cannot fire while normalisation is on.
 
 Run it after changing the hook.
 

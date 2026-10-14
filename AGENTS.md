@@ -41,7 +41,9 @@ Rules:
 - One commit does one thing. Split unrelated changes.
 - No WIP, debug output, commented-out code, or placeholder values.
 - No secrets, `.env` files, or credentials.
-- Revert with `git revert`, keeping the original subject prefixed with `Revert: `.
+- Revert with `git revert`. Its message is the one exception to the format above:
+  the original subject prefixed with `Revert:`, plus a body stating why the
+  change is being reverted.
 
 ### Workflow
 
