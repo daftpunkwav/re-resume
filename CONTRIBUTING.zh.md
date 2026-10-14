@@ -47,7 +47,8 @@ git config core.hooksPath .githooks
 
 钩子是便利工具，不是门禁。装不装，上面的规则都一样成立。
 
-钩子自带自测，覆盖每一项检查的正反两个方向：
+钩子自带自测，覆盖拒绝行尾空白、冲突标记、缺少末尾换行和 blob 大小读取失败，
+`git add` 时的 CRLF 规范化，以及允许 Markdown 硬换行和干净文本：
 
 ```bash
 bash .githooks/test-pre-commit.sh

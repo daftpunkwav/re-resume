@@ -54,7 +54,9 @@ git config core.hooksPath .githooks
 The hook is a convenience, not a gate. The rules above hold whether or not it
 is installed.
 
-The hook has a self-test covering each check in both directions:
+The hook has a self-test covering rejection of trailing whitespace, conflict
+markers, missing final newlines, and blob size read failures; CRLF normalisation
+at `git add`; and acceptance of Markdown hard breaks and clean text:
 
 ```bash
 bash .githooks/test-pre-commit.sh
