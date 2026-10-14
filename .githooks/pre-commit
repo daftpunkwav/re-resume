@@ -96,7 +96,10 @@ done
 # catch it before the push rather than at it.
 MAX_BYTES=$((50 * 1024 * 1024))
 for f in "${staged[@]}"; do
-  size="$(git cat-file -s ":$f" 2>/dev/null || echo 0)"
+  # A read failure must not be mistaken for a zero-byte file: that would let an
+  # oversized blob through uncaught. Fail closed instead. git's own error is
+  # left on stderr so the cause is visible next to the hook's message.
+  size="$(git cat-file -s ":$f")" || fail "cannot read size of $f"
   if [ "$size" -gt "$MAX_BYTES" ]; then
     fail "$f is $size bytes, over the 50 MB GitHub push warning threshold"
   fi
