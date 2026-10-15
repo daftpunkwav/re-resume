@@ -30,7 +30,12 @@ node_modules/
 .next/
 out/
 .turbo/
+.vite/
 *.tsbuildinfo
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Jupyter
 .ipynb_checkpoints/
