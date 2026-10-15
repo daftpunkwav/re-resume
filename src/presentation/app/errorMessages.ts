@@ -23,6 +23,7 @@ const DOMAIN_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   variantNotInExperience: '这条表述不属于所选经历。',
   variantUnconfirmed: '这条表述还没确认，确认后才能放进简历。',
   claimRejected: '有断言已被拒绝，需要先更换或移除。',
+  claimNotFound: '找不到这条断言，它不属于当前经历。',
   claimPending: '存在待确认的断言，定稿前请先确认或拒绝它们。',
   referencedByBlocks: '仍被简历引用，请先在这些简历中解除引用。',
   invalidClaimTransition: '这条断言当前的状态不允许这个操作。',
