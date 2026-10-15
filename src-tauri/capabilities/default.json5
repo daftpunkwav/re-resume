@@ -1,0 +1,107 @@
+{
+  // Least-privilege capabilities for the single application window.
+  //
+  // The file is json5 because every entry below states which frontend feature
+  // needs it; that rationale is the part that goes stale, so it sits next to the
+  // grant rather than in a document the grants drift away from.
+  "$schema": "../gen/schemas/desktop-schema.json",
+
+  "identifier": "frontend",
+
+  "description":
+    "Everything the ReResume webview may reach over IPC. A permission that is not listed here is not available to the frontend, regardless of which plugin registers it.",
+
+  // The only window in the application (see `app.windows` in tauri.conf.json).
+  "windows": ["main"],
+
+  // The product ships for Windows and macOS only. Stating it here keeps a
+  // permission from silently applying to a platform the product is not built for.
+  "platforms": ["macOS", "windows"],
+
+  "permissions": [
+    // Tauri core: event, window and webview commands. The event bus carries the
+    // agent-run progress events the presentation layer subscribes to.
+    "core:default",
+
+    // --- SQLite ---------------------------------------------------------
+    // Read path for the application database: load, select and close.
+    "sql:default",
+
+    // Write path. `sql:default` grants reads only, and every repository in
+    // infrastructure/persistence issues inserts, updates and deletes through
+    // execute. Without this the repositories cannot write at all.
+    //
+    // The plugin has no command scope, so the database this reaches is the one
+    // the connection string names. The migrations registered in lib.rs and the
+    // bookkeeping table behind them are the plugin's own; nothing here creates
+    // a schema-version table.
+    "sql:allow-execute",
+
+    // --- Outbound HTTP --------------------------------------------------
+    // `http:default` enables the fetch command family and nothing else. The
+    // origins below are what narrow it: the WebView's own fetch cannot reach a
+    // model endpoint, so every provider call goes through this plugin instead.
+    {
+      "identifier": "http:default",
+      "allow": [
+        // AnthropicProvider appends /v1/messages to its base URL.
+        { "url": "https://api.anthropic.com/v1/*" },
+        // OpenAiCompatibleProvider appends /chat/completions to its base URL.
+        { "url": "https://api.openai.com/v1/*" },
+      ],
+    },
+    // The permitted origins are application configuration, so the list names
+    // origins rather than a wildcard. Pointing the app at a self-hosted or
+    // third-party OpenAI-compatible endpoint means adding that origin here in
+    // the same change that makes it configurable. Do not replace this list with
+    // `*://*`: it would hand the webview the whole network.
+
+    // --- File dialogs ---------------------------------------------------
+    // Choosing where an exported PDF or DOCX is written. Export is the only
+    // user-initiated file write in the application.
+    "dialog:allow-save",
+
+    // Selecting an existing file to bring into the experience library. `allow-message`
+    // and `allow-confirm` are not granted: no frontend feature renders a native
+    // message or a native confirmation today.
+    "dialog:allow-open",
+
+    // --- File system ----------------------------------------------------
+    // Writing the bytes the exporter produces to the path the save dialog
+    // returned. The scope is the two standard user destinations a document is
+    // saved into; nothing else on disk is writable from the webview.
+    //
+    // `fs:default` is not taken, so no directory outside this scope is reachable.
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
+    },
+
+    // --- Stronghold -----------------------------------------------------
+    // Credential storage, per StrongholdSecretStore in infrastructure/security.
+    // Taken as individual commands rather than `stronghold:default` so the Vault
+    // surface stays closed: StrongholdSecretStore keeps records in the client's
+    // key-value Store because the Vault has no read command, and nothing here
+    // needs it.
+    //
+    // loadClient / createClient — opening or creating the client that owns the
+    //   store, on both a fresh install and a snapshot written by an earlier run.
+    "stronghold:allow-initialize",
+    "stronghold:allow-load-client",
+    "stronghold:allow-create-client",
+    // get / save / remove a single secret record.
+    "stronghold:allow-get-store-record",
+    "stronghold:allow-save-store-record",
+    "stronghold:allow-remove-store-record",
+    // Writing the encrypted snapshot. Every mutation is followed by a save; the
+    // snapshot is only durable once it is.
+    "stronghold:allow-save",
+
+    // Not granted, deliberately:
+    //   stronghold:allow-execute-procedure — the SLIP10/Ed25519 procedures back
+    //     the Vault, which this build does not use.
+    //   stronghold:allow-save-secret, stronghold:allow-remove-secret — the same.
+    //   stronghold:allow-destroy — deletes the snapshot; no frontend feature
+    //     destroys credentials.
+  ],
+}
