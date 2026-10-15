@@ -1,0 +1,125 @@
+/**
+ * Resume region. Layout comes from the shared classes in shell.css and
+ * components.css; these rules only add what those do not describe.
+ */
+
+/* Workspace --------------------------------------------------------------- */
+
+.resume-workspace-empty {
+  min-height: 200px;
+}
+
+/* List -------------------------------------------------------------------- */
+
+.resume-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.resume-list-action {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.resume-list-row {
+  cursor: pointer;
+}
+
+.resume-list-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Editor ------------------------------------------------------------------ */
+
+.resume-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.resume-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.resume-identity-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.resume-identity-title {
+  font-size: var(--text-size-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-identity-role {
+  font-size: var(--text-size-sm);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-editor-grid {
+  align-items: stretch;
+  min-height: 0;
+}
+
+.resume-editor-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.resume-editor-canvas {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 520px;
+}
+
+/* Palette ----------------------------------------------------------------- */
+
+.resume-palette-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.resume-palette-separator {
+  height: 1px;
+  margin: var(--space-4) 0 var(--space-3);
+  background: var(--border-subtle);
+}
+
+/* Operations feedback ----------------------------------------------------- */
+
+.resume-blockers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-xs);
+  color: var(--text-tertiary);
+}
+
+@media (width <= 1180px) {
+  .resume-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resume-editor-canvas {
+    min-height: 420px;
+  }
+}

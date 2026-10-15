@@ -1,0 +1,372 @@
+/**
+ * @file ResumeEditorPanel
+ * @description One resume, end to end: its header and actions, its page setup,
+ * its palette and the canvas that draws it. Every mutation in this file leaves
+ * through commit(), undo(), redo(), freeze() or duplicate() on the composition
+ * root, so the revision chain the user can walk is the record of what happened.
+ *
+ * Responsibilities:
+ * - Load the resume, then materialize and lay it out again after every change
+ * - Turn editor intents into pure DocumentChange transitions and commit them
+ * - Refuse editing affordances on a frozen resume and say why
+ * - Confirm the consequences of freezing before doing it
+ *
+ * Constraints:
+ * - next is pure. It reads the state it is handed and returns a new one; it
+ *   captures nothing, because the revision it produces is replayed by undo.
+ * - Nothing here changes a resume directly. commit() is the only write path.
+ */
+
+import { useCallback, useRef, useState } from 'react'
+
+import { Badge } from '../../app/components/Badge'
+import { Button } from '../../app/components/Button'
+import { Dialog } from '../../app/components/Dialog'
+import { Notice } from '../../app/components/Notice'
+import { Spinner } from '../../app/components/Spinner'
+import { useServices } from '../../app/ApplicationServicesProvider'
+import type { ReadableError } from '../../app/errorMessages'
+import { useNavigation } from '../../app/navigationStore'
+import { useOperation } from '../../app/useOperation'
+import { useResource } from '../../app/useResource'
+
+import type { ResumeWorkbench } from '../../../bootstrap/compositionRoot'
+import type { Block } from '../../../domain/resume/Block'
+import type { DocumentChange, DocumentState } from '../../../domain/resume/DocumentChange'
+import { isAbsoluteLayout } from '../../../domain/resume/Layout'
+import type { LayoutOutput } from '../../../domain/resume/PageLayout'
+import type { PageSetup } from '../../../domain/resume/PageSetup'
+import type { Resume } from '../../../domain/resume/Resume'
+import type { MaterializedBlock } from '../../../domain/resume/ResumeSnapshot'
+import type { BlockId, ResumeId } from '../../../domain/shared/branded-id'
+
+import { ResumeCanvas } from '../../canvas/ResumeCanvas'
+import type { BlockMove } from '../../canvas/ResumeCanvas'
+import { BlockPalette } from './BlockPalette'
+import { PageSetupForm } from './PageSetupForm'
+
+import './resume.css'
+
+export interface ResumeEditorPanelProps {
+  readonly resumeId: ResumeId
+  /** Told after every accepted change so the list can refresh its status. */
+  readonly onResumeChanged: () => void
+}
+
+interface ResumePreview {
+  readonly blocks: readonly MaterializedBlock[]
+  readonly layout: LayoutOutput
+}
+
+type NoticeTone = 'info' | 'success' | 'warning'
+
+interface OperationOutcome {
+  readonly tone: NoticeTone
+  readonly title: string
+}
+
+/** Metadata every user change carries. The run id stays null: this is the user. */
+function userChange(label: string, next: (state: DocumentState) => DocumentState): DocumentChange {
+  return { label, origin: 'user', runId: null, next }
+}
+
+export function appendBlock(label: string, block: Block): DocumentChange {
+  return userChange(label, (state) => ({ ...state, blocks: [...state.blocks, block] }))
+}
+
+export function reorderBlocks(label: string, blockId: BlockId, toIndex: number): DocumentChange {
+  return userChange(label, (state) => {
+    const from = state.blocks.findIndex((block) => block.id === blockId)
+    // A block that is no longer in the document leaves it untouched; the canvas
+    // can be one interaction behind an undo, and a change that invented a
+    // position for a missing block would write history that never happened.
+    if (from < 0) return state
+    const blocks = [...state.blocks]
+    const [moved] = blocks.splice(from, 1)
+    if (moved === undefined) return state
+    const bounded = Math.min(Math.max(toIndex, 0), blocks.length)
+    blocks.splice(bounded, 0, moved)
+    return { ...state, blocks }
+  })
+}
+
+export function placeAbsoluteBlock(
+  label: string,
+  blockId: BlockId,
+  x: number,
+  y: number,
+): DocumentChange {
+  return userChange(label, (state) => ({
+    ...state,
+    blocks: state.blocks.map((block) =>
+      block.id === blockId && isAbsoluteLayout(block.layout)
+        ? { ...block, layout: { ...block.layout, x, y } }
+        : block,
+    ),
+  }))
+}
+
+export function changePageSetup(label: string, pageSetup: PageSetup): DocumentChange {
+  return userChange(label, (state) => ({ ...state, pageSetup }))
+}
+
+/**
+ * Materializing and laying out is two reads against the same document. A null
+ * resume has nothing to resolve yet, which the panel renders as a spinner
+ * rather than as an empty canvas.
+ */
+async function loadPreview(
+  workbench: ResumeWorkbench,
+  resume: Resume | null,
+): Promise<ResumePreview | null> {
+  if (resume === null) return null
+  const blocks = await workbench.materialize(resume.id)
+  return { blocks, layout: workbench.layOut(blocks, resume.pageSetup) }
+}
+
+export function ResumeEditorPanel({ resumeId, onResumeChanged }: ResumeEditorPanelProps) {
+  const { resumes } = useServices()
+  const selectResume = useNavigation((state) => state.selectResume)
+
+  const loadResume = useCallback(() => resumes.get(resumeId), [resumes, resumeId])
+  const resumeResource = useResource(loadResume, [resumes, resumeId])
+  const resume = resumeResource.data
+  // Re-materializing after every accepted change is what makes the canvas show
+  // what was actually stored rather than what was intended.
+  const loadCurrentPreview = useCallback(() => loadPreview(resumes, resume), [resumes, resume])
+  const preview = useResource(loadCurrentPreview, [resumes, resume])
+
+  const [outcome, setOutcome] = useState<OperationOutcome | null>(null)
+  const [selectedBlockId, setSelectedBlockId] = useState<BlockId | null>(null)
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false)
+
+  /**
+   * One error surface and one refresh path for every mutation here. The command
+   * to run is parked in a ref so each call site can hand over its own closure
+   * without useOperation having to know which of them it is running.
+   */
+  const pending = useRef<() => Promise<unknown>>(async () => undefined)
+  const documentOp = useOperation(
+    useCallback(async () => pending.current(), []),
+    async () => {
+      await resumeResource.reload()
+      onResumeChanged()
+    },
+  )
+
+  const dispatch = (
+    run: () => Promise<unknown>,
+    success?: OperationOutcome,
+  ): void => {
+    setOutcome(null)
+    pending.current =
+      success === undefined
+        ? run
+        : async () => {
+            await run()
+            setOutcome(success)
+          }
+    void documentOp.run()
+  }
+
+  if (resumeResource.loading && resume === null) {
+    return <Spinner label="正在读取简历…" />
+  }
+  if (resume === null) {
+    return (
+      <Notice tone="danger" title="这份简历已经不存在了。">
+        <p>{describeResumeReadError(resumeResource.error)}</p>
+      </Notice>
+    )
+  }
+
+  const frozen = resume.status === 'frozen'
+  const editable = !frozen && !documentOp.busy
+  // A block can leave the document while it is selected — an undo, or a commit
+  // that removed it. Deriving the selection here means the canvas never shows
+  // a frame around a block the document no longer holds.
+  const selected =
+    selectedBlockId !== null && resume.blocks.some((block) => block.id === selectedBlockId)
+      ? selectedBlockId
+      : null
+
+  const commit = (change: DocumentChange): Promise<unknown> => resumes.commit(resumeId, change)
+
+  const addBlock = (block: Block): void => {
+    dispatch(() => commit(appendBlock('添加区块', block)))
+  }
+
+  const moveBlock = (move: BlockMove): void => {
+    dispatch(() =>
+      commit(
+        move.kind === 'reorder'
+          ? reorderBlocks('移动区块', move.blockId, move.toIndex)
+          : placeAbsoluteBlock('移动区块', move.blockId, move.x, move.y),
+      ),
+    )
+  }
+
+  const copyResume = (): void => {
+    dispatch(
+      async () => {
+        const copyId = await resumes.duplicate({ sourceResumeId: resumeId })
+        selectResume(copyId)
+      },
+      { tone: 'success', title: '已复制为一份新的草稿。' },
+    )
+  }
+
+  return (
+    <div className="resume-editor">
+      <div className="toolbar">
+        <div className="resume-identity">
+          <div className="resume-identity-text">
+            <h2 className="resume-identity-title">{resume.title}</h2>
+            <p className="resume-identity-role">{resume.targetRole ?? '未设置目标岗位'}</p>
+          </div>
+          <Badge tone={frozen ? 'info' : 'neutral'}>{frozen ? '已定稿' : '草稿'}</Badge>
+        </div>
+        <div className="toolbar-group">
+          <Button
+            size="small"
+            icon="undo"
+            disabled={documentOp.busy || frozen}
+            onClick={() => dispatch(() => resumes.undo(resumeId))}
+          >
+            撤销
+          </Button>
+          <Button
+            size="small"
+            icon="redo"
+            disabled={documentOp.busy || frozen}
+            onClick={() => dispatch(() => resumes.redo(resumeId))}
+          >
+            重做
+          </Button>
+          <Button size="small" icon="copy" disabled={documentOp.busy} onClick={copyResume}>
+            复制
+          </Button>
+          <Button
+            size="small"
+            icon="freeze"
+            variant="primary"
+            disabled={documentOp.busy || frozen}
+            onClick={() => setConfirmingFreeze(true)}
+          >
+            定稿
+          </Button>
+        </div>
+      </div>
+
+      {frozen ? (
+        <Notice tone="info" title="已定稿，复制一份草稿继续修改">
+          <p>定稿之后这份简历不再接受任何改动；复制会得到一份可以继续编辑的草稿。</p>
+        </Notice>
+      ) : null}
+
+      <OperationFailure error={documentOp.error} onDismiss={documentOp.clearError} />
+
+      {outcome === null ? null : (
+        <Notice
+          tone={outcome.tone}
+          title={outcome.title}
+          actions={
+            <Button size="small" variant="ghost" onClick={() => setOutcome(null)}>
+              知道了
+            </Button>
+          }
+        />
+      )}
+
+      <div className="split resume-editor-grid">
+        <div className="resume-editor-sidebar">
+          <PageSetupForm
+            pageSetup={resume.pageSetup}
+            disabled={!editable}
+            onChange={(pageSetup) => dispatch(() => commit(changePageSetup('调整页面设置', pageSetup)))}
+          />
+          <BlockPalette disabled={!editable} onAddBlock={addBlock} />
+        </div>
+
+        <div className="resume-editor-canvas">
+          {preview.data === null ? (
+            preview.error === null ? (
+              <Spinner label="正在排版…" />
+            ) : (
+              <Notice tone="danger" title="排版失败">
+                <p>{preview.error.message}</p>
+              </Notice>
+            )
+          ) : (
+            <ResumeCanvas
+              layout={preview.data.layout}
+              page={resume.pageSetup}
+              blocks={resume.blocks}
+              editable={editable}
+              selectedBlockId={selected}
+              onSelectBlock={setSelectedBlockId}
+              onMoveBlock={moveBlock}
+            />
+          )}
+        </div>
+      </div>
+
+      <Dialog
+        open={confirmingFreeze}
+        title="定稿这份简历"
+        confirmLabel="定稿"
+        busy={documentOp.busy}
+        onConfirm={() => {
+          setConfirmingFreeze(false)
+          dispatch(
+            () => resumes.freeze(resumeId),
+            {
+              tone: 'success',
+              title: '简历已定稿，导出将使用这份快照。',
+            },
+          )
+        }}
+        onClose={() => setConfirmingFreeze(false)}
+      >
+        <p>定稿会带来两个不可撤销的结果：</p>
+        <ul>
+          <li>生成本次内容的快照，此后的经历库改动不再影响它。</li>
+          <li>简历变为只读，要继续修改只能先复制一份草稿。</li>
+        </ul>
+      </Dialog>
+    </div>
+  )
+}
+
+function OperationFailure({
+  error,
+  onDismiss,
+}: {
+  readonly error: ReadableError | null
+  readonly onDismiss: () => void
+}) {
+  if (error === null) return null
+  return (
+    <Notice
+      tone="danger"
+      title={error.message}
+      actions={
+        <Button size="small" variant="ghost" onClick={onDismiss}>
+          知道了
+        </Button>
+      }
+    >
+      {error.blockers.length === 0 ? null : (
+        <ul className="resume-blockers">
+          {error.blockers.map((blocker) => (
+            <li key={blocker}>{blocker}</li>
+          ))}
+        </ul>
+      )}
+    </Notice>
+  )
+}
+
+function describeResumeReadError(error: ReadableError | null): string {
+  return error === null ? '它可能已经被删除，或者这一份从来没有保存成功。' : error.message
+}
