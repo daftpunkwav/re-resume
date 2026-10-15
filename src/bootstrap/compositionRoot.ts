@@ -40,7 +40,7 @@ import type { LayoutInput, LayoutOutput } from '../domain/resume/PageLayout'
 import type { MaterializedBlock, ResumeSnapshot } from '../domain/resume/ResumeSnapshot'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import type { AgentRun } from '../domain/generation/AgentRun'
-import type { ModelProvider, ToolSchema } from '../domain/generation/ports/ModelProvider'
+import type { ModelChunk, ModelProvider, ToolSchema } from '../domain/generation/ports/ModelProvider'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import type { ToolContext } from '../domain/generation/ports/ToolRegistry'
 
@@ -52,11 +52,15 @@ import { SqliteExperienceRepository } from '../infrastructure/persistence/Sqlite
 import { SqliteProfileRepository } from '../infrastructure/persistence/SqliteProfileRepository'
 import { SqliteResumeRepository } from '../infrastructure/persistence/SqliteResumeRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/SqliteAgentRunRepository'
+import { SqliteJobPostingRepository } from '../infrastructure/persistence/SqliteJobPostingRepository'
 import { fromDocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
 import type { DocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
+import { createTauriHttpClient } from '../infrastructure/http/TauriHttpClient'
+import { AnthropicProvider } from '../infrastructure/http/ProviderAdapters/AnthropicProvider'
+import { OpenAiCompatibleProvider } from '../infrastructure/http/ProviderAdapters/OpenAiCompatibleProvider'
 
 import { createExperience } from '../application/experience/CreateExperience'
 import type { CreateExperienceCommand } from '../application/experience/CreateExperience'
@@ -199,25 +203,40 @@ export interface CompositionRoot {
   shutdown(): Promise<void>
 }
 
+/** Plain configuration for one model service. No behaviour, no secrets. */
+export type ProviderDescriptor =
+  | {
+      readonly kind: 'openai-compatible'
+      readonly id: string
+      readonly modelId: string
+      /** Endpoint root, for example https://api.openai.com/v1 */
+      readonly baseUrl: string
+      /** SecretStore key holding the API key for this endpoint. */
+      readonly apiKeyRef: string
+    }
+  | {
+      readonly kind: 'anthropic'
+      readonly id: string
+      readonly modelId: string
+      /** Endpoint root, for example https://api.anthropic.com */
+      readonly baseUrl: string
+      /** SecretStore key holding the API key for this endpoint. */
+      readonly apiKeyRef: string
+    }
+
 export interface CompositionRootOptions {
   /** Connection string handed to the SQL plugin verbatim. */
   readonly databaseConnectionString: string
   /** Stronghold snapshot path and unlock password; the password is never persisted. */
   readonly stronghold: StrongholdSecretStoreOptions
-  /** The provider the settings screen configured. This root does not pick one. */
-  readonly provider: ModelProvider
   /**
-   * Secret references belonging to that provider. Their values are loaded here
-   * and scrubbed from every string a run persists. Pass an empty list when no
-   * provider secret is stored.
+   * Which model service to talk to, or null when none is configured yet. The
+   * adapter is built here, not by the caller: constructing one means importing
+   * an infrastructure module, and the only directory allowed to do that is
+   * this one. Null does not disable the application — only the agent
+   * console, which reports that no provider is configured when it is used.
    */
-  readonly providerSecretRefs: readonly string[]
-  /**
-   * The job_posting reader and writer. The application layer declares that
-   * vocabulary locally and this build has no SQLite implementation of it, so
-   * the caller supplies one rather than this root inventing a row mapping.
-   */
-  readonly jobPostings: JobPostingRepository
+  readonly provider: ProviderDescriptor | null
 }
 
 /** Everything the service factories below share, resolved once per root. */
@@ -261,6 +280,7 @@ export async function createCompositionRoot(
   // the schema is inert until this reports 1, so the repositories refuse to run.
   await database.enableForeignKeys()
 
+  const secretStore = new StrongholdSecretStore(options.stronghold)
   const wiring: Wiring = {
     clock,
     ids,
@@ -281,9 +301,10 @@ export async function createCompositionRoot(
     resumeRepo: new SqliteResumeRepository(database, clock, ids),
     runRepo: new SqliteAgentRunRepository(database),
     secretStore: new StrongholdSecretStore(options.stronghold),
-    provider: options.provider,
-    providerSecretRefs: options.providerSecretRefs,
-    jobPostings: options.jobPostings,
+    provider: await buildProvider(options.provider, secretStore),
+    providerSecretRefs:
+      options.provider === null ? [] : [options.provider.apiKeyRef],
+    jobPostings: new SqliteJobPostingRepository(database),
   }
 
   return {
@@ -481,6 +502,56 @@ function revisionChainReader(database: SqlDatabase): LiveRevisionChain {
  * write recordToolInvocation. The adapter keeps both vocabularies intact
  * instead of widening the port to the implementation's spelling.
  */
+/**
+ * Builds the adapter from configuration. The credential stays in the secret
+ * store; only the adapter, and only for the lifetime of this root, holds it.
+ */
+async function buildProvider(
+  descriptor: ProviderDescriptor | null,
+  store: SecretStore,
+): Promise<ModelProvider> {
+  if (descriptor === null) return new UnconfiguredModelProvider()
+  const apiKey = await store.load(descriptor.apiKeyRef)
+  if (apiKey === null || apiKey.length === 0) {
+    throw new Error(
+      `No credential is stored under "${descriptor.apiKeyRef}", so no model service can be reached.`,
+    )
+  }
+  const http = createTauriHttpClient()
+  if (descriptor.kind === 'anthropic') {
+    return new AnthropicProvider({
+      id: descriptor.id,
+      modelId: descriptor.modelId,
+      baseUrl: descriptor.baseUrl,
+      apiKey,
+      http,
+    })
+  }
+  return new OpenAiCompatibleProvider({
+    id: descriptor.id,
+    modelId: descriptor.modelId,
+    baseUrl: descriptor.baseUrl,
+    apiKey,
+    http,
+  })
+}
+
+/**
+ * Stands in until a provider is configured. It fails loudly on first use
+ * rather than returning empty output, so an unconfigured console reads as
+ * "not set up yet" instead of "the model had nothing to say".
+ */
+class UnconfiguredModelProvider implements ModelProvider {
+  readonly id = 'unconfigured'
+  readonly modelId = 'unconfigured'
+
+  stream(): AsyncIterable<ModelChunk> {
+    throw new Error(
+      'No model service is configured yet. Add a provider in settings before running an agent task.',
+    )
+  }
+}
+
 function toolInvocationRecorder(runRepo: SqliteAgentRunRepository): ToolInvocationRecorder {
   return { record: (invocation) => runRepo.recordToolInvocation(invocation) }
 }

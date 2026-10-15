@@ -11,9 +11,9 @@
  * - Record the agent run the parse is attributed to
  *
  * Constraints:
- * - This module declares JobPostingRepository because the domain has no port
- *   for the job_posting table; the persistence vocabulary stays here, where
- *   job postings are written.
+ * - JobPostingRepository lives in the domain context, next to the entity it
+ *   persists, so the infrastructure implementation never has to reach back
+ *   into this layer for the port's shape.
  * - Grounding is checked on the result, not asked for in a prompt: a
  *   requirement the raw text does not contain is refused however confidently
  *   the model stated it.
@@ -21,6 +21,9 @@
 
 import { z } from 'zod'
 import { attachParse } from '../../domain/generation/JobPosting'
+import type { JobPostingRepository } from '../../domain/generation/ports/JobPostingRepository'
+
+export type { JobPostingRepository }
 import type { JobPosting } from '../../domain/generation/JobPosting'
 import { completeRun, failRun } from '../../domain/generation/AgentRun'
 import type { AgentRun } from '../../domain/generation/AgentRun'
@@ -38,12 +41,6 @@ import type { Result } from '../../domain/shared/Result'
  * table has no domain port, and the use cases in this layer are its only
  * reader and writer. A repository implementation binds to this vocabulary.
  */
-export interface JobPostingRepository {
-  findById(id: JobPostingId): Promise<JobPosting | null>
-  listAll(): Promise<readonly JobPosting[]>
-  save(jobPosting: JobPosting): Promise<void>
-}
-
 export interface ParseJobPostingDeps {
   readonly model: ModelProvider
   readonly jobPostings: JobPostingRepository
