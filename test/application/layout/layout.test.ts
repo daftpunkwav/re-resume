@@ -156,6 +156,11 @@ describe('layout', () => {
       { blockId: asBlockId('block-1'), reason: 'block-taller-than-page' },
     ])
     expect(result.blocks[0]?.height).toBeGreaterThan(contentHeight(A4_PAGE_SETUP))
+    // It still belongs to the first page: advancing here would report its
+    // position one page late and leave an empty page ahead of it.
+    expect(result.blocks[0]?.pageIndex).toBe(0)
+    expect(result.blocks[0]?.y).toBe(0)
+    expect(result.pages).toHaveLength(1)
   })
 
   it('places an absolute block at its coordinates and keeps it out of the flow', () => {

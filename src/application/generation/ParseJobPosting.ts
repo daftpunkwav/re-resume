@@ -239,9 +239,14 @@ function ungroundedStatements(
   rawText: string,
 ): readonly string[] {
   const haystack = normalizeForGrounding(rawText)
-  return [...parsed.responsibilities, ...parsed.requirements].filter(
-    (statement) => !haystack.includes(normalizeForGrounding(statement)),
-  )
+  return [...parsed.responsibilities, ...parsed.requirements].filter((statement) => {
+    const needle = normalizeForGrounding(statement)
+    // Every string contains the empty string, so a statement that normalizes
+    // away to nothing — punctuation alone, say — would otherwise pass as
+    // grounded and let the model assert content that is not in the text.
+    if (needle.length === 0) return true
+    return !haystack.includes(needle)
+  })
 }
 
 /**

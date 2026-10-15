@@ -6,7 +6,7 @@
  */
 
 import { parseDateTime } from '../../../domain/shared/DateTime'
-import { RowMappingError, readJsonEnvelope, writeJsonEnvelope } from './JsonEnvelope'
+import { RowMappingError, readJsonRecordEnvelope, writeJsonEnvelope } from './JsonEnvelope'
 import { asAgentRunId, asJobPostingId } from '../../../domain/shared/branded-id'
 import type { JobPosting, ParsedJobPosting } from '../../../domain/generation/JobPosting'
 
@@ -20,20 +20,41 @@ export interface JobPostingRow {
   readonly created_at: string
 }
 
-function readParsed(raw: string, id: string): ParsedJobPosting {
-  const data = readJsonEnvelope(raw, `job_posting(${id}).parsed_json`)
-  const record = data as Partial<ParsedJobPosting>
-  const stringList = (value: unknown): readonly string[] =>
-    Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
-  const nullableText = (value: unknown): string | null =>
-    typeof value === 'string' ? value : null
+function readStringList(value: unknown, column: string): readonly string[] {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)) {
+    throw new RowMappingError(column, 'expected an array of strings', value)
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'string') {
+      throw new RowMappingError(`${column}[${index}]`, 'expected a string', entry)
+    }
+    return entry
+  })
+}
 
+function readNullableText(value: unknown, column: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') {
+    throw new RowMappingError(column, 'expected a string or null', value)
+  }
+  return value
+}
+
+/**
+ * Every field is checked rather than coerced. A silently dropped requirement
+ * would leave the agent matching against a posting it can no longer fully
+ * read, and the cause would be invisible at the point it mattered.
+ */
+function readParsed(raw: string, id: string): ParsedJobPosting {
+  const column = `job_posting(${id}).parsed_json`
+  const record = readJsonRecordEnvelope(raw, column)
   return {
-    title: nullableText(record.title),
-    company: nullableText(record.company),
-    responsibilities: stringList(record.responsibilities),
-    requirements: stringList(record.requirements),
-    keywords: stringList(record.keywords),
+    title: readNullableText(record.title, `${column}.title`),
+    company: readNullableText(record.company, `${column}.company`),
+    responsibilities: readStringList(record.responsibilities, `${column}.responsibilities`),
+    requirements: readStringList(record.requirements, `${column}.requirements`),
+    keywords: readStringList(record.keywords, `${column}.keywords`),
   }
 }
 

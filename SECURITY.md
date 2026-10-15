@@ -16,13 +16,29 @@ surface.
 
 ## Deployment model
 
-There is no deployment. The repository holds documentation, configuration, and a
-Git hook; nothing in it listens on a port, processes requests, or requires a
-secret to function. The attack surface is the repository itself and the code
-that external contributors contribute to it.
+The application runs on a user's own desktop. It is installed locally, opens no
+listening port, and keeps personal data in a database file inside the user's
+application data directory. It reaches the network only when the user starts an
+agent task, and then only to the model service endpoint configured in settings.
 
 ## Security-relevant surfaces
 
+- **Local data at rest.** Experience records, resumes, revisions and snapshots
+  live in an unencrypted SQLite file on disk. Anyone with access to the user's
+  account can read them.
+- **Provider credentials.** API keys are held in an encrypted store unlocked by a
+  password held in memory for the session, and are never written to the
+  database, to an export, or to a log. Agent runs scrub known credential values
+  before persisting tool arguments and results.
+- **Outbound model requests.** Starting an agent task sends the prompt, the
+  conversation and the tool results to the configured endpoint. The destination
+  is declared as application configuration and the container restricts outbound
+  requests to the origins listed there.
+- **Content security policy.** The window runs under a policy that permits no
+  remote script or style origin. Inline styles are permitted because positioned
+  elements require them; nothing else is relaxed.
+- **Plugin permissions.** The container grants filesystem and network access per
+  command and to named origins, rather than through the plugins' default sets.
 - **Repository contents are public.** Every file, including content in the
   history of any branch, is readable by anyone. Adding a file is therefore a
   disclosure decision and not only a code change.

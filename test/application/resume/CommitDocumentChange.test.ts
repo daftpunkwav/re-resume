@@ -296,32 +296,38 @@ describe('commitDocumentChange', () => {
   it('accepts the change that drops a rejected claim reference', async () => {
     const resumeRepo = await seededResume()
     const experienceRepo = new InMemoryExperienceRepository()
-    experienceRepo.seed(rejectClaim(experienceWithConfirmedClaim(), CONFIRMED_CLAIM_ID, NOW))
-    await expect(
-      commitDocumentChange(
-        resumeRepo,
-        experienceRepo,
-        RESUME_ID,
-        changeAppending(
-          experienceBlock('block-1', { claimIds: [CONFIRMED_CLAIM_ID] }),
-          '引用已拒绝断言',
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'claimRejected' })
+    const confirmed = experienceWithConfirmedClaim()
+    experienceRepo.seed(confirmed)
+
+    // The reference is stored first, while the claim is still confirmed: the
+    // revision has to hold it before anything is rejected.
+    await commitDocumentChange(
+      resumeRepo,
+      experienceRepo,
+      RESUME_ID,
+      changeAppending(experienceBlock('block-1', { claimIds: [CONFIRMED_CLAIM_ID] }), '引用断言'),
+    )
+
+    experienceRepo.seed(rejectClaim(confirmed, CONFIRMED_CLAIM_ID, NOW))
 
     const revision = await commitDocumentChange(
       resumeRepo,
       experienceRepo,
       RESUME_ID,
-      describeChange({ label: '删除块', origin: 'user', runId: null }, () => ({
-        blocks: [],
-        pageSetup: A4_PAGE_SETUP,
+      describeChange({ label: '移除断言引用', origin: 'user', runId: null }, (state) => ({
+        ...state,
+        blocks: state.blocks.map((block) =>
+          block.id === 'block-1'
+            ? { ...block, content: { ...block.content, claimIds: [] } }
+            : block,
+        ),
       })),
     )
 
-    expect(revision.seq).toBe(2)
+    expect(revision.seq).toBe(3)
     const stored = await resumeRepo.findById(RESUME_ID)
-    expect(stored?.blocks).toHaveLength(0)
+    const content = stored?.blocks[0]?.content
+    expect(content).toMatchObject({ type: 'experience', claimIds: [] })
   })
 
   it('keeps nothing persisted when the change itself throws', async () => {

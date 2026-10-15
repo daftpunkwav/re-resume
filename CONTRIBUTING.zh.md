@@ -5,12 +5,44 @@
 
 ## 当前状态
 
-仓库包含许可证、编辑器与 Git 配置、pre-commit 钩子以及本文档。没有应用
-源码，没有包清单，也没有构建或测试任何内容的工作流。
+仓库是一个桌面应用：业务逻辑跑在原生容器的单一 TypeScript 运行时中，外加配套
+的配置与文档。TypeScript 源码分为领域、应用、基础设施、组合根与界面五层；容器
+侧只承载窗口、插件与打包配置。
 
 ## 检查项
 
-开 PR 前请跑一遍。以下均为本地检查，没有任何环节自动执行。
+开 PR 前请跑一遍。
+
+### 类型与单元检查
+
+```bash
+pnpm install
+pnpm run typecheck
+pnpm test
+pnpm run lint
+pnpm run lint:css
+```
+
+测试覆盖领域不变量、用例（仓储用内存实现）、行映射器、排版引擎与界面区域。其中
+一个用例会解析源码里的每一条 import，出现被禁止的层级依赖时会点名文件与
+specifier。
+
+### 构建
+
+```bash
+pnpm run build
+```
+
+生产产物会编译到受支持的最旧 WebView 基线。用到更新语法或 API 的改动会在兼容
+检查阶段失败，而不是在用户机器上失败。
+
+### 容器
+
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+改动容器壳或插件权限后请执行。
 
 ### 行尾与空白
 

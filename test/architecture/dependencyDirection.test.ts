@@ -43,7 +43,8 @@ interface Violation {
 /**
  * Line-anchored, so a commented-out or documented example of an import is not
  * read as a real one. The three forms cover static import/export ... from,
- * a bare side-effect import and import().
+ * a bare side-effect import and import(). Backtick quoting counts as well:
+ * it is valid syntax and would otherwise be an unpoliced way in.
  */
 const IMPORT_FORMS = [
   /^[ \t]*(?:import|export)\b[^'"]*?\bfrom[ \t]*['"]([^'"]+)['"]/gm,

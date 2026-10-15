@@ -19,6 +19,7 @@
 import { z } from 'zod'
 import type { ToolInvocation } from '../../domain/generation/ToolInvocation'
 import { initialApprovalState } from '../../domain/generation/ToolInvocation'
+import { redactSecret } from './redactSecret'
 import type { Clock } from '../../domain/catalog/ports/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { AgentRunId } from '../../domain/shared/branded-id'
@@ -63,6 +64,12 @@ export interface DestructiveToolRequest {
   readonly runId: AgentRunId
   readonly ctx: ToolContext
   readonly ids: IdGenerator
+  /**
+   * Credential values currently loaded for the provider. The dry-run plan and
+   * the audit row both persist the argument text, so both are scrubbed here as
+   * well — the reserved path must not be the one place a secret survives.
+   */
+  readonly secrets?: readonly string[]
   /** Omitted for a dry run; the v1 run loop never supplies it. */
   readonly approval?: DestructiveApproval
 }
@@ -76,12 +83,13 @@ export async function approveToolInvocation(
       `approveToolInvocation handles the destructive path only; "${request.tool.name}" is registered as ${request.tool.risk}.`,
     )
   }
+  const argsJson = redactSecret(request.argsJson, request.secrets ?? [])
   const plan: DestructivePlan = {
     toolName: request.tool.name,
-    argsJson: request.argsJson,
-    targets: namedIdentifiers(request.argsJson),
+    argsJson,
+    targets: namedIdentifiers(argsJson),
   }
-  const invocation = startInvocation(deps, request, initialApprovalState('destructive'))
+  const invocation = startInvocation(deps, request, argsJson, initialApprovalState('destructive'))
 
   if (request.approval === undefined) {
     await deps.invocations.record(invocation)
@@ -128,6 +136,7 @@ export async function approveToolInvocation(
 function startInvocation(
   deps: ApproveToolInvocationDeps,
   request: DestructiveToolRequest,
+  argsJson: string,
   approvalState: ToolInvocation['approvalState'],
 ): ToolInvocation {
   return {
@@ -135,7 +144,7 @@ function startInvocation(
     runId: request.runId,
     toolName: request.tool.name,
     risk: request.tool.risk,
-    argsJson: request.argsJson,
+    argsJson,
     resultJson: null,
     approvalState,
     createdAt: deps.clock.now(),

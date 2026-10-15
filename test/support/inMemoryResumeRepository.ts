@@ -173,6 +173,8 @@ export class InMemoryResumeRepository implements ResumeRepository {
     // reachable. The cut point is whichever starts later.
     const windowStart = live[live.length - this.revisionLimit]
     if (windowStart === undefined) return
+    // Cut below whichever starts earlier: the window the limit allows, or the
+    // cursor, which redo still has to reach.
     const cutBelow = Math.min(windowStart.seq, cursor.seq)
     for (const revision of live) {
       if (revision.seq < cutBelow) this.revisions.delete(revision.id)

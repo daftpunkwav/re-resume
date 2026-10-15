@@ -300,7 +300,7 @@ export async function createCompositionRoot(
     profileRepo: new SqliteProfileRepository(database),
     resumeRepo: new SqliteResumeRepository(database, clock, ids),
     runRepo: new SqliteAgentRunRepository(database),
-    secretStore: new StrongholdSecretStore(options.stronghold),
+    secretStore,
     provider: await buildProvider(options.provider, secretStore),
     providerSecretRefs:
       options.provider === null ? [] : [options.provider.apiKeyRef],
@@ -498,11 +498,6 @@ function revisionChainReader(database: SqlDatabase): LiveRevisionChain {
 }
 
 /**
- * The application layer declares record(); the SQLite repository names the same
- * write recordToolInvocation. The adapter keeps both vocabularies intact
- * instead of widening the port to the implementation's spelling.
- */
-/**
  * Builds the adapter from configuration. The credential stays in the secret
  * store; only the adapter, and only for the lifetime of this root, holds it.
  */
@@ -512,11 +507,10 @@ async function buildProvider(
 ): Promise<ModelProvider> {
   if (descriptor === null) return new UnconfiguredModelProvider()
   const apiKey = await store.load(descriptor.apiKeyRef)
-  if (apiKey === null || apiKey.length === 0) {
-    throw new Error(
-      `No credential is stored under "${descriptor.apiKeyRef}", so no model service can be reached.`,
-    )
-  }
+  // A configured endpoint with no stored credential is a settings state, not a
+  // reason to refuse to start. The console reports it on first use, so the rest
+  // of the application stays available while it is being fixed.
+  if (apiKey === null || apiKey.length === 0) return new UnconfiguredModelProvider()
   const http = createTauriHttpClient()
   if (descriptor.kind === 'anthropic') {
     return new AnthropicProvider({
@@ -547,11 +541,17 @@ class UnconfiguredModelProvider implements ModelProvider {
 
   stream(): AsyncIterable<ModelChunk> {
     throw new Error(
-      'No model service is configured yet. Add a provider in settings before running an agent task.',
+      'No model service is reachable: add a provider and store its credential in settings ' +
+        'before running an agent task.',
     )
   }
 }
 
+/**
+ * The application layer declares record(); the SQLite repository names the same
+ * write recordToolInvocation. The adapter keeps both vocabularies intact
+ * instead of widening the port to the implementation's spelling.
+ */
 function toolInvocationRecorder(runRepo: SqliteAgentRunRepository): ToolInvocationRecorder {
   return { record: (invocation) => runRepo.recordToolInvocation(invocation) }
 }

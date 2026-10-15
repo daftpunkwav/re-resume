@@ -331,7 +331,7 @@ function findVariant(experience: Experience, variantId: VariantId): Variant {
 function findClaim(experience: Experience, claimId: ClaimId): Claim {
   const found = experience.claims.find((claim) => claim.id === claimId)
   if (found === undefined) {
-    throw new DomainError('claimRejected', 'Claim does not belong to this experience.', {
+    throw new DomainError('claimNotFound', 'Claim does not belong to this experience.', {
       entity: 'experience',
       id: experience.id,
       blockers: [claimId],

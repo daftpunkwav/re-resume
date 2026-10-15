@@ -28,6 +28,7 @@ export const DOMAIN_ERROR_CODES = [
   'variantNotInExperience',
   'variantUnconfirmed',
   'claimRejected',
+  'claimNotFound',
   'claimPending',
   'referencedByBlocks',
   'invalidClaimTransition',

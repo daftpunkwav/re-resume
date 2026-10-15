@@ -80,7 +80,11 @@ export function buildReorderResumeSectionsTool(
         .filter((block) => !named.has(block.id))
         .map((block) => block.id)
       const unknownBlockIds = requested.filter((blockId) => !current.has(blockId))
-      if (missingBlockIds.length > 0 || unknownBlockIds.length > 0) {
+      // A Set collapses duplicates, so an order that names a block twice would
+      // otherwise pass the length checks and produce a document holding a copy
+      // of it. A permutation names every block exactly once.
+      const duplicated = requested.length !== named.size
+      if (duplicated || missingBlockIds.length > 0 || unknownBlockIds.length > 0) {
         return { kind: 'notAPermutation', missingBlockIds, unknownBlockIds }
       }
 

@@ -142,7 +142,7 @@ async function* readBodyChunks(response: Response): AsyncIterable<Uint8Array> {
  * A frame left unterminated at end of stream is still dispatched, since a
  * provider that closes the connection mid-line should not lose that line.
  */
-async function* readServerSentEvents(
+export async function* readServerSentEvents(
   chunks: AsyncIterable<Uint8Array>,
 ): AsyncIterable<string> {
   const decoder = new TextDecoder('utf-8')
@@ -182,7 +182,9 @@ function dispatchServerSentEventLine(line: string, dataLines: string[]): string 
 function flushServerSentEvent(dataLines: string[]): string | null {
   if (dataLines.length === 0) return null
   const payload = dataLines.join('\n')
-  dataLines = []
+  // Cleared in place: the array belongs to the reader, and reassigning the
+  // parameter here would leave every later event carrying this one's lines.
+  dataLines.length = 0
   return payload
 }
 

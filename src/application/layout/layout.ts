@@ -82,7 +82,9 @@ export function layout(input: LayoutInput): LayoutOutput {
     if (height > availableHeight) {
       overflows.push({ blockId: block.id, reason: 'block-taller-than-page' })
     }
-    if (flowTop + height > availableHeight) {
+    // An oversized first block stays on page 0. Advancing first would leave an
+    // empty page ahead of it and report its position one page too late.
+    if (flowTop > 0 && flowTop + height > availableHeight) {
       flowPage += 1
       flowTop = 0
     }
@@ -222,11 +224,11 @@ function wrapText(
 
 /**
  * Greedy wrapping: the last break opportunity that still fits ends the line,
- * and the end of the paragraph is always a candidate. Width is not monotonic
- * across characters, so every candidate after the start is measured rather than
- * stopping at the first one that overflows. When nothing fits, the run is kept
- * whole and overflows — an unbreakable word is reported by its position, not
- * silently chopped.
+ * and the end of the paragraph is always a candidate. Candidates are measured
+ * in order and the scan stops at the first one that overflows, because every
+ * earlier candidate has already been decided and a later one cannot yield a
+ * shorter line. When nothing fits, the run is kept whole and overflows — an
+ * unbreakable word is reported by its position, not silently chopped.
  */
 function wrapParagraph(
   paragraph: string,

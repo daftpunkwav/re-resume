@@ -78,10 +78,14 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     const claimRows = toClaimRows(experience)
     await this.#database.transaction(async () => {
       await this.#upsertExperience(row)
-      for (const variantRow of variantRows) await this.#upsertVariant(variantRow)
-      for (const claimRow of claimRows) await this.#upsertClaim(claimRow)
+      // Absent rows go first: removing one variant and adding another that
+      // reuses its label is a legal edit of the aggregate, and the unique index
+      // on (experience_id, label) would reject the insert while the row it
+      // displaces is still there.
       await this.#deleteVariantsAbsentFrom(experience.id, variantRows.map((each) => each.id))
       await this.#deleteClaimsAbsentFrom(experience.id, claimRows.map((each) => each.id))
+      for (const variantRow of variantRows) await this.#upsertVariant(variantRow)
+      for (const claimRow of claimRows) await this.#upsertClaim(claimRow)
     })
   }
 

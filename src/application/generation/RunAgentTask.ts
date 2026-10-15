@@ -28,6 +28,7 @@ import {
   describeArgumentFailure,
   parseToolArguments,
 } from './ApproveToolInvocation'
+import { redactSecret as redact } from './redactSecret'
 import type { DestructivePlan, ToolInvocationRecorder } from './ApproveToolInvocation'
 import type { AgentRun } from '../../domain/generation/AgentRun'
 import type { ToolInvocation } from '../../domain/generation/ToolInvocation'
@@ -39,7 +40,6 @@ import type { AgentRunId, JobPostingId, ResumeId } from '../../domain/shared/bra
 import { asAgentRunId, asToolInvocationId } from '../../domain/shared/branded-id'
 
 const DEFAULT_MAX_TURNS = 8
-const REDACTED = '[redacted]'
 
 /**
  * The registry plus the JSON Schemas the model needs. The domain ToolRegistry
@@ -197,7 +197,7 @@ async function invokeTool(
   if (tool.risk === 'destructive') {
     const outcome = await approveToolInvocation(
       { invocations: deps.invocations, clock: ctx.clock },
-      { tool, argsJson: call.argsJson, runId, ctx, ids: deps.ids },
+      { tool, argsJson: call.argsJson, runId, ctx, ids: deps.ids, secrets },
     )
     throw new DestructiveApprovalRequired(outcome.plan)
   }
@@ -258,16 +258,6 @@ async function endRun(
 
 function isCancelled(request: RunAgentTaskRequest): boolean {
   return request.isCancelled?.() === true
-}
-
-/** Exact-match replacement, so a secret with regex metacharacters is safe. */
-function redact(value: string, secrets: readonly string[]): string {
-  let scrubbed = value
-  for (const secret of secrets) {
-    if (secret.length === 0) continue
-    scrubbed = scrubbed.split(secret).join(REDACTED)
-  }
-  return scrubbed
 }
 
 function describeThrown(error: unknown): string {

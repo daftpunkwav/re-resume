@@ -6,14 +6,48 @@ to this repository.
 
 ## Current state
 
-The repository contains a license, editor and Git settings, a pre-commit hook,
-and these documents. There is no application source, no package manifest, and
-no workflow that builds or tests anything.
+The repository holds a desktop application built on a single TypeScript runtime
+inside a native container, plus the configuration and documents around it. The
+TypeScript source is split into domain, application, infrastructure, bootstrap
+and presentation layers, and the container holds window, plugin and packaging
+configuration only.
 
 ## Checks
 
-Run these before opening a pull request. They are local checks; nothing
-automates them.
+Run these before opening a pull request.
+
+### Type and unit checks
+
+```bash
+pnpm install
+pnpm run typecheck
+pnpm test
+pnpm run lint
+pnpm run lint:css
+```
+
+The suite covers the domain invariants, the use cases against in-memory
+repositories, the row mappers, the layout engine and the interface regions. One
+test parses every import in the source tree and fails on a forbidden layer
+direction, naming the file and the specifier.
+
+### Build
+
+```bash
+pnpm run build
+```
+
+The production bundle is compiled down to the oldest supported WebView. A
+change that needs a newer language or Web API fails the compatibility check
+rather than failing on a user's machine.
+
+### Container
+
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+Run it after touching the container shell or a plugin permission.
 
 ### Line endings and whitespace
 

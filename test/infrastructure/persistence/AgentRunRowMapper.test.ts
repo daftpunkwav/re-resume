@@ -91,7 +91,7 @@ describe('AgentRunRowMapper', () => {
     expect(() => fromAgentRunRow(runRowWith({ status: 'paused' }))).toThrow(/agent_run.status/)
   })
 
-  it('rejects a run status this build does not model as reachable', () => {
+  it('round-trips awaitingConfirmation, which is reserved rather than removed', () => {
     expect(fromAgentRunRow(runRowWith({ status: 'awaitingConfirmation' })).status).toBe(
       'awaitingConfirmation',
     )
