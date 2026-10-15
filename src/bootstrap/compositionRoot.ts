@@ -1,0 +1,520 @@
+/**
+ * @file compositionRoot
+ * @description The one module allowed to construct infrastructure and hand it
+ * to application use cases. Everything below `presentation/` receives ready to
+ * call services and never sees a repository, a SQL string or a provider.
+ *
+ * Responsibilities:
+ * - Open the database connection and run the startup check that guards it
+ * - Construct the port implementations and inject them into the use cases
+ * - Bind the canonical TextMeasurer to layout() and to the agent's layout check
+ * - Close the connection on shutdown
+ *
+ * Constraints:
+ * - This module must not import from `presentation/`: the dependency points
+ *   one way, and the UI receives this contract rather than the reverse.
+ * - No business rule lives here. A rule stated below belongs in a use case;
+ *   this file only decides which implementation each port receives.
+ */
+
+import type { Clock } from '../domain/catalog/ports/Clock'
+import type { Experience } from '../domain/catalog/Experience'
+import type { Profile } from '../domain/catalog/Profile'
+import type { ExperienceRepository } from '../domain/catalog/ports/ExperienceRepository'
+import type { ProfileRepository } from '../domain/catalog/ports/ProfileRepository'
+import type { IdGenerator } from '../domain/shared/IdGenerator'
+import type { Result } from '../domain/shared/Result'
+import type { AgentRunId } from '../domain/shared/branded-id'
+import type {
+  ClaimId,
+  ExperienceId,
+  JobPostingId,
+  ResumeId,
+  VariantId,
+} from '../domain/shared/branded-id'
+import type { Resume } from '../domain/resume/Resume'
+import type { Revision } from '../domain/resume/Revision'
+import type { DocumentChange } from '../domain/resume/DocumentChange'
+import type { PageSetup } from '../domain/resume/PageSetup'
+import type { LayoutInput, LayoutOutput } from '../domain/resume/PageLayout'
+import type { MaterializedBlock, ResumeSnapshot } from '../domain/resume/ResumeSnapshot'
+import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
+import type { AgentRun } from '../domain/generation/AgentRun'
+import type { ModelProvider, ToolSchema } from '../domain/generation/ports/ModelProvider'
+import type { SecretStore } from '../domain/generation/ports/SecretStore'
+import type { ToolContext } from '../domain/generation/ports/ToolRegistry'
+
+import { SystemClock } from '../infrastructure/platform/systemClock'
+import { RandomIdGenerator } from '../infrastructure/platform/randomIdGenerator'
+import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
+import type { SqlDatabase } from '../infrastructure/persistence/sqlite'
+import { SqliteExperienceRepository } from '../infrastructure/persistence/SqliteExperienceRepository'
+import { SqliteProfileRepository } from '../infrastructure/persistence/SqliteProfileRepository'
+import { SqliteResumeRepository } from '../infrastructure/persistence/SqliteResumeRepository'
+import { SqliteAgentRunRepository } from '../infrastructure/persistence/SqliteAgentRunRepository'
+import { fromDocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
+import type { DocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
+import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
+import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
+import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
+
+import { createExperience } from '../application/experience/CreateExperience'
+import type { CreateExperienceCommand } from '../application/experience/CreateExperience'
+import { updateExperienceFact } from '../application/experience/UpdateExperienceFact'
+import type { UpdateExperienceFactCommand } from '../application/experience/UpdateExperienceFact'
+import { deleteExperience } from '../application/experience/DeleteExperience'
+import { addVariant } from '../application/experience/AddVariant'
+import type { AddVariantCommand } from '../application/experience/AddVariant'
+import { updateVariant } from '../application/experience/UpdateVariant'
+import type { UpdateVariantCommand } from '../application/experience/UpdateVariant'
+import { removeVariant } from '../application/experience/RemoveVariant'
+import { confirmVariant } from '../application/experience/ConfirmVariant'
+import { addClaim } from '../application/experience/AddClaim'
+import type { AddClaimCommand } from '../application/experience/AddClaim'
+import { confirmClaim } from '../application/experience/ConfirmClaim'
+import { rejectClaim } from '../application/experience/RejectClaim'
+import { reopenClaim } from '../application/experience/ReopenClaim'
+import { updateProfile } from '../application/profile/UpdateProfile'
+import type { UpdateProfileCommand } from '../application/profile/UpdateProfile'
+import { createResume } from '../application/resume/CreateResume'
+import type { CreateResumeInput, ResumeCreation } from '../application/resume/CreateResume'
+import { duplicateResume } from '../application/resume/DuplicateResume'
+import type { DuplicateResumeInput } from '../application/resume/DuplicateResume'
+import { commitDocumentChange } from '../application/resume/CommitDocumentChange'
+import { undoDocumentChange } from '../application/resume/UndoDocumentChange'
+import type { LiveRevisionChain } from '../application/resume/UndoDocumentChange'
+import { redoDocumentChange } from '../application/resume/RedoDocumentChange'
+import { freezeResume } from '../application/resume/FreezeResume'
+import { compareVersions } from '../application/resume/CompareVersions'
+import type { VersionDiff, VersionSelector } from '../application/resume/CompareVersions'
+import { detectStaleReferences } from '../application/resume/DetectStaleReferences'
+import type { StaleReference } from '../application/resume/DetectStaleReferences'
+import { materializeBlocks } from '../application/resume/materializeBlocks'
+import { layout } from '../application/layout/layout'
+import { runAgentTask } from '../application/generation/RunAgentTask'
+import { buildToolRegistry } from '../application/generation/buildToolRegistry'
+import type { ToolInvocationRecorder } from '../application/generation/ApproveToolInvocation'
+import { parseJobPosting } from '../application/generation/ParseJobPosting'
+import type {
+  JobPostingRepository,
+  ParseJobPostingCommand,
+  ParsedJobPostingOutcome,
+} from '../application/generation/ParseJobPosting'
+
+export type { CreateExperienceCommand } from '../application/experience/CreateExperience'
+export type { UpdateExperienceFactCommand } from '../application/experience/UpdateExperienceFact'
+export type { AddVariantCommand } from '../application/experience/AddVariant'
+export type { UpdateVariantCommand } from '../application/experience/UpdateVariant'
+export type { AddClaimCommand } from '../application/experience/AddClaim'
+export type { UpdateProfileCommand } from '../application/profile/UpdateProfile'
+export type { CreateResumeInput } from '../application/resume/CreateResume'
+export type { DuplicateResumeInput } from '../application/resume/DuplicateResume'
+export type { VersionDiff, VersionSelector } from '../application/resume/CompareVersions'
+export type { StaleReference } from '../application/resume/DetectStaleReferences'
+export type { ParseJobPostingCommand, ParsedJobPostingOutcome } from '../application/generation/ParseJobPosting'
+
+export interface ExperienceLibrary {
+  list(): Promise<readonly Experience[]>
+  get(id: ExperienceId): Promise<Experience | null>
+  create(command: CreateExperienceCommand): Promise<Result<Experience, unknown>>
+  updateFact(command: UpdateExperienceFactCommand): Promise<Result<Experience, unknown>>
+  remove(id: ExperienceId): Promise<void>
+  addVariant(command: AddVariantCommand): Promise<Result<Experience, unknown>>
+  updateVariant(command: UpdateVariantCommand): Promise<Result<Experience, unknown>>
+  removeVariant(experienceId: ExperienceId, variantId: VariantId): Promise<void>
+  confirmVariant(experienceId: ExperienceId, variantId: VariantId): Promise<Experience>
+  addClaim(command: AddClaimCommand): Promise<Result<Experience, unknown>>
+  confirmClaim(experienceId: ExperienceId, claimId: ClaimId): Promise<Experience>
+  rejectClaim(experienceId: ExperienceId, claimId: ClaimId): Promise<Experience>
+  reopenClaim(experienceId: ExperienceId, claimId: ClaimId): Promise<Experience>
+}
+
+export interface ProfileSettings {
+  get(): Promise<Profile>
+  update(command: UpdateProfileCommand): Promise<Result<Profile, unknown>>
+}
+
+export interface ResumeWorkbench {
+  list(): Promise<readonly Resume[]>
+  get(id: ResumeId): Promise<Resume | null>
+  create(input: CreateResumeInput): Promise<ResumeId>
+  duplicate(input: DuplicateResumeInput): Promise<ResumeId>
+  /** The single write path into Resume.blocks. */
+  commit(resumeId: ResumeId, change: DocumentChange): Promise<Revision>
+  undo(resumeId: ResumeId): Promise<Revision>
+  redo(resumeId: ResumeId): Promise<Revision>
+  freeze(resumeId: ResumeId): Promise<ResumeSnapshot>
+  compare(from: VersionSelector, to: VersionSelector): Promise<VersionDiff>
+  /** Resolves live references so the canvas, export and the layout check share one input shape. */
+  materialize(resumeId: ResumeId): Promise<readonly MaterializedBlock[]>
+  /** Pure: pagination and overflow for an already-materialized document. */
+  layOut(blocks: readonly MaterializedBlock[], page: PageSetup): LayoutOutput
+  /** Derived on demand; never persisted. */
+  staleReferences(
+    experienceId: ExperienceId,
+    knownFactVersion: number,
+  ): Promise<readonly StaleReference[]>
+}
+
+/**
+ * What one agent run needs from its caller. The sink and the cancellation
+ * signal are declared here rather than owned by the console: the run loop
+ * streams deltas and polls for cancellation between turns, and only the caller
+ * knows where that text goes and when the user stopped waiting.
+ */
+export interface AgentTaskRequest {
+  readonly prompt: string
+  readonly system?: string | null
+  readonly resumeId?: ResumeId | null
+  readonly jobPostingId?: JobPostingId | null
+  /** Called once per streamed text delta. */
+  readonly onTextDelta: (delta: string) => void
+  /** Polled before every model turn and before every tool call. */
+  readonly isCancelled: () => boolean
+}
+
+/**
+ * The run is the outcome. runAgentTask records a model failure, a malformed
+ * tool call and a cancellation on the run itself — status and errorText — rather
+ * than throwing, so the caller reads the result off the returned row.
+ */
+export type AgentTaskOutcome = AgentRun
+
+export interface AgentConsole {
+  toolSchemas(): readonly ToolSchema[]
+  run(request: AgentTaskRequest): Promise<AgentTaskOutcome>
+  parseJobPosting(
+    command: ParseJobPostingCommand,
+  ): Promise<Result<ParsedJobPostingOutcome, unknown>>
+}
+
+export interface CompositionRoot {
+  readonly clock: Clock
+  readonly ids: IdGenerator
+  readonly experiences: ExperienceLibrary
+  readonly profile: ProfileSettings
+  readonly resumes: ResumeWorkbench
+  readonly agent: AgentConsole
+  /** Closes the one database connection this root opened. */
+  shutdown(): Promise<void>
+}
+
+export interface CompositionRootOptions {
+  /** Connection string handed to the SQL plugin verbatim. */
+  readonly databaseConnectionString: string
+  /** Stronghold snapshot path and unlock password; the password is never persisted. */
+  readonly stronghold: StrongholdSecretStoreOptions
+  /** The provider the settings screen configured. This root does not pick one. */
+  readonly provider: ModelProvider
+  /**
+   * Secret references belonging to that provider. Their values are loaded here
+   * and scrubbed from every string a run persists. Pass an empty list when no
+   * provider secret is stored.
+   */
+  readonly providerSecretRefs: readonly string[]
+  /**
+   * The job_posting reader and writer. The application layer declares that
+   * vocabulary locally and this build has no SQLite implementation of it, so
+   * the caller supplies one rather than this root inventing a row mapping.
+   */
+  readonly jobPostings: JobPostingRepository
+}
+
+/** Everything the service factories below share, resolved once per root. */
+interface Wiring {
+  readonly clock: Clock
+  readonly ids: IdGenerator
+  readonly database: SqlDatabase
+  readonly measurer: TextMeasurer
+  readonly experienceRepo: ExperienceRepository
+  readonly profileRepo: ProfileRepository
+  /** Concrete: the resume creation use cases need insertWithInitialRevision,
+   *  which ResumeRepository does not declare. */
+  readonly resumeRepo: SqliteResumeRepository
+  readonly runRepo: SqliteAgentRunRepository
+  readonly secretStore: SecretStore
+  readonly provider: ModelProvider
+  readonly providerSecretRefs: readonly string[]
+  readonly jobPostings: JobPostingRepository
+}
+
+/**
+ * openSqliteDatabase declares execute, select and transaction only. close and
+ * the foreign key check belong to the plugin-backed implementation and are what
+ * shutdown and cascade integrity depend on, so the guard refuses a connection
+ * that cannot do them instead of leaving shutdown a silent no-op.
+ */
+interface ManagedSqlDatabase extends SqlDatabase {
+  close(): Promise<boolean>
+  enableForeignKeys(): Promise<void>
+}
+
+export async function createCompositionRoot(
+  options: CompositionRootOptions,
+): Promise<CompositionRoot> {
+  const clock: Clock = new SystemClock()
+  const ids: IdGenerator = new RandomIdGenerator()
+  const database = requireManagedDatabase(
+    await openSqliteDatabase(options.databaseConnectionString),
+  )
+  // Startup check: every ON DELETE CASCADE and ON DELETE RESTRICT clause in
+  // the schema is inert until this reports 1, so the repositories refuse to run.
+  await database.enableForeignKeys()
+
+  const wiring: Wiring = {
+    clock,
+    ids,
+    database,
+    /**
+     * The canonical measurer. CanvasTextMeasurer cannot take this place: it
+     * needs a rendering context, which does not exist until the canvas mounts,
+     * and its own contract forbids feeding layout(), so a caret offset could
+     * never move a page break. FixtureTextMeasurer is the only implementation
+     * available synchronously at startup, and it is deterministic. When the font
+     * pipeline lands, this line is the replacement — a measurer built from the
+     * bundled font files — which also reaches checkResumeLayout, because
+     * buildToolRegistry receives this same instance.
+     */
+    measurer: new FixtureTextMeasurer(),
+    experienceRepo: new SqliteExperienceRepository(database),
+    profileRepo: new SqliteProfileRepository(database),
+    resumeRepo: new SqliteResumeRepository(database, clock, ids),
+    runRepo: new SqliteAgentRunRepository(database),
+    secretStore: new StrongholdSecretStore(options.stronghold),
+    provider: options.provider,
+    providerSecretRefs: options.providerSecretRefs,
+    jobPostings: options.jobPostings,
+  }
+
+  return {
+    clock,
+    ids,
+    experiences: buildExperienceLibrary(wiring),
+    profile: buildProfileSettings(wiring),
+    resumes: buildResumeWorkbench(wiring),
+    agent: buildAgentConsole(wiring),
+    shutdown: async (): Promise<void> => {
+      await database.close()
+    },
+  }
+}
+
+function buildExperienceLibrary(wiring: Wiring): ExperienceLibrary {
+  const writeDeps = { experienceRepo: wiring.experienceRepo, clock: wiring.clock }
+  const createDeps = { ...writeDeps, ids: wiring.ids }
+  // deleteExperience and removeVariant refuse a removal that a resume block
+  // still points at, which is why the resume repository is reachable here.
+  const deleteDeps = {
+    experienceRepo: wiring.experienceRepo,
+    resumeRepo: wiring.resumeRepo,
+  }
+  const removeVariantDeps = { ...deleteDeps, clock: wiring.clock }
+  return {
+    list: () => wiring.experienceRepo.listAll(),
+    get: (id) => wiring.experienceRepo.findById(id),
+    create: (command) => createExperience(createDeps, command),
+    updateFact: (command) => updateExperienceFact(writeDeps, command),
+    remove: (id) => deleteExperience(deleteDeps, id),
+    addVariant: (command) => addVariant(createDeps, command),
+    updateVariant: (command) => updateVariant(writeDeps, command),
+    removeVariant: (experienceId, variantId) =>
+      removeVariant(removeVariantDeps, experienceId, variantId),
+    confirmVariant: (experienceId, variantId) =>
+      confirmVariant(writeDeps, experienceId, variantId),
+    addClaim: (command) => addClaim(createDeps, command),
+    confirmClaim: (experienceId, claimId) => confirmClaim(writeDeps, experienceId, claimId),
+    rejectClaim: (experienceId, claimId) => rejectClaim(writeDeps, experienceId, claimId),
+    reopenClaim: (experienceId, claimId) => reopenClaim(writeDeps, experienceId, claimId),
+  }
+}
+
+function buildProfileSettings(wiring: Wiring): ProfileSettings {
+  const deps = { profileRepo: wiring.profileRepo, clock: wiring.clock }
+  return {
+    get: () => wiring.profileRepo.get(),
+    update: (command) => updateProfile(deps, command),
+  }
+}
+
+function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
+  // ResumeCreation is the narrow capability CreateResume and DuplicateResume
+  // declare; SqliteResumeRepository answers it with insertWithInitialRevision,
+  // which writes the resume row and its first revision in one transaction.
+  const resumeCreation: ResumeCreation = wiring.resumeRepo
+  const readChain = revisionChainReader(wiring.database)
+  const measurer = wiring.measurer
+  return {
+    list: () => wiring.resumeRepo.listAll(),
+    get: (id) => wiring.resumeRepo.findById(id),
+    create: (input) => createResume(resumeCreation, wiring.ids, wiring.clock, input),
+    duplicate: (input) =>
+      duplicateResume(
+        wiring.resumeRepo,
+        resumeCreation,
+        wiring.experienceRepo,
+        wiring.profileRepo,
+        wiring.ids,
+        wiring.clock,
+        input,
+      ),
+    commit: (resumeId, change) =>
+      commitDocumentChange(wiring.resumeRepo, wiring.experienceRepo, resumeId, change),
+    undo: (resumeId) => undoDocumentChange(wiring.resumeRepo, readChain, resumeId),
+    redo: (resumeId) => redoDocumentChange(wiring.resumeRepo, readChain, resumeId),
+    freeze: (resumeId) =>
+      freezeResume(
+        wiring.resumeRepo,
+        wiring.experienceRepo,
+        readChain,
+        wiring.ids,
+        wiring.clock,
+        resumeId,
+      ),
+    compare: (from, to) => compareVersions(wiring.resumeRepo, from, to),
+    materialize: async (resumeId) => {
+      const resume = await wiring.resumeRepo.findById(resumeId)
+      if (resume === null) {
+        throw new Error(`Cannot materialize resume "${resumeId}": no such resume.`)
+      }
+      return materializeBlocks(wiring.experienceRepo, resumeId, resume.blocks)
+    },
+    layOut: (blocks, page) => layout({ blocks, page, measurer }),
+    staleReferences: async (experienceId, knownFactVersion) => {
+      const [resumes, experience] = await Promise.all([
+        wiring.resumeRepo.listAll(),
+        wiring.experienceRepo.findById(experienceId),
+      ])
+      if (experience === null) {
+        throw new Error(
+          `Cannot list stale references for experience "${experienceId}": no such experience.`,
+        )
+      }
+      return detectStaleReferences(resumes, experienceId, knownFactVersion, experience.claims)
+    },
+  }
+}
+
+function buildAgentConsole(wiring: Wiring): AgentConsole {
+  const toolContext: ToolContext = {
+    resumes: wiring.resumeRepo,
+    experiences: wiring.experienceRepo,
+    profiles: wiring.profileRepo,
+    runs: wiring.runRepo,
+    clock: wiring.clock,
+    // The canonical measurer again: checkResumeLayout lays the document out with
+    // this function, and the input measurer it passes is the same instance.
+    layout: (input: LayoutInput): LayoutOutput => layout({ ...input, measurer: wiring.measurer }),
+  }
+  return {
+    toolSchemas: () => registryFor(null).schemas,
+    run: async (request) => {
+      const secrets = await loadProviderSecrets(wiring.secretStore, wiring.providerSecretRefs)
+      return runAgentTask(
+        toolContext,
+        {
+          model: wiring.provider,
+          invocations: toolInvocationRecorder(wiring.runRepo),
+          ids: wiring.ids,
+          secrets,
+        },
+        {
+          prompt: request.prompt,
+          system: request.system,
+          resumeId: request.resumeId,
+          jobPostingId: request.jobPostingId,
+          tools: registryFor,
+          onTextDelta: request.onTextDelta,
+          isCancelled: request.isCancelled,
+        },
+      )
+    },
+    parseJobPosting: (command) =>
+      parseJobPosting(
+        {
+          model: wiring.provider,
+          jobPostings: wiring.jobPostings,
+          runs: wiring.runRepo,
+          clock: wiring.clock,
+          ids: wiring.ids,
+        },
+        command,
+      ),
+  }
+
+  /**
+   * Built per run, because the drafting run has to be stamped onto whatever the
+   * agent writes. A null run id serves schema listing, which registers the same
+   * tools with a null provenance.
+   */
+  function registryFor(runId: AgentRunId | null) {
+    return buildToolRegistry(
+      {
+        jobPostings: wiring.jobPostings,
+        ids: wiring.ids,
+        resumeCreation: wiring.resumeRepo,
+        measurer: wiring.measurer,
+      },
+      runId,
+    )
+  }
+}
+
+/**
+ * The revision chain the undo, redo and freeze use cases walk. ResumeRepository
+ * addresses one revision at a time and offers no listing, and the port is not
+ * this build's to widen, so the read is issued here against the connection the
+ * root already opened. Superseded rows are returned as they are: each use case
+ * filters them itself.
+ */
+function revisionChainReader(database: SqlDatabase): LiveRevisionChain {
+  return async (resumeId) => {
+    const rows = await database.select<DocumentRevisionRow>(
+      'SELECT * FROM document_revision WHERE resume_id = $1 ORDER BY seq ASC',
+      [resumeId],
+    )
+    return rows.map(fromDocumentRevisionRow)
+  }
+}
+
+/**
+ * The application layer declares record(); the SQLite repository names the same
+ * write recordToolInvocation. The adapter keeps both vocabularies intact
+ * instead of widening the port to the implementation's spelling.
+ */
+function toolInvocationRecorder(runRepo: SqliteAgentRunRepository): ToolInvocationRecorder {
+  return { record: (invocation) => runRepo.recordToolInvocation(invocation) }
+}
+
+/**
+ * A reference that resolves to nothing is a settings fault, not an empty
+ * secret: continuing would leave the provider's own credential out of the
+ * scrubber while the run persists text about it.
+ */
+async function loadProviderSecrets(
+  store: SecretStore,
+  refs: readonly string[],
+): Promise<readonly string[]> {
+  const secrets: string[] = []
+  for (const ref of refs) {
+    const secret = await store.load(ref)
+    if (secret === null) {
+      throw new Error(
+        `The secret reference "${ref}" holds no record, so its value cannot be scrubbed ` +
+          'from the text this run persists.',
+      )
+    }
+    secrets.push(secret)
+  }
+  return secrets
+}
+
+function requireManagedDatabase(database: SqlDatabase): ManagedSqlDatabase {
+  const candidate = database as Partial<ManagedSqlDatabase>
+  if (typeof candidate.close !== 'function' || typeof candidate.enableForeignKeys !== 'function') {
+    throw new Error(
+      'The opened SQLite connection exposes neither close() nor enableForeignKeys(), ' +
+        'which shutdown and the cascade integrity check both require.',
+    )
+  }
+  return candidate as ManagedSqlDatabase
+}
