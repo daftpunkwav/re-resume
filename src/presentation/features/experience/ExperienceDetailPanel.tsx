@@ -107,7 +107,6 @@ function SelectedExperience({ library, experienceId, onListChanged }: SelectedEx
             library={library}
             experience={current}
             onSaved={applyChange}
-            onListChanged={onListChanged}
           />
         </div>
       ) : null}
@@ -186,12 +185,7 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
               </Button>
             }
           />
-          <ExperienceForm
-            library={library}
-            experience={null}
-            onSaved={openExisting}
-            onListChanged={onListChanged}
-          />
+          <ExperienceForm library={library} experience={null} onSaved={openExisting} />
         </div>
       ) : null}
 

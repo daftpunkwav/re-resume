@@ -146,16 +146,15 @@ export interface ExperienceFormProps {
   readonly library: ExperienceLibrary
   /** Null opens the form empty and creates a new experience on save. */
   readonly experience: Experience | null
+  /**
+   * Told once the command succeeded. Refreshing the list is this callback's
+   * job, not a second one here: a save that reported through it and then
+   * reloaded on its own would fetch the same list twice for one edit.
+   */
   readonly onSaved: (saved: Experience) => void | Promise<void>
-  readonly onListChanged: () => void | Promise<void>
 }
 
-export function ExperienceForm({
-  library,
-  experience,
-  onSaved,
-  onListChanged,
-}: ExperienceFormProps) {
+export function ExperienceForm({ library, experience, onSaved }: ExperienceFormProps) {
   const [draft, setDraft] = useState<ExperienceDraft>(() => draftOf(experience, experience?.kind ?? INITIAL_KIND))
   const fields = detailFieldsOf(draft.kind)
 
@@ -180,7 +179,7 @@ export function ExperienceForm({
           } satisfies UpdateExperienceFactCommand)
     if (!result.ok) throw new Error(describeCommandFailure(result.error))
     await onSaved(result.value)
-  }, onListChanged)
+  })
 
   const setFact = <Key extends keyof ExperienceDraft>(key: Key, value: ExperienceDraft[Key]) =>
     setDraft((current) => ({ ...current, [key]: value }))
