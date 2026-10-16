@@ -7,7 +7,17 @@
 export interface ModelProvider {
   readonly id: string
   readonly modelId: string
-  stream(request: ChatRequest, tools: readonly ToolSchema[]): AsyncIterable<ModelChunk>
+  /**
+   * `signal` cancels a stream that is still running. Breaking out of the loop
+   * that consumes the stream is not enough on its own: the connection stays
+   * open until the adapter releases it, and an adapter is free to do that only
+   * when it is handed a way to abort.
+   */
+  stream(
+    request: ChatRequest,
+    tools: readonly ToolSchema[],
+    signal?: AbortSignal,
+  ): AsyncIterable<ModelChunk>
 }
 
 /** Minimal shapes; provider adapters refine at their boundary. */

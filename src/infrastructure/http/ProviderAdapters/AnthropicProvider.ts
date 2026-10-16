@@ -54,8 +54,12 @@ export class AnthropicProvider implements ModelProvider {
     this.modelId = config.modelId
   }
 
-  stream(request: ChatRequest, tools: readonly ToolSchema[]): AsyncIterable<ModelChunk> {
-    return streamMessages(this.#config, request, tools)
+  stream(
+    request: ChatRequest,
+    tools: readonly ToolSchema[],
+    signal?: AbortSignal,
+  ): AsyncIterable<ModelChunk> {
+    return streamMessages(this.#config, request, tools, signal)
   }
 }
 
@@ -63,6 +67,7 @@ async function* streamMessages(
   config: AnthropicProviderConfig,
   request: ChatRequest,
   tools: readonly ToolSchema[],
+  signal?: AbortSignal,
 ): AsyncIterable<ModelChunk> {
   const response = await config.http.openStream({
     method: 'POST',
@@ -77,6 +82,7 @@ async function* streamMessages(
       buildRequestBody(config.modelId, config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, request, tools),
     ),
     connectTimeoutMs: config.connectTimeoutMs,
+    signal,
   })
   await refuseUnsuccessfulResponse('Anthropic messages endpoint', response)
 

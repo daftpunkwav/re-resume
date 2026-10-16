@@ -19,7 +19,7 @@
 import { z } from 'zod'
 import type { ToolInvocation } from '../../domain/generation/ToolInvocation'
 import { initialApprovalState } from '../../domain/generation/ToolInvocation'
-import { redactSecret } from './redactSecret'
+import { redactJsonSecrets } from './redactSecret'
 import type { Clock } from '../../domain/catalog/ports/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { AgentRunId } from '../../domain/shared/branded-id'
@@ -83,7 +83,7 @@ export async function approveToolInvocation(
       `approveToolInvocation handles the destructive path only; "${request.tool.name}" is registered as ${request.tool.risk}.`,
     )
   }
-  const argsJson = redactSecret(request.argsJson, request.secrets ?? [])
+  const argsJson = redactJsonSecrets(request.argsJson, request.secrets ?? [])
   const plan: DestructivePlan = {
     toolName: request.tool.name,
     argsJson,

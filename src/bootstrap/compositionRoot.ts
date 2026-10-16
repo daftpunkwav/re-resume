@@ -557,9 +557,11 @@ function toolInvocationRecorder(runRepo: SqliteAgentRunRepository): ToolInvocati
 }
 
 /**
- * A reference that resolves to nothing is a settings fault, not an empty
- * secret: continuing would leave the provider's own credential out of the
- * scrubber while the run persists text about it.
+ * The credential values the scrubber needs for this run. A reference that holds
+ * no record contributes nothing: an unconfigured provider was handed no key, so
+ * there is nothing of it in the text to scrub. Refusing here instead would
+ * reject the call before runAgentTask could create the failed run that names
+ * the real cause — the user would see a settings error with no run recorded.
  */
 async function loadProviderSecrets(
   store: SecretStore,
@@ -568,13 +570,7 @@ async function loadProviderSecrets(
   const secrets: string[] = []
   for (const ref of refs) {
     const secret = await store.load(ref)
-    if (secret === null) {
-      throw new Error(
-        `The secret reference "${ref}" holds no record, so its value cannot be scrubbed ` +
-          'from the text this run persists.',
-      )
-    }
-    secrets.push(secret)
+    if (secret !== null && secret.length > 0) secrets.push(secret)
   }
   return secrets
 }

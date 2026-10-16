@@ -373,6 +373,32 @@ describe('runAgentTask', () => {
     expect(invocation?.resultJson).not.toContain(secret)
     expect(invocation?.argsJson).toContain('[redacted]')
   })
+
+  it('keeps a secret out of an argument the model spelled with JSON escapes', async () => {
+    const harness = newHarness()
+    const secret = 'sk-live-do-not-store'
+    const echo = echoTool()
+    const tools: (runId: AgentRunId) => AgentTools = () => ({
+      registry: { list: () => [echo], get: () => echo },
+      schemas: [],
+    })
+    // The credential is intact once the row is parsed, and absent from its text.
+    const escaped = String.raw`sk-live-do-not-store`
+    const model = new ScriptedModel([
+      [{ type: 'toolCall', name: 'echo', argsJson: `{"text":"${escaped}"}` }],
+      [{ type: 'text', textDelta: 'done' }],
+    ])
+
+    await runAgentTask(
+      harness.ctx,
+      { model, invocations: harness.invocations, ids: harness.registryDeps.ids, secrets: [secret] },
+      { prompt: '复述', tools },
+    )
+
+    const invocation = harness.invocations.list().at(0)
+    expect(invocation?.argsJson).not.toContain(secret)
+    expect(invocation?.argsJson).toContain('[redacted]')
+  })
 })
 
 function dangerousTool(onExecute: () => string): RegisteredTool<{ resumeId: string }, string> {

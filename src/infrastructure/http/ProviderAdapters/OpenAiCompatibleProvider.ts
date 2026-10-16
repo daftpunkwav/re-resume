@@ -57,8 +57,12 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     this.modelId = config.modelId
   }
 
-  stream(request: ChatRequest, tools: readonly ToolSchema[]): AsyncIterable<ModelChunk> {
-    return streamChatCompletion(this.#config, request, tools)
+  stream(
+    request: ChatRequest,
+    tools: readonly ToolSchema[],
+    signal?: AbortSignal,
+  ): AsyncIterable<ModelChunk> {
+    return streamChatCompletion(this.#config, request, tools, signal)
   }
 }
 
@@ -66,6 +70,7 @@ async function* streamChatCompletion(
   config: OpenAiCompatibleProviderConfig,
   request: ChatRequest,
   tools: readonly ToolSchema[],
+  signal?: AbortSignal,
 ): AsyncIterable<ModelChunk> {
   const response = await config.http.openStream({
     method: 'POST',
@@ -77,6 +82,7 @@ async function* streamChatCompletion(
     },
     body: JSON.stringify(buildRequestBody(config.modelId, request, tools)),
     connectTimeoutMs: config.connectTimeoutMs,
+    signal,
   })
   await refuseUnsuccessfulResponse('OpenAI-compatible endpoint', response)
 

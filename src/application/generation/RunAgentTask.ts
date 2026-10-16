@@ -28,7 +28,7 @@ import {
   describeArgumentFailure,
   parseToolArguments,
 } from './ApproveToolInvocation'
-import { redactSecret as redact } from './redactSecret'
+import { redactJsonSecrets, redactSecret as redact } from './redactSecret'
 import type { DestructivePlan, ToolInvocationRecorder } from './ApproveToolInvocation'
 import type { AgentRun } from '../../domain/generation/AgentRun'
 import type { ToolInvocation } from '../../domain/generation/ToolInvocation'
@@ -80,6 +80,7 @@ interface PendingToolCall {
 interface ModelTurn {
   readonly text: string
   readonly toolCalls: readonly PendingToolCall[]
+  readonly cancelled: boolean
 }
 
 /** Raised when a destructive tool is called; the loop has no approval channel. */
@@ -127,7 +128,12 @@ export async function runAgentTask(
         { system: request.system ?? null, messages },
         tools.schemas,
         request.onTextDelta,
+        request.isCancelled,
       )
+      // The turn in flight is aborted rather than drained once the caller has
+      // cancelled: draining it would keep the provider answering a prompt
+      // nobody is waiting for.
+      if (reply.cancelled) return await endRun(ctx, run, 'cancelled', null)
       messages.push({ role: 'assistant', text: assistantText(reply) })
       if (reply.toolCalls.length === 0) return await endRun(ctx, run, 'completed', null)
 
@@ -152,10 +158,20 @@ async function readTurn(
   },
   schemas: readonly ToolSchema[],
   onTextDelta: ((delta: string) => void) | undefined,
+  isCancelled: (() => boolean) | undefined,
 ): Promise<ModelTurn> {
+  const abort = new AbortController()
+  const chunks = model.stream(request, schemas, abort.signal)[Symbol.asyncIterator]()
   let text = ''
   const toolCalls: PendingToolCall[] = []
-  for await (const chunk of model.stream(request, schemas)) {
+  for (;;) {
+    if (isCancelled?.() === true) {
+      abort.abort()
+      return { text, toolCalls, cancelled: true }
+    }
+    const next = await chunks.next()
+    if (next.done === true) return { text, toolCalls, cancelled: false }
+    const chunk = next.value
     if (chunk.type === 'text') {
       text += chunk.textDelta
       onTextDelta?.(chunk.textDelta)
@@ -163,7 +179,6 @@ async function readTurn(
     }
     toolCalls.push({ name: chunk.name, argsJson: chunk.argsJson })
   }
-  return { text, toolCalls }
 }
 
 /**
@@ -207,7 +222,7 @@ async function invokeTool(
     runId,
     toolName: tool.name,
     risk: tool.risk,
-    argsJson: redact(call.argsJson, secrets),
+    argsJson: redactJsonSecrets(call.argsJson, secrets),
     resultJson: null,
     approvalState: initialApprovalState(tool.risk),
     createdAt: ctx.clock.now(),
@@ -218,15 +233,15 @@ async function invokeTool(
   if (!parsed.ok) {
     // A malformed argument is an expected outcome: it is recorded and handed
     // back to the model, which may correct it, and the run continues.
-    const resultJson = redact(failureJson(parsed.error), secrets)
+    const resultJson = redactJsonSecrets(failureJson(parsed.error), secrets)
     return toolResultMessage(tool.name, await recordResult(deps, invocation, resultJson))
   }
   try {
     const value = await tool.execute(parsed.value, ctx)
-    const resultJson = redact(successJson(value), secrets)
+    const resultJson = redactJsonSecrets(successJson(value), secrets)
     return toolResultMessage(tool.name, await recordResult(deps, invocation, resultJson))
   } catch (error: unknown) {
-    const resultJson = redact(failureJson(describeArgumentFailure(error)), secrets)
+    const resultJson = redactJsonSecrets(failureJson(describeArgumentFailure(error)), secrets)
     return toolResultMessage(tool.name, await recordResult(deps, invocation, resultJson))
   }
 }
