@@ -62,7 +62,14 @@ export function ApplicationServicesProvider({
           stronghold: { snapshotPath, password: vaultPassword },
           provider: toProviderDescriptor(settings),
         })
-        if (!cancelled) setBoot({ status: 'ready', root })
+        // A root that arrives after the effect was cancelled is still holding
+        // the database handle and the outbound client; nothing else would ever
+        // shut it down.
+        if (cancelled) {
+          void root.shutdown()
+          return
+        }
+        setBoot({ status: 'ready', root })
       } catch (thrown) {
         if (cancelled) return
         const reason = thrown instanceof Error ? thrown.message : '未知原因'
