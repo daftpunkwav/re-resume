@@ -44,5 +44,14 @@ export interface ResumeRepository {
    * snapshot is what a comparison must not do.
    */
   findSnapshotById(id: SnapshotId): Promise<ResumeSnapshot | null>
-  appendSnapshot(snapshot: ResumeSnapshot): Promise<void>
+  /**
+   * Writes the snapshot that justifies a frozen status and moves the status in
+   * the same transaction.
+   *
+   * `expectedRevisionId` is the revision the snapshot was cut from. Freezing
+   * reads the resume and materializes it before this call, and a commit landing
+   * in between would otherwise leave a snapshot of one revision attached to a
+   * resume whose cursor has already moved on.
+   */
+  appendSnapshot(snapshot: ResumeSnapshot, expectedRevisionId: RevisionId): Promise<void>
 }

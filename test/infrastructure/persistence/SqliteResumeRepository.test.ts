@@ -182,9 +182,37 @@ describe('SqliteResumeRepository', () => {
     expect(third.seq).toBe(3)
   })
 
+  /** Freezes against the revision the snapshot was cut from, as the use case does. */
+  async function freezeAsOfCurrent(
+    repository: SqliteResumeRepository,
+    snapshot: ResumeSnapshot = frozenSnapshot(),
+  ): Promise<void> {
+    const current = await repository.findById(RESUME_ID)
+    if (current === null) throw new Error('the seeded resume should exist')
+    await repository.appendSnapshot(snapshot, current.currentRevision)
+  }
+
+  it('refuses a freeze whose snapshot was cut from a revision the cursor has left', async () => {
+    const { repository } = await newRepository()
+    const loaded = await repository.findById(RESUME_ID)
+    if (loaded === null) throw new Error('the seeded resume should exist')
+    await saveNext(repository, FIRST_STATE, '先改一次')
+
+    // Freezing reads the resume and materializes it before it writes, so the
+    // cursor can move in between. The snapshot would then describe a revision
+    // the frozen resume is no longer on.
+    await expect(
+      repository.appendSnapshot(frozenSnapshot(), loaded.currentRevision),
+    ).rejects.toMatchObject({ code: 'cursorNotOnLiveChain' })
+
+    const reloaded = await repository.findById(RESUME_ID)
+    expect(reloaded?.status).toBe('draft')
+    expect(reloaded?.snapshots).toHaveLength(0)
+  })
+
   it('refuses a new revision on a frozen resume', async () => {
     const { repository } = await newRepository()
-    await repository.appendSnapshot(frozenSnapshot())
+    await freezeAsOfCurrent(repository)
 
     await expect(saveNext(repository, FIRST_STATE, '再改一次')).rejects.toMatchObject(
       { code: 'frozenResumeImmutable' },
@@ -240,7 +268,7 @@ describe('SqliteResumeRepository', () => {
   it('refuses to move the cursor on a frozen resume', async () => {
     const { repository } = await newRepository()
     const second = await saveNext(repository, FIRST_STATE, '第二版')
-    await repository.appendSnapshot(frozenSnapshot())
+    await freezeAsOfCurrent(repository)
 
     await expect(repository.moveCursor(RESUME_ID, second.id)).rejects.toMatchObject({
       code: 'frozenResumeImmutable',
@@ -291,7 +319,7 @@ describe('SqliteResumeRepository', () => {
     const { repository } = await newRepository()
     await saveNext(repository, FIRST_STATE, '第二版')
 
-    await repository.appendSnapshot(frozenSnapshot())
+    await freezeAsOfCurrent(repository)
 
     const reloaded = await repository.findById(RESUME_ID)
     expect(reloaded?.status).toBe('frozen')

@@ -74,7 +74,7 @@ export async function freezeResume(
       blockers: [],
     })
   }
-  await resumeRepo.appendSnapshot(snapshot)
+  await resumeRepo.appendSnapshot(snapshot, resume.currentRevision)
   return snapshot
 }
 

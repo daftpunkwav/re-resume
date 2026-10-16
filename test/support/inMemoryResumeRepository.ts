@@ -142,8 +142,18 @@ export class InMemoryResumeRepository implements ResumeRepository {
     return this.revisions.get(id) ?? null
   }
 
-  async appendSnapshot(snapshot: ResumeSnapshot): Promise<void> {
+  async appendSnapshot(
+    snapshot: ResumeSnapshot,
+    expectedRevisionId: RevisionId,
+  ): Promise<void> {
     const resume = this.requireResume(snapshot.resumeId)
+    if (resume.currentRevision !== expectedRevisionId) {
+      throw new DomainError(
+        'cursorNotOnLiveChain',
+        'This resume took another revision while it was being finalized. Reload it and try again.',
+        { entity: 'resume', id: snapshot.resumeId, blockers: [expectedRevisionId] },
+      )
+    }
     const next: Resume = {
       ...resume,
       status: 'frozen',

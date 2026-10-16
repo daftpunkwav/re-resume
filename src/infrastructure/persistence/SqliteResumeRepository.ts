@@ -228,7 +228,10 @@ export class SqliteResumeRepository implements ResumeRepository {
    * status itself. Invariant 3 holds because both land together — a frozen
    * resume without its snapshot is unreachable, not merely unlikely.
    */
-  async appendSnapshot(snapshot: ResumeSnapshot): Promise<void> {
+  async appendSnapshot(
+    snapshot: ResumeSnapshot,
+    expectedRevisionId: RevisionId,
+  ): Promise<void> {
     const row = toResumeSnapshotRow(snapshot)
     await this.#database.transaction(async (tx) => {
       await tx.execute(
@@ -236,10 +239,20 @@ export class SqliteResumeRepository implements ResumeRepository {
          VALUES ($1, $2, $3, $4, $5)`,
         [row.id, row.resume_id, row.seq, row.materialized_json, row.created_at],
       )
-      await tx.execute(
-        'UPDATE resume SET status = $1, updated_at = $2 WHERE id = $3',
-        ['frozen', snapshot.createdAt, snapshot.resumeId],
+      // The cursor is part of the condition rather than a separate read: the
+      // rowsAffected count is what says the resume was still where the
+      // snapshot was cut from, and it is taken inside this transaction.
+      const frozen = await tx.execute(
+        'UPDATE resume SET status = $1, updated_at = $2 WHERE id = $3 AND current_revision_id = $4',
+        ['frozen', snapshot.createdAt, snapshot.resumeId, expectedRevisionId],
       )
+      if (frozen.rowsAffected !== 1) {
+        throw new DomainError(
+          'cursorNotOnLiveChain',
+          'This resume took another revision while it was being finalized. Reload it and try again.',
+          { entity: 'resume', id: snapshot.resumeId, blockers: [expectedRevisionId] },
+        )
+      }
     })
   }
 
