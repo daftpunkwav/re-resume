@@ -5,7 +5,7 @@
  * than letting the Result escape into an unhandled rejection.
  */
 
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsView } from '../../../../src/presentation/features/settings/SettingsView'
@@ -171,6 +171,35 @@ describe('ProfileForm', () => {
         links: [{ label: 'GitHub', url: 'https://github.invalid/zhang' }],
       }),
     )
+  })
+
+  it('keeps the row being edited when an earlier link is removed', async () => {
+    stubProfileService(
+      profileService({
+        get: async () =>
+          profileWith({
+            links: [
+              { label: 'GitHub', url: 'https://github.invalid/zhang' },
+              { label: '博客', url: 'https://blog.invalid/zhang' },
+            ],
+          }),
+      }),
+    )
+
+    render(<SettingsView />)
+    await screen.findByDisplayValue('博客')
+    const editing = screen.getByDisplayValue('博客')
+    editing.focus()
+    expect(document.activeElement).toBe(editing)
+
+    // fireEvent leaves focus alone; a real click would move it to the button
+    // and prove nothing about how the rows were reconciled.
+    fireEvent.click(screen.getByRole('button', { name: '删除第 1 条链接' }))
+
+    // The row that was second is now first. It is still the row the user was
+    // editing, so the caret has to still be in it.
+    expect(screen.getByDisplayValue('博客')).toBe(editing)
+    expect(document.activeElement).toBe(editing)
   })
 
   it('removes a seeded link row', async () => {

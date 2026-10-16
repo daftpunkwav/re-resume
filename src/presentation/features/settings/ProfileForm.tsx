@@ -32,6 +32,9 @@ import type { Profile } from '../../../domain/catalog/Profile'
 import type { UpdateProfileCommand } from '../../../application/profile/UpdateProfile'
 
 interface ProfileDraftLink {
+  /** Client-only, so a row keeps its inputs across edits elsewhere in the
+   *  list. Stripped in toCommand: the stored profile has no such field. */
+  readonly id: string
   readonly label: string
   readonly url: string
 }
@@ -43,6 +46,13 @@ interface ProfileDraft {
   readonly links: readonly ProfileDraftLink[]
 }
 
+let linkSequence = 0
+
+function nextLinkId(): string {
+  linkSequence += 1
+  return `draft-link-${linkSequence}`
+}
+
 /** Every text input is a string; the stored profile carries null for the two
  *  optional fields, and an empty string means the same thing to UpdateProfile. */
 function toDraft(profile: Profile): ProfileDraft {
@@ -50,7 +60,7 @@ function toDraft(profile: Profile): ProfileDraft {
     displayName: profile.displayName,
     email: profile.email ?? '',
     phone: profile.phone ?? '',
-    links: profile.links.map((link) => ({ label: link.label, url: link.url })),
+    links: profile.links.map((link) => ({ id: nextLinkId(), label: link.label, url: link.url })),
   }
 }
 
@@ -128,7 +138,7 @@ function ProfileFields({
   }
 
   const addLink = (): void => {
-    replaceDraft({ ...draft, links: [...draft.links, { label: '', url: '' }] })
+    replaceDraft({ ...draft, links: [...draft.links, { id: nextLinkId(), label: '', url: '' }] })
   }
 
   const removeLink = (index: number): void => {
@@ -184,7 +194,7 @@ function ProfileFields({
         ) : (
           <ul className="stack">
             {draft.links.map((link, index) => (
-              <li className="settings-link-row" key={index}>
+              <li className="settings-link-row" key={link.id}>
                 <TextField
                   label="链接名称"
                   value={link.label}
