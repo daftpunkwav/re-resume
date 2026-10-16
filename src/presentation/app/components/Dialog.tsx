@@ -11,6 +11,19 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from './Button'
 
+/** What Tab may reach inside the panel: the controls that are there and able
+ *  to take focus. A busy footer button is skipped, as is anything the author
+ *  took out of the tab order with tabIndex={-1}. */
+function focusStops(panel: HTMLDivElement | null): HTMLElement[] {
+  if (panel === null) return []
+  return Array.from(
+    panel.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'),
+  ).filter(
+    (element) =>
+      !element.hasAttribute('disabled') && element.getAttribute('tabindex') !== '-1',
+  )
+}
+
 export interface DialogProps {
   readonly open: boolean
   readonly title: string
@@ -37,16 +50,50 @@ export function Dialog({
   onClose,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
 
   useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  /**
+   * A dialog owns the keyboard while it is open: focus moves into it once,
+   * Tab cannot walk out into the page behind it, and closing hands focus back
+   * to whatever opened it. The handler is held in a ref so a parent that
+   * re-renders with a fresh onClose does not re-run the effect and steal the
+   * focus back out of the field the user is typing in.
+   */
+  useEffect(() => {
     if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     panelRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const stops = focusStops(panelRef.current)
+      if (stops.length === 0) return
+      const first = stops[0]
+      const last = stops[stops.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === panelRef.current)) {
+        event.preventDefault()
+        last?.focus()
+        return
+      }
+      if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first?.focus()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      opener?.focus()
+    }
+  }, [open])
 
   if (!open) return null
 
