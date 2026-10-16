@@ -57,19 +57,20 @@ describe('useResource', () => {
       attempt === 1 ? Promise.reject(new Error('读不到')) : retry.promise
 
     const { result, rerender } = renderHook(
-      ({ resumeId }: { readonly resumeId: string }) => useResource(load(1), [resumeId]),
+      ({ resumeId }: { readonly resumeId: string }) =>
+        useResource(load(resumeId === 'draft' ? 1 : 2), [resumeId]),
       { initialProps: { resumeId: 'draft' } },
     )
     await waitFor(() => expect(result.current.error).not.toBeNull())
 
-    retry.resolve(['全栈简历'])
     rerender({ resumeId: 'frozen' })
 
     expect(result.current.loading).toBe(true)
     expect(result.current.error).toBeNull()
 
     await act(async () => {
-      retry.resolve([])
+      retry.resolve(['全栈简历'])
     })
+    expect(result.current.data).toEqual(['全栈简历'])
   })
 })
