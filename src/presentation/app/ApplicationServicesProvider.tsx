@@ -13,6 +13,8 @@ import type { ReactNode } from 'react'
 import { createCompositionRoot } from '../../bootstrap/compositionRoot'
 import type { CompositionRoot } from '../../bootstrap/compositionRoot'
 import { Spinner } from './components/Spinner'
+import { TextField } from './components/TextField'
+import { Button } from './components/Button'
 import { Notice } from './components/Notice'
 import { toProviderDescriptor, useProviderSettings } from './providerSettingsStore'
 
@@ -60,6 +62,14 @@ export function ApplicationServicesProvider({
   // that triggered it — a vault password, a saved provider — cannot replace a
   // working session with a failure screen the user did nothing to earn.
   const serving = useRef<CompositionRoot | null>(null)
+  // Counts the boots the user asked for directly. The store only re-renders on
+  // a value that actually changed, so retrying with the password already held
+  // would otherwise re-run nothing at all.
+  const [attempt, setAttempt] = useState(0)
+  // Held here rather than in the failure screen, because that screen is
+  // remounted by every failed attempt and a password the user mistyped once
+  // should not have to be typed again.
+  const [bootPassword, setBootPassword] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -97,7 +107,7 @@ export function ApplicationServicesProvider({
     return () => {
       cancelled = true
     }
-  }, [createRoot, resolveSnapshotPath, settings, vaultPassword])
+  }, [createRoot, resolveSnapshotPath, settings, vaultPassword, attempt])
 
   // Keyed on the root rather than on the whole state, so recording a rebuild
   // error does not read as a new root and shut down the one still serving.
@@ -123,14 +133,18 @@ export function ApplicationServicesProvider({
   if (boot.status === 'failed') {
     return (
       <div className="boot-screen">
-        <Notice tone="danger" title="无法连接本地应用容器">
-          <p>
-            界面依赖 Tauri 容器提供的 SQLite、加密存储与出站网络能力。请通过
-            <code> pnpm run tauri dev </code>
-            启动，或在设置中确认凭据库密码。
-          </p>
-          <p className="boot-reason">{boot.reason}</p>
-        </Notice>
+        <BootFailure
+          reason={boot.reason}
+          password={bootPassword}
+          onPasswordChange={setBootPassword}
+          onRetry={() => {
+            setBoot({ status: 'booting' })
+            // Bumped as well as the password: writing the same password twice
+            // into the store changes nothing there, and the boot effect would
+            // not run a second time.
+            setAttempt((count) => count + 1)
+          }}
+        />
       </div>
     )
   }
@@ -147,6 +161,62 @@ export function ApplicationServicesProvider({
       )}
       {children}
     </ServicesContext.Provider>
+  )
+}
+
+/**
+ * A boot that failed has no root serving, so everything that could ask for a
+ * vault password — the settings form — is below this provider and was never
+ * mounted. The prompt therefore lives here: the encrypted store opens when the
+ * root is built, so a boot refused for want of the password can only be
+ * answered at the point where the boot happens.
+ */
+function BootFailure({
+  reason,
+  password,
+  onPasswordChange,
+  onRetry,
+}: {
+  readonly reason: string
+  readonly password: string
+  readonly onPasswordChange: (password: string) => void
+  readonly onRetry: () => void
+}) {
+  const unlockVault = useProviderSettings((state) => state.unlockVault)
+
+  return (
+    <div className="stack">
+      <Notice tone="danger" title="无法连接本地应用容器">
+        <p>
+          界面依赖 Tauri 容器提供的 SQLite、加密存储与出站网络能力。请通过
+          <code> pnpm run tauri dev </code>
+          启动。
+        </p>
+        <p className="boot-reason">{reason}</p>
+      </Notice>
+
+      <div className="boot-retry">
+        <TextField
+          label="凭据库密码"
+          type="password"
+          value={password}
+          autoComplete="off"
+          onChange={(event) => onPasswordChange(event.target.value)}
+        />
+        <Button
+          disabled={password.length === 0}
+          onClick={() => {
+            unlockVault(password)
+            onRetry()
+          }}
+        >
+          重试启动
+        </Button>
+      </div>
+      <p className="boot-hint">
+        凭据库密码只保存在内存里。如果这次启动失败与它无关，清空它再重试一次即可。
+      </p>
+    </div>
   )
 }
 

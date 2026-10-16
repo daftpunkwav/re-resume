@@ -17,6 +17,22 @@
   opacity: 0.8;
 }
 
+/* The retry the user has when the boot itself failed. It is a column because
+   the password field is the widest thing on the screen and the button is a
+   single short word — side by side they would only stretch the pair. */
+.boot-retry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(28rem, 100%);
+  align-items: stretch;
+}
+
+.boot-hint {
+  font-size: var(--text-size-xs);
+  opacity: 0.75;
+}
+
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;

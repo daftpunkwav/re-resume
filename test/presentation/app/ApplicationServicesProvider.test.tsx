@@ -5,11 +5,13 @@
  */
 
 import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApplicationServicesProvider } from '../../../src/presentation/app/ApplicationServicesProvider'
 import { useProviderSettings } from '../../../src/presentation/app/providerSettingsStore'
 import type { CompositionRoot } from '../../../src/bootstrap/compositionRoot'
+import type { createCompositionRoot } from '../../../src/bootstrap/compositionRoot'
 
 function stubRoot(): CompositionRoot {
   return { shutdown: vi.fn(async () => undefined) } as unknown as CompositionRoot
@@ -29,7 +31,9 @@ function rebuild(): void {
   })
 }
 
-function renderProvider(createRoot: () => Promise<CompositionRoot>): void {
+function renderProvider(
+  createRoot: typeof createCompositionRoot,
+): void {
   render(
     <ApplicationServicesProvider
       createRoot={createRoot}
@@ -95,6 +99,51 @@ describe('ApplicationServicesProvider', () => {
 
     await vi.waitFor(() => expect(first.shutdown).toHaveBeenCalled())
     expect(second.shutdown).not.toHaveBeenCalled()
+  })
+
+  it('offers the vault password on the failure screen and boots with it', async () => {
+    const user = userEvent.setup({ delay: null })
+    let attempt = 0
+    renderProvider(async (options) => {
+      attempt += 1
+      // The encrypted store refuses an empty password, the way it would once
+      // something has been written into the snapshot.
+      if (options.stronghold.password === '') throw new Error('凭据库没有解开')
+      return stubRoot()
+    })
+
+    expect(await screen.findByText('无法连接本地应用容器')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('凭据库密码'), 'the-vault-password')
+    await user.click(screen.getByRole('button', { name: '重试启动' }))
+
+    // Without a prompt here the user has no way forward at all: the settings
+    // form that could ask for this password was never mounted.
+    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
+    expect(attempt).toBe(2)
+  })
+
+  it('retries with the password it already holds', async () => {
+    const user = userEvent.setup({ delay: null })
+    let attempt = 0
+    renderProvider(async () => {
+      attempt += 1
+      // The store already holds this password from a previous attempt, so the
+      // retry has to re-boot without anything about it having changed.
+      if (attempt < 3) throw new Error('凭据库没有解开')
+      return stubRoot()
+    })
+    await screen.findByText('无法连接本地应用容器')
+
+    const field = screen.getByLabelText('凭据库密码')
+    await user.type(field, 'first')
+    await user.click(screen.getByRole('button', { name: '重试启动' }))
+    await screen.findByText('无法连接本地应用容器')
+
+    await user.click(screen.getByRole('button', { name: '重试启动' }))
+
+    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
+    expect(attempt).toBe(3)
   })
 
   it('closes a root that arrives after a newer rebuild superseded it', async () => {
