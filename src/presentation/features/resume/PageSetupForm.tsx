@@ -68,22 +68,22 @@ function rawPoints(pageSetup: PageSetup): Readonly<Record<PointField, string>> {
 }
 
 export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormProps) {
-  // The draft follows the stored setup, so the committed value always wins
-  // once a revision comes back — including one an undo has just rolled back.
-  // Adjusting it while rendering, rather than in an effect, keeps the field
-  // from showing a value for a render that the store has already replaced.
-  const [draft, setDraft] = useState<PageSetup>(pageSetup)
-  const [draftedFrom, setDraftedFrom] = useState<PageSetup>(pageSetup)
   // What each field shows is what the user has typed, which is not always a
   // number: a half-typed 620 reads as 6 or 62, and clearing a field reads as
   // nothing at all. Reporting any of those as a change would write a revision
-  // per keystroke, so the draft only moves once the edit is finished.
+  // per keystroke, so nothing is proposed until the edit is finished.
   const [typed, setTyped] = useState<Readonly<Record<PointField, string>>>(rawPoints(pageSetup))
   const [invalid, setInvalid] = useState<ReadonlySet<PointField>>(new Set())
+  const [shownFrom, setShownFrom] = useState<PageSetup>(pageSetup)
 
-  if (draftedFrom !== pageSetup) {
-    setDraftedFrom(pageSetup)
-    setDraft(pageSetup)
+  // Every proposal is built from the stored setup rather than from a local
+  // draft. A refused commit — a frozen document, for one — leaves the stored
+  // value where it was, and a draft that had already moved would put the
+  // refused number into the next change the user makes. Adjusting what is shown
+  // while rendering, rather than in an effect, keeps a field from holding a
+  // value for a render the store has already replaced.
+  if (shownFrom !== pageSetup) {
+    setShownFrom(pageSetup)
     setTyped(rawPoints(pageSetup))
     setInvalid(new Set())
   }
@@ -103,10 +103,8 @@ export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormPr
     const value = Number(raw)
     // An edit that lands back on the value it started from has nothing to say,
     // and a revision would undo to a document identical to this one.
-    if (draft[field] === value) return
-    const nextPageSetup: PageSetup = { ...draft, [field]: value }
-    setDraft(nextPageSetup)
-    onChange(nextPageSetup)
+    if (pageSetup[field] === value) return
+    onChange({ ...pageSetup, [field]: value })
   }
 
   return (
@@ -133,14 +131,11 @@ export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormPr
           label="栏数"
           disabled={disabled}
           options={COLUMN_OPTIONS}
-          value={String(draft.columns)}
+          value={String(pageSetup.columns)}
           onChange={(event) => {
-            const nextPageSetup: PageSetup = {
-              ...draft,
-              columns: Number(event.target.value) === 2 ? 2 : 1,
-            }
-            setDraft(nextPageSetup)
-            onChange(nextPageSetup)
+            const columns = Number(event.target.value) === 2 ? 2 : 1
+            if (pageSetup.columns === columns) return
+            onChange({ ...pageSetup, columns })
           }}
         />
       </div>
