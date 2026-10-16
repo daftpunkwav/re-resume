@@ -164,18 +164,21 @@ describe('experience detail', () => {
   it('does not file one experience under another when the selection moves mid-command', async () => {
     const user = userEvent.setup()
     const release: { current: (() => void) | null } = { current: null }
+    let listReads = 0
     const slow = makeExperience({
       id: 'exp-slow',
       kind: 'project',
       title: '慢的那条',
       detail: { technologies: ['TypeScript'], role: '慢', highlights: ['慢'] },
-      variants: [makeVariant({
-        id: 'var-slow',
-        label: '慢表述',
-        content: '慢的正文。',
-        draftedByRunId: 'run-9',
-        confirmedAt: null,
-      })],
+      variants: [
+        makeVariant({
+          id: 'var-slow',
+          label: '慢表述',
+          content: '慢的正文。',
+          draftedByRunId: 'run-9',
+          confirmedAt: null,
+        }),
+      ],
     })
     const fast = makeExperience({
       id: 'exp-fast',
@@ -184,7 +187,10 @@ describe('experience detail', () => {
       detail: { technologies: ['Go'], role: '快', highlights: ['快'] },
     })
     givenLibrary({
-      list: async () => [slow, fast],
+      list: async () => {
+        listReads += 1
+        return [slow, fast]
+      },
       get: async (id: unknown) => (String(id) === 'exp-slow' ? slow : fast),
       confirmVariant: async () => {
         // Still running when the user picks the other row.
@@ -211,15 +217,20 @@ describe('experience detail', () => {
     await openRow('快的那条')
     expect(await screen.findByLabelText('角色')).toHaveValue('快')
 
+    const readsBefore = listReads
     release.current?.()
-    await waitFor(() =>
-      expect(screen.queryByText('慢的正文。')).toBeNull(),
-    )
+    // Wait for the command to have run all the way through — it refreshes the
+    // library last. Waiting for the old variant's text to be absent would pass
+    // at once, since choosing the other row had already removed it.
+    await waitFor(() => expect(listReads).toBeGreaterThan(readsBefore))
 
-    // The confirmation belonged to the other experience. Its result must not
-    // replace what the row now open is showing.
+    // The confirmation belonged to the other experience, and the panel it was
+    // started in is gone: nothing it returns may reach the row now open, which
+    // also opens on its own tab rather than the one it was showing.
     expect(screen.getByLabelText('角色')).toHaveValue('快')
     expect(screen.getByLabelText('标题')).toHaveValue('快的那条')
+    expect(screen.getByRole('tab', { name: '基本信息' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText('慢的正文。')).toBeNull()
   })
 
   it('clears the draft badge once a variant is confirmed', async () => {
