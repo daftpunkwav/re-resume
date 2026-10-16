@@ -227,45 +227,15 @@ export function ResumeEditorPanel({
 
   return (
     <div className="resume-editor">
-      <div className="toolbar">
-        <div className="resume-identity">
-          <div className="resume-identity-text">
-            <h2 className="resume-identity-title">{resume.title}</h2>
-            <p className="resume-identity-role">{resume.targetRole ?? '未设置目标岗位'}</p>
-          </div>
-          <Badge tone={frozen ? 'info' : 'neutral'}>{frozen ? '已定稿' : '草稿'}</Badge>
-        </div>
-        <div className="toolbar-group">
-          <Button
-            size="small"
-            icon="undo"
-            disabled={documentOp.busy || frozen}
-            onClick={() => dispatch(() => resumes.undo(resumeId))}
-          >
-            撤销
-          </Button>
-          <Button
-            size="small"
-            icon="redo"
-            disabled={documentOp.busy || frozen}
-            onClick={() => dispatch(() => resumes.redo(resumeId))}
-          >
-            重做
-          </Button>
-          <Button size="small" icon="copy" disabled={documentOp.busy} onClick={copyResume}>
-            复制
-          </Button>
-          <Button
-            size="small"
-            icon="freeze"
-            variant="primary"
-            disabled={documentOp.busy || frozen}
-            onClick={() => setConfirmingFreeze(true)}
-          >
-            定稿
-          </Button>
-        </div>
-      </div>
+      <ResumeToolbar
+        resume={resume}
+        frozen={frozen}
+        busy={documentOp.busy}
+        onUndo={() => dispatch(() => resumes.undo(resumeId))}
+        onRedo={() => dispatch(() => resumes.redo(resumeId))}
+        onCopy={copyResume}
+        onFreeze={() => setConfirmingFreeze(true)}
+      />
 
       {frozen ? (
         <Notice tone="info" title="已定稿，复制一份草稿继续修改">
@@ -286,25 +256,15 @@ export function ResumeEditorPanel({
         </div>
 
         <div className="resume-editor-canvas">
-          {preview.data === null ? (
-            preview.error === null ? (
-              <Spinner label="正在排版…" />
-            ) : (
-              <Notice tone="danger" title="排版失败">
-                <p>{preview.error.message}</p>
-              </Notice>
-            )
-          ) : (
-            <ResumeCanvas
-              layout={preview.data.layout}
-              page={resume.pageSetup}
-              blocks={resume.blocks}
-              editable={editable}
-              selectedBlockId={selected}
-              onSelectBlock={setSelectedBlockId}
-              onMoveBlock={moveBlock}
-            />
-          )}
+          <ResumeCanvasArea
+            preview={preview.data}
+            error={preview.error}
+            resume={resume}
+            editable={editable}
+            selectedBlockId={selected}
+            onSelectBlock={setSelectedBlockId}
+            onMoveBlock={moveBlock}
+          />
         </div>
       </div>
 
@@ -332,6 +292,105 @@ export function ResumeEditorPanel({
         </ul>
       </Dialog>
     </div>
+  )
+}
+
+/**
+ * The identity of the open document and the four things that can be done to
+ * it. Split out because none of it decides anything: every control reports an
+ * intent, and the panel decides what that intent means.
+ */
+function ResumeToolbar({
+  resume,
+  frozen,
+  busy,
+  onUndo,
+  onRedo,
+  onCopy,
+  onFreeze,
+}: {
+  readonly resume: Resume
+  readonly frozen: boolean
+  readonly busy: boolean
+  readonly onUndo: () => void
+  readonly onRedo: () => void
+  readonly onCopy: () => void
+  readonly onFreeze: () => void
+}) {
+  return (
+    <div className="toolbar">
+      <div className="resume-identity">
+        <div className="resume-identity-text">
+          <h2 className="resume-identity-title">{resume.title}</h2>
+          <p className="resume-identity-role">{resume.targetRole ?? '未设置目标岗位'}</p>
+        </div>
+        <Badge tone={frozen ? 'info' : 'neutral'}>{frozen ? '已定稿' : '草稿'}</Badge>
+      </div>
+      <div className="toolbar-group">
+        <Button size="small" icon="undo" disabled={busy || frozen} onClick={onUndo}>
+          撤销
+        </Button>
+        <Button size="small" icon="redo" disabled={busy || frozen} onClick={onRedo}>
+          重做
+        </Button>
+        <Button size="small" icon="copy" disabled={busy} onClick={onCopy}>
+          复制
+        </Button>
+        <Button
+          size="small"
+          icon="freeze"
+          variant="primary"
+          disabled={busy || frozen}
+          onClick={onFreeze}
+        >
+          定稿
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The drawing, or the two reasons there is not one yet. A document whose
+ * layout could not be produced is reported rather than left as a blank sheet
+ * the user would read as an empty resume.
+ */
+function ResumeCanvasArea({
+  preview,
+  error,
+  resume,
+  editable,
+  selectedBlockId,
+  onSelectBlock,
+  onMoveBlock,
+}: {
+  readonly preview: ResumePreview | null
+  readonly error: ReadableError | null
+  readonly resume: Resume
+  readonly editable: boolean
+  readonly selectedBlockId: BlockId | null
+  readonly onSelectBlock: (blockId: BlockId | null) => void
+  readonly onMoveBlock: (move: BlockMove) => void
+}) {
+  if (preview === null) {
+    return error === null ? (
+      <Spinner label="正在排版…" />
+    ) : (
+      <Notice tone="danger" title="排版失败">
+        <p>{error.message}</p>
+      </Notice>
+    )
+  }
+  return (
+    <ResumeCanvas
+      layout={preview.layout}
+      page={resume.pageSetup}
+      blocks={resume.blocks}
+      editable={editable}
+      selectedBlockId={selectedBlockId}
+      onSelectBlock={onSelectBlock}
+      onMoveBlock={onMoveBlock}
+    />
   )
 }
 
