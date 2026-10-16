@@ -1,0 +1,165 @@
+{
+  // Tauri configuration. Parsed as json5, so these comments are part of the file
+  // and not a description of it.
+  "$schema": "https://schema.tauri.app/config/2",
+
+  "productName": "ReResume",
+  "version": "0.1.0",
+  "identifier": "com.reresume.app",
+
+  "build": {
+    "beforeDevCommand": "pnpm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm run build",
+    "frontendDist": "../dist"
+  },
+
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ReResume",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+
+    "security": {
+      // Production policy. Tauri injects a nonce for its own initialisation
+      // script and adds it to script-src at runtime; the nonce is not written
+      // here.
+      "csp": {
+        // Baseline for every directive that is not named below: only the
+        // bundle's own origin (tauri://localhost, or http://tauri.localhost on
+        // Windows) may load anything.
+        "default-src": ["'self'"],
+
+        // Stops a <base> element in injected markup from re-pointing every
+        // relative script and style URL somewhere else.
+        "base-uri": ["'self'"],
+
+        // The app never instantiates <object> or <embed>. PDF output is
+        // produced by the renderer in JavaScript, not displayed through one.
+        "object-src": ["'none'"],
+
+        // ReResume is a top-level window and is never embedded in another page.
+        "frame-ancestors": ["'none'"],
+
+        // There are no HTML form submissions; every outbound request is an
+        // explicit call made by application code.
+        "form-action": ["'none'"],
+
+        // WASM — RESERVED, NOT PRESENT TODAY.
+        //
+        // A WebAssembly dependency needs `'wasm-unsafe-eval'` added to this
+        // directive. WebAssembly.instantiate and WebAssembly.instantiateStreaming
+        // are gated by the script policy, so a WASM module cannot load under
+        // `'self'` alone. The reason this is reserved rather than shipped: the
+        // PDF renderer registers a WASM layout engine (yoga-layout), and that
+        // is the dependency that needs it. Nothing in the bundle compiles
+        // WebAssembly yet, so the directive is absent.
+        //
+        // When the WASM dependency lands, add `'wasm-unsafe-eval'` to script-src
+        // in the same change. Not to default-src, and not `'unsafe-eval'`: the
+        // former is broader than needed, the latter permits string-to-code
+        // compilation that nothing requires.
+        "script-src": ["'self'"],
+
+        // No unsafe-eval and no unsafe-inline here: script execution is confined
+        // to the bundle, and inline handlers do not execute.
+        //
+        // 'unsafe-inline' on style-src is the one relaxation this policy makes.
+        // React and Konva position elements through the style attribute, and a
+        // style attribute cannot be authorized by hash or nonce — only by this
+        // keyword. Without it every positioned element loses its style. The
+        // relaxation covers style attributes and <style> blocks only; it grants
+        // nothing to script-src.
+        "style-src": ["'self'", "'unsafe-inline'"],
+
+        // Inline data and object URLs for images. Konva hands canvas output and
+        // any decoded image back as a blob: URL rather than a file path.
+        "img-src": ["'self'", "data:", "blob:"],
+
+        // Nothing loads a font from outside the bundle today.
+        "font-src": ["'self'"],
+
+        // Only the Tauri IPC endpoints. Model provider requests are issued by
+        // the HTTP plugin on the Rust side, which runs outside the WebView and
+        // is therefore not subject to this policy; the plugin's own permission
+        // scope is what bounds those requests. ipc: is the custom protocol used
+        // on macOS, http://ipc.localhost the loopback host used on Windows.
+        "connect-src": ["'self'", "ipc:", "http://ipc.localhost"]
+      },
+
+      // Development policy. Tauri does not add the dev server to the policy on
+      // its own: devCsp falls back to csp when it is unset, and Vite serves
+      // over plain HTTP with hot reload over a WebSocket, both of which the
+      // production policy above blocks.
+      "devCsp": {
+        "default-src": ["'self'"],
+        "base-uri": ["'self'"],
+        "object-src": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'none'"],
+        // Vite's React Fast Refresh preamble is an inline module script. This
+        // relaxation is development-only and does not apply to the production
+        // policy above.
+        "script-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'", "'unsafe-inline'", "http://localhost:1420"],
+        "img-src": ["'self'", "data:", "blob:", "http://localhost:1420"],
+        "font-src": ["'self'", "data:", "http://localhost:1420"],
+        // ws:// is the hot-reload channel Vite opens back to the dev server.
+        "connect-src": [
+          "'self'",
+          "ipc:",
+          "http://ipc.localhost",
+          "http://localhost:1420",
+          "ws://localhost:1420"
+        ]
+      }
+    }
+  },
+
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "shortDescription": "Local-first resume workbench",
+    "longDescription": "ReResume builds and edits resumes against a local experience library, with no account and no server.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      // tauri-build compiles this one into the Windows resource on every build,
+      // not only when a bundle is produced, so it has to be listed here.
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      // The product's floor is macOS 10.15 (Catalina). Tauri defaults to 10.13;
+      // 10.13 and 10.14 are explicitly not supported, so the default would
+      // produce installers that install on systems this product does not run on.
+      "minimumSystemVersion": "10.15"
+    }
+  },
+
+  "plugins": {
+    "sql": {
+      // Connecting at startup runs the migrations registered in lib.rs before
+      // the frontend opens its own connection, so the schema is in place by the
+      // time the first query is issued.
+      "preload": ["sqlite:re-resume.db"]
+    },
+
+    "http": {
+      // The URL scope in capabilities/default.json5 is only a real boundary if
+      // redirects are checked against it too, and the plugin's default is not to
+      // check them. A model endpoint that answers with a redirect would
+      // otherwise reach an origin the scope does not list.
+      "scopeRedirects": true
+    }
+  }
+}
