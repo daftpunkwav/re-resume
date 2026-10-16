@@ -51,6 +51,12 @@ export interface ResumeEditorPanelProps {
   readonly resumeId: ResumeId
   /** Told after every accepted change so the list can refresh its status. */
   readonly onResumeChanged: () => void
+  /**
+   * The outcome is held by the workspace rather than here. Copying a resume
+   * selects the copy, and the panel is keyed by the selected id, so a notice
+   * set inside this panel would be discarded by the very remount it caused.
+   */
+  readonly onOutcome: (outcome: OperationOutcome | null) => void
 }
 
 interface ResumePreview {
@@ -60,7 +66,7 @@ interface ResumePreview {
 
 type NoticeTone = 'info' | 'success' | 'warning'
 
-interface OperationOutcome {
+export interface OperationOutcome {
   readonly tone: NoticeTone
   readonly title: string
 }
@@ -124,7 +130,11 @@ async function loadPreview(
   return { blocks, layout: workbench.layOut(blocks, resume.pageSetup) }
 }
 
-export function ResumeEditorPanel({ resumeId, onResumeChanged }: ResumeEditorPanelProps) {
+export function ResumeEditorPanel({
+  resumeId,
+  onResumeChanged,
+  onOutcome,
+}: ResumeEditorPanelProps) {
   const { resumes } = useServices()
   const selectResume = useNavigation((state) => state.selectResume)
 
@@ -136,7 +146,6 @@ export function ResumeEditorPanel({ resumeId, onResumeChanged }: ResumeEditorPan
   const loadCurrentPreview = useCallback(() => loadPreview(resumes, resume), [resumes, resume])
   const preview = useResource(loadCurrentPreview, [resumes, resume])
 
-  const [outcome, setOutcome] = useState<OperationOutcome | null>(null)
   const [selectedBlockId, setSelectedBlockId] = useState<BlockId | null>(null)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
 
@@ -158,13 +167,13 @@ export function ResumeEditorPanel({ resumeId, onResumeChanged }: ResumeEditorPan
     run: () => Promise<unknown>,
     success?: OperationOutcome,
   ): void => {
-    setOutcome(null)
+    onOutcome(null)
     pending.current =
       success === undefined
         ? run
         : async () => {
             await run()
-            setOutcome(success)
+            onOutcome(success)
           }
     void documentOp.run()
   }
@@ -265,18 +274,6 @@ export function ResumeEditorPanel({ resumeId, onResumeChanged }: ResumeEditorPan
       ) : null}
 
       <OperationFailure error={documentOp.error} onDismiss={documentOp.clearError} />
-
-      {outcome === null ? null : (
-        <Notice
-          tone={outcome.tone}
-          title={outcome.title}
-          actions={
-            <Button size="small" variant="ghost" onClick={() => setOutcome(null)}>
-              知道了
-            </Button>
-          }
-        />
-      )}
 
       <div className="split resume-editor-grid">
         <div className="resume-editor-sidebar">

@@ -142,6 +142,39 @@ describe('ResumeWorkspace', () => {
     await waitFor(() => expect(useNavigation.getState().selectedResumeId).toBe('resume-copy'))
   })
 
+  it('keeps the copy notice after the editor it came from is remounted', async () => {
+    const services = stubWorkbench(DRAFTS)
+    render(<ResumeWorkspace />)
+    await screen.findByRole('heading', { name: '后端简历' })
+
+    const header = screen.getByRole('heading', { name: '后端简历' }).closest('.resume-editor')
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: '复制' }))
+
+    // Copying selects the copy, which remounts the editor. The notice has to
+    // survive that, or the user is told nothing about the draft that appeared.
+    expect(await screen.findByText('已复制为一份新的草稿。')).toBeInTheDocument()
+    await waitFor(() => expect(useNavigation.getState().selectedResumeId).toBe('resume-copy'))
+    expect(screen.getByText('已复制为一份新的草稿。')).toBeInTheDocument()
+    expect(services.resumes.duplicate).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a freeze confirmation when the selection moves under it', async () => {
+    stubWorkbench(DRAFTS)
+    render(<ResumeWorkspace />)
+    await screen.findByRole('heading', { name: '后端简历' })
+
+    fireEvent.click(screen.getByRole('button', { name: '定稿' }))
+    expect(await screen.findByRole('dialog', { name: '定稿这份简历' })).toBeInTheDocument()
+
+    // The list stays usable behind the dialog, so the selection can move while
+    // a confirmation is open. Confirming then would freeze a document the user
+    // never agreed to freeze.
+    fireEvent.click(screen.getByText('全栈简历'))
+    await waitFor(() => expect(useNavigation.getState().selectedResumeId).toBe(FROZEN_ID))
+
+    expect(screen.queryByRole('dialog', { name: '定稿这份简历' })).toBeNull()
+  })
+
   it('offers nothing to edit until a resume is selected', async () => {
     stubWorkbench([])
     render(<ResumeWorkspace />)

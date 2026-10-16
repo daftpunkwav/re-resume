@@ -10,7 +10,7 @@
  *   panel, so one error surface reports both.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../app/components/Button'
 import { EmptyState } from '../../app/components/EmptyState'
@@ -23,6 +23,7 @@ import { useResource } from '../../app/useResource'
 import { asResumeId } from '../../../domain/shared/branded-id'
 
 import { ResumeEditorPanel } from './ResumeEditorPanel'
+import type { OperationOutcome } from './ResumeEditorPanel'
 import { ResumeListPanel } from './ResumeListPanel'
 import type { ResumeCreationRequest } from './ResumeListPanel'
 
@@ -35,6 +36,10 @@ export function ResumeWorkspace() {
 
   const loadList = useCallback(() => resumes.list(), [resumes])
   const list = useResource(loadList, [resumes])
+  // The editor reports upwards because it is remounted whenever the selection
+  // moves. A notice about copying a resume has to outlive the panel that
+  // produced it — the copy selects itself — so it is held here, above the key.
+  const [outcome, setOutcome] = useState<OperationOutcome | null>(null)
 
   // useOperation's run() takes no argument, so the request waits in a ref
   // until the very call that will read it.
@@ -95,6 +100,18 @@ export function ResumeWorkspace() {
           </Notice>
         )}
 
+        {outcome === null ? null : (
+          <Notice
+            tone={outcome.tone}
+            title={outcome.title}
+            actions={
+              <Button size="small" variant="ghost" onClick={() => setOutcome(null)}>
+                知道了
+              </Button>
+            }
+          />
+        )}
+
         {selectedResumeId === null ? (
           <EmptyState
             icon="document"
@@ -105,8 +122,16 @@ export function ResumeWorkspace() {
           <ResumeEditorPanel
             // navigationStore holds the selection as a plain string, so the
             // brand is restored here — the same boundary the row mapper uses.
+            //
+            // The key is what makes the selection authoritative over whatever
+            // the panel was holding: without it, confirming a freeze on one
+            // resume and then picking another would leave that confirmation
+            // open, and confirming it would freeze a document the user never
+            // agreed to freeze.
+            key={selectedResumeId}
             resumeId={asResumeId(selectedResumeId)}
             onResumeChanged={() => void list.reload()}
+            onOutcome={setOutcome}
           />
         )}
       </div>

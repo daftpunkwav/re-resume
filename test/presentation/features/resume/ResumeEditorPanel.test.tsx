@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
 import { ResumeEditorPanel } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
+import type { OperationOutcome } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { FakeResumeServices } from '../../fakeResumeServices'
 import { createFakeResumeServices } from '../../fakeResumeServices'
 import {
@@ -56,6 +57,7 @@ interface Harness {
   readonly services: FakeResumeServices
   readonly resume: Resume
   readonly resumeChanged: Mock<() => void>
+  readonly onOutcome: Mock<(outcome: OperationOutcome | null) => void>
   stored(): DocumentState
 }
 
@@ -90,10 +92,12 @@ function stubWorkbench(
   servicesRef.current = services
 
   const resumeChanged = vi.fn<() => void>()
+  const onOutcome = vi.fn<(outcome: OperationOutcome | null) => void>()
   return {
     services,
     resume,
     resumeChanged,
+    onOutcome,
     stored: () => stored,
   }
 }
@@ -103,6 +107,7 @@ async function renderEditor(harness: Harness, resumeId: string = DRAFT_ID): Prom
     <ResumeEditorPanel
       resumeId={resumeId as Resume['id']}
       onResumeChanged={harness.resumeChanged}
+      onOutcome={harness.onOutcome}
     />,
   )
   // The panel reads the resume, then materializes and lays it out; the drawn
@@ -244,6 +249,34 @@ describe('ResumeEditorPanel', () => {
     expect(screen.getByText(/block-one/u)).toBeInTheDocument()
   })
 
+  it('builds the next measurement from the stored setup, not from a refused one', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+    // A document that refuses everything, the way a frozen one does.
+    harness.services.resumes.commit.mockRejectedValue(
+      new Error('这份简历已定稿，复制一份新的草稿再继续修改。'),
+    )
+
+    const width = screen.getByLabelText('页面宽度（pt）')
+    fireEvent.change(width, { target: { value: '620' } })
+    fireEvent.blur(width)
+    await screen.findByText('这份简历已定稿，复制一份新的草稿再继续修改。')
+
+    // The refused width never reached the document, so the next edit has to
+    // propose the stored width back — not the refused one alongside it.
+    const height = screen.getByLabelText('页面高度（pt）')
+    fireEvent.change(height, { target: { value: '700' } })
+    fireEvent.blur(height)
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(2))
+    const change = harness.services.resumes.commit.mock.calls[1]?.[1] as {
+      next: (state: DocumentState) => DocumentState
+    }
+    const proposed = change.next({ blocks: [], pageSetup: harness.resume.pageSetup }).pageSetup
+    expect(proposed.pageHeight).toBe(700)
+    expect(proposed.pageWidth).toBe(harness.resume.pageSetup.pageWidth)
+  })
+
   it('reports what stopped a refused change', async () => {
     const harness = stubWorkbench(makeResume())
     harness.services.resumes.commit.mockRejectedValue(
@@ -280,7 +313,14 @@ describe('ResumeEditorPanel', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '定稿' }))
 
     await waitFor(() => expect(harness.services.resumes.freeze).toHaveBeenCalledWith(DRAFT_ID))
-    expect(await screen.findByText('简历已定稿，导出将使用这份快照。')).toBeInTheDocument()
+    // The outcome is reported upwards: the workspace holds it, because a
+    // panel keyed by the selection would be remounted by its own notice.
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith({
+        tone: 'success',
+        title: '简历已定稿，导出将使用这份快照。',
+      }),
+    )
   })
 
   it('duplicates the document into a new draft', async () => {
@@ -292,6 +332,11 @@ describe('ResumeEditorPanel', () => {
     await waitFor(() =>
       expect(harness.services.resumes.duplicate).toHaveBeenCalledWith({ sourceResumeId: DRAFT_ID }),
     )
-    expect(await screen.findByText('已复制为一份新的草稿。')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith({
+        tone: 'success',
+        title: '已复制为一份新的草稿。',
+      }),
+    )
   })
 })
