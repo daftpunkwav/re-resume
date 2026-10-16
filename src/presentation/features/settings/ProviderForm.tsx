@@ -115,8 +115,11 @@ export function ProviderForm() {
           />
 
           {vaultPassword.length === 0 ? null : (
-            <Notice tone="success" title="凭据库已在本次会话解锁">
-              <p>这个密码不会离开内存，重新打开应用需要再输入一次。</p>
+            <Notice tone="info" title="凭据库密码已保存在本次会话">
+              {/* Nothing has opened the vault yet: the composition root reads
+                  this password when it boots, so claiming an unlock here would
+                  report a success no code has been able to observe. */}
+              <p>这个密码不会离开内存，重新打开应用需要再输入一次。它会在下次启动应用容器时被使用。</p>
             </Notice>
           )}
 

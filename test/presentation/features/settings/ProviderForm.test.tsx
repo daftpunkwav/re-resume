@@ -105,7 +105,8 @@ describe('ProviderForm', () => {
       expect(useProviderSettings.getState().vaultPassword).toBe('vault-passphrase')
     })
     expect(window.localStorage.getItem('reresume.provider')).toBeNull()
-    expect(await screen.findByText('凭据库已在本次会话解锁')).toBeInTheDocument()
+    // Nothing has opened the vault yet, so the form must not claim it did.
+    expect(await screen.findByText('凭据库密码已保存在本次会话')).toBeInTheDocument()
   })
 
   it('names what an agent run sends and where it goes', () => {
