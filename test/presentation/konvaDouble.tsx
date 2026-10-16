@@ -123,6 +123,8 @@ export function Rect(props: KonvaDoubleProps) {
   // Konva subscribes to its own events on the node rather than through React's
   // synthetic system, which has no dragmove at all. The double does the same,
   // which is why a test can fire a drag the component would really receive.
+  // Whether a node can be dragged is decided here, at mount, so the effect has
+  // to run again when the canvas takes a document read-only or writable.
   useEffect(() => {
     const element = elementRef.current
     if (element === null) return
@@ -130,7 +132,7 @@ export function Rect(props: KonvaDoubleProps) {
     for (const name of FORWARDED_EVENTS) {
       // Konva only drags a node that is draggable; a read-only document never
       // emits a drag at all, and the double must not invent one.
-      if (name.startsWith('onDrag') && latest.current.draggable !== true) continue
+      if (name.startsWith('onDrag') && props.draggable !== true) continue
       const type = name.slice(2).toLowerCase()
       const listener: EventListener = (domEvent) => {
         const current = latest.current[name]
@@ -144,7 +146,7 @@ export function Rect(props: KonvaDoubleProps) {
     return () => {
       for (const [type, listener] of attached) element.removeEventListener(type, listener)
     }
-  }, [])
+  }, [props.draggable])
 
   return (
     <div ref={elementRef} data-konva="rect" data-node-id={nodeId} {...measuredAttributes(props)} />
