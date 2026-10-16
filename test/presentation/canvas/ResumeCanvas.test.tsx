@@ -279,6 +279,23 @@ describe('ResumeCanvas', () => {
     })
   })
 
+  it('drops a flow block by its own centre rather than its top edge', () => {
+    const { onMoveBlock } = renderCanvas()
+    const node = blockNode('block-one')
+
+    // The block's top edge lands above the divider's middle, but the block's
+    // own middle does not. Measuring the two the same way is what keeps a tall
+    // block from jumping past a neighbour it is visibly still above.
+    grab(node, 20, 24.25)
+    release(node, 20, 24.25)
+
+    expect(onMoveBlock).toHaveBeenCalledWith({
+      kind: 'reorder',
+      blockId: 'block-one',
+      toIndex: 1,
+    })
+  })
+
   it('puts the dragged node back where the layout put it', () => {
     renderCanvas()
     const node = blockNode('block-one')

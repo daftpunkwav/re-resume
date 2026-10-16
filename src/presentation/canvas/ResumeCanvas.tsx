@@ -331,7 +331,12 @@ export function ResumeCanvas({
       onMoveBlock({
         kind: 'reorder',
         blockId,
-        toIndex: reorderIndexForDrop(layout.blocks, blockId, content.y),
+        // reorderIndexForDrop compares the drop point against the middle of
+        // every remaining block, so the dragged block has to be measured the
+        // same way. Its top edge says the block lands later than it does: a
+        // tall block dropped just above its neighbour looked like it belonged
+        // below it.
+        toIndex: reorderIndexForDrop(layout.blocks, blockId, content.y + laidOut.height / 2),
       })
     },
     [blocks, layout, onMoveBlock, page, zoom],
