@@ -27,7 +27,7 @@ beforeEach(() => {
 
 describe('ProviderForm', () => {
   it('writes the descriptor through the store and keeps it in local storage', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     render(<ProviderForm />)
 
     await user.selectOptions(screen.getByLabelText('服务类型'), 'anthropic')
@@ -57,7 +57,7 @@ describe('ProviderForm', () => {
 
   it('asks before clearing, and clears nothing until the dialog is confirmed', async () => {
     useProviderSettings.getState().saveSettings(SAVED)
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     render(<ProviderForm />)
 
     await user.click(screen.getByRole('button', { name: '清除模型服务配置' }))
@@ -76,7 +76,7 @@ describe('ProviderForm', () => {
 
   it('keeps the descriptor when the dialog is dismissed', async () => {
     useProviderSettings.getState().saveSettings(SAVED)
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     render(<ProviderForm />)
 
     await user.click(screen.getByRole('button', { name: '清除模型服务配置' }))
@@ -95,7 +95,7 @@ describe('ProviderForm', () => {
   })
 
   it('puts the unlocked password in memory and not in storage', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     render(<ProviderForm />)
 
     await user.type(screen.getByLabelText('凭据库密码'), 'vault-passphrase')

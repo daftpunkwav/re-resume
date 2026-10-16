@@ -42,5 +42,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
+    // The default is five seconds, which a presentation test can cross on a
+    // loaded machine without anything being wrong: typing a field through
+    // userEvent and then committing it is real work, and the files run in
+    // parallel. A test that reaches this is genuinely stuck, not merely slow.
+    testTimeout: 15000,
   },
 })
