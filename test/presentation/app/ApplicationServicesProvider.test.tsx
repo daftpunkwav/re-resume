@@ -125,25 +125,52 @@ describe('ApplicationServicesProvider', () => {
 
   it('retries with the password it already holds', async () => {
     const user = userEvent.setup({ delay: null })
+    const seen: string[] = []
     let attempt = 0
-    renderProvider(async () => {
+    renderProvider(async (options) => {
       attempt += 1
-      // The store already holds this password from a previous attempt, so the
-      // retry has to re-boot without anything about it having changed.
-      if (attempt < 3) throw new Error('凭据库没有解开')
+      seen.push(options.stronghold.password)
+      // Fails until the third boot, and only accepts the password entered, so
+      // a retry that lost it cannot pass by accident.
+      if (attempt < 3 || options.stronghold.password !== 'first') {
+        throw new Error('凭据库没有解开')
+      }
       return stubRoot()
     })
     await screen.findByText('无法连接本地应用容器')
 
-    const field = screen.getByLabelText('凭据库密码')
-    await user.type(field, 'first')
+    await user.type(screen.getByLabelText('凭据库密码'), 'first')
     await user.click(screen.getByRole('button', { name: '重试启动' }))
     await screen.findByText('无法连接本地应用容器')
 
+    // The second retry has to carry the same password even though writing it
+    // into the store again changes nothing there.
     await user.click(screen.getByRole('button', { name: '重试启动' }))
 
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
-    expect(attempt).toBe(3)
+    expect(seen).toEqual(['', 'first', 'first'])
+  })
+
+  it('retries with no password when the vault is not what failed', async () => {
+    const user = userEvent.setup({ delay: null })
+    const seen: string[] = []
+    let attempt = 0
+    renderProvider(async (options) => {
+      attempt += 1
+      seen.push(options.stronghold.password)
+      // A failure nothing the user typed could fix. Clearing the field is the
+      // only move left, so the retry must not require a password to be typed.
+      if (attempt < 3) throw new Error('端口被占用')
+      return stubRoot()
+    })
+    await screen.findByText('无法连接本地应用容器')
+
+    await user.click(screen.getByRole('button', { name: '重试启动' }))
+    await screen.findByText('无法连接本地应用容器')
+    await user.click(screen.getByRole('button', { name: '重试启动' }))
+
+    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
+    expect(seen).toEqual(['', '', ''])
   })
 
   it('closes a root that arrives after a newer rebuild superseded it', async () => {

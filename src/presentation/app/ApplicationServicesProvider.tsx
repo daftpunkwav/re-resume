@@ -203,8 +203,11 @@ function BootFailure({
           autoComplete="off"
           onChange={(event) => onPasswordChange(event.target.value)}
         />
+        {/* Deliberately never disabled. A boot can fail for a reason the
+            password has nothing to do with, and the way to try again without
+            one is exactly what that case needs. The retry counter re-runs the
+            boot even when the store already holds this password. */}
         <Button
-          disabled={password.length === 0}
           onClick={() => {
             unlockVault(password)
             onRetry()
