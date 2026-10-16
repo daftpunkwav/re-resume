@@ -88,55 +88,101 @@ async function* streamMessages(
 
   const openToolCalls = new Map<number, OpenToolCall>()
   for await (const data of response.serverSentEvents()) {
-    const event = requireRecord(parseJsonFrame(data), 'stream event')
-    const type = event.type
-    if (type === 'content_block_delta') {
-      const delta = requireRecord(event.delta, 'content_block_delta.delta')
-      if (delta.type === 'text_delta') {
-        const text = delta.text
-        if (typeof text === 'string' && text !== '') yield { type: 'text', textDelta: text }
-      } else if (delta.type === 'input_json_delta') {
-        const partial = delta.partial_json
-        const index = readBlockIndex(event)
-        const open = openToolCalls.get(index)
-        if (open === undefined) {
-          throw new Error(
-            `The stream sent argument fragments for content block ${index} without opening a tool_use block for it.`,
-          )
-        }
-        if (typeof partial === 'string') open.argsJson += partial
-      }
-      continue
-    }
-    if (type === 'content_block_start') {
-      const block = requireRecord(event.content_block, 'content_block_start.content_block')
-      if (block.type === 'tool_use') {
-        const name = block.name
-        if (typeof name !== 'string' || name === '') {
-          throw new Error('The stream opened a tool_use block without naming the tool.')
-        }
-        openToolCalls.set(readBlockIndex(event), { name, argsJson: '' })
-      }
-      continue
-    }
-    if (type === 'content_block_stop') {
-      const index = readBlockIndex(event)
-      const open = openToolCalls.get(index)
-      if (open === undefined) continue
-      openToolCalls.delete(index)
-      yield { type: 'toolCall', name: open.name, argsJson: open.argsJson }
-      continue
-    }
-    if (type === 'error') {
-      throw new Error(`The stream reported an error: ${JSON.stringify(event.error)}`)
-    }
+    const chunk = applyStreamEvent(
+      requireRecord(parseJsonFrame(data), 'stream event'),
+      openToolCalls,
+    )
+    if (chunk !== null) yield chunk
   }
   // A stream cut short after the last fragment still has to hand over what it
   // assembled rather than losing the call.
-  for (const [index, open] of [...openToolCalls.entries()].sort(([left], [right]) => left - right)) {
-    openToolCalls.delete(index)
-    yield { type: 'toolCall', name: open.name, argsJson: open.argsJson }
+  for (const chunk of closeEveryOpenToolCall(openToolCalls)) yield chunk
+}
+
+/**
+ * One event, one meaning. Each branch returns the chunk the port speaks, or
+ * null when the event only moved the state a later fragment reads.
+ */
+function applyStreamEvent(
+  event: Record<string, unknown>,
+  openToolCalls: Map<number, OpenToolCall>,
+): ModelChunk | null {
+  const type = event.type
+  if (type === 'content_block_delta') {
+    const text = readTextDelta(event)
+    if (text !== null) return { type: 'text', textDelta: text }
+    appendToolArguments(event, openToolCalls)
+    return null
   }
+  if (type === 'content_block_start') {
+    openToolUseBlock(event, openToolCalls)
+    return null
+  }
+  if (type === 'content_block_stop') return closeToolUseBlock(event, openToolCalls)
+  if (type === 'error') {
+    throw new Error(`The stream reported an error: ${JSON.stringify(event.error)}`)
+  }
+  return null
+}
+
+/** The text this delta carries, or null when it is not a text delta. */
+function readTextDelta(event: Record<string, unknown>): string | null {
+  const delta = requireRecord(event.delta, 'content_block_delta.delta')
+  if (delta.type !== 'text_delta') return null
+  const text = delta.text
+  return typeof text === 'string' && text !== '' ? text : null
+}
+
+function appendToolArguments(
+  event: Record<string, unknown>,
+  openToolCalls: Map<number, OpenToolCall>,
+): void {
+  const delta = requireRecord(event.delta, 'content_block_delta.delta')
+  if (delta.type !== 'input_json_delta') return
+  const index = readBlockIndex(event)
+  const open = openToolCalls.get(index)
+  if (open === undefined) {
+    throw new Error(
+      `The stream sent argument fragments for content block ${index} without opening a tool_use block for it.`,
+    )
+  }
+  if (typeof delta.partial_json === 'string') open.argsJson += delta.partial_json
+}
+
+function openToolUseBlock(
+  event: Record<string, unknown>,
+  openToolCalls: Map<number, OpenToolCall>,
+): void {
+  const block = requireRecord(event.content_block, 'content_block_start.content_block')
+  if (block.type !== 'tool_use') return
+  const name = block.name
+  if (typeof name !== 'string' || name === '') {
+    throw new Error('The stream opened a tool_use block without naming the tool.')
+  }
+  openToolCalls.set(readBlockIndex(event), { name, argsJson: '' })
+}
+
+function closeToolUseBlock(
+  event: Record<string, unknown>,
+  openToolCalls: Map<number, OpenToolCall>,
+): ModelChunk | null {
+  const index = readBlockIndex(event)
+  const open = openToolCalls.get(index)
+  if (open === undefined) return null
+  openToolCalls.delete(index)
+  return { type: 'toolCall', name: open.name, argsJson: open.argsJson }
+}
+
+/** In block order, so a stream that stops between two calls still emits both. */
+function closeEveryOpenToolCall(openToolCalls: Map<number, OpenToolCall>): ModelChunk[] {
+  const chunks: ModelChunk[] = []
+  for (const [index, open] of [...openToolCalls.entries()].sort(
+    ([left], [right]) => left - right,
+  )) {
+    openToolCalls.delete(index)
+    chunks.push({ type: 'toolCall', name: open.name, argsJson: open.argsJson })
+  }
+  return chunks
 }
 
 function buildRequestBody(
