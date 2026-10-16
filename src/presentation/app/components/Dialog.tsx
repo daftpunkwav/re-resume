@@ -51,10 +51,23 @@ export function Dialog({
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
+  const busyRef = useRef(busy)
 
   useEffect(() => {
     onCloseRef.current = onClose
-  }, [onClose])
+    busyRef.current = busy
+  }, [busy, onClose])
+
+  /**
+   * A pending operation owns the dialog: dismissing it now unmounts whatever
+   * the caller put inside to report the result, which is the same reason the
+   * footer buttons are disabled. Both live in refs so that neither a fresh
+   * onClose nor a change of busy restarts the focus effect below.
+   */
+  const dismiss = (): void => {
+    if (busyRef.current) return
+    onCloseRef.current()
+  }
 
   /**
    * A dialog owns the keyboard while it is open: focus moves into it once,
@@ -69,7 +82,7 @@ export function Dialog({
     panelRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onCloseRef.current()
+        dismiss()
         return
       }
       if (event.key !== 'Tab') return
@@ -101,7 +114,7 @@ export function Dialog({
     <div
       className="dialog-scrim"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget) dismiss()
       }}
     >
       <div
@@ -114,7 +127,7 @@ export function Dialog({
       >
         <header className="dialog-head">
           <h2 className="dialog-title">{title}</h2>
-          <Button variant="ghost" size="small" iconOnly icon="close" aria-label="关闭" onClick={onClose} />
+          <Button variant="ghost" size="small" iconOnly icon="close" aria-label="关闭" onClick={dismiss} disabled={busy} />
         </header>
         <div className="dialog-body">
           {description === undefined ? null : <p className="dialog-description">{description}</p>}

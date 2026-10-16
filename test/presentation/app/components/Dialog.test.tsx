@@ -44,6 +44,32 @@ function openDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   return user.click(screen.getByRole('button', { name: '打开' }))
 }
 
+/**
+ * `busy` arrives on the second render rather than at mount, so a dialog that
+ * is only ever busy after a click still exercises the guard.
+ */
+function BusyHarness() {
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(true)
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(true)}>
+        打开
+      </button>
+      <button type="button" onClick={() => setBusy(true)}>
+        开始
+      </button>
+      <Dialog
+        open={open}
+        title="定稿这份简历"
+        busy={busy}
+        onConfirm={() => undefined}
+        onClose={() => setOpen(false)}
+      />
+    </div>
+  )
+}
+
 describe('dialog focus', () => {
   it('leaves focus where it is when the parent re-renders', async () => {
     const user = userEvent.setup()
@@ -93,5 +119,40 @@ describe('dialog focus', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(opener)
+  })
+})
+
+describe('dialog dismissal while busy', () => {
+  it('ignores Escape, the scrim and the close button while an operation runs', async () => {
+    const user = userEvent.setup()
+    render(<BusyHarness />)
+    const dialog = screen.getByRole('dialog')
+
+    // The operation starts after the dialog opened, so the guard has to be
+    // read at the moment it fires rather than captured when it mounted.
+    await user.click(screen.getByRole('button', { name: '开始' }))
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBe(dialog)
+
+    fireEvent.mouseDown(screen.getByRole('dialog').parentElement as HTMLElement)
+    expect(screen.getByRole('dialog')).toBe(dialog)
+
+    // Every way out is closed, so nothing the caller renders inside to report
+    // the result can be unmasked by a stray dismissal.
+    expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '确定' }))
+    expect(screen.getByRole('dialog')).toBe(dialog)
+  })
+
+  it('dismisses again once the operation is no longer pending', async () => {
+    const user = userEvent.setup()
+    render(<BusyHarness />)
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
