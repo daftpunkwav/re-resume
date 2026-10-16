@@ -50,6 +50,7 @@ export class InMemoryResumeRepository implements ResumeRepository {
     id: ResumeId,
     state: DocumentState,
     change: DocumentChangeMeta,
+    expectedRevisionId: RevisionId,
   ): Promise<Revision> {
     const resume = this.requireResume(id)
     if (resume.status === 'frozen') {
@@ -61,6 +62,13 @@ export class InMemoryResumeRepository implements ResumeRepository {
     }
     const history = this.historyOf(id)
     const cursor = this.requireRevision(resume.currentRevision)
+    if (cursor.id !== expectedRevisionId) {
+      throw new DomainError(
+        'cursorNotOnLiveChain',
+        'This resume took another revision while the change was being prepared. Reload it and try again.',
+        { entity: 'resume', id, blockers: [expectedRevisionId, cursor.id] },
+      )
+    }
     if (cursor.supersededAt !== null) {
       throw new DomainError('cursorNotOnLiveChain', 'The cursor sits on an abandoned branch.', {
         entity: 'resume',

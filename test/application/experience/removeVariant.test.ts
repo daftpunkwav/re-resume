@@ -86,6 +86,7 @@ async function resumeReferencing(
     RESUME_ID,
     { blocks: [experienceBlock(BLOCK_ID, variantId)], pageSetup: A4_PAGE_SETUP },
     { label: '加入经历块', origin: 'user', runId: null },
+    revisionId,
   )
 }
 

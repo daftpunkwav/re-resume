@@ -73,9 +73,13 @@ export class SqliteResumeRepository implements ResumeRepository {
     const rows = await this.#database.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
     const row = rows[0]
     if (row === undefined) return null
-    const revisions = await this.#readHistory(this.#database, id)
+    // Only the revision the cursor names is read. Every document change starts
+    // with this lookup, and superseded revisions are never trimmed, so loading
+    // the whole chain to pick one row would make editing more expensive the
+    // longer a resume's abandoned history grew.
+    const cursor = await this.#readRevisionAt(row.current_revision_id, id)
     const snapshots = await this.#readSnapshots(id)
-    return hydrateResume(row, this.#requireCursor(row, revisions), snapshots)
+    return hydrateResume(row, cursor, snapshots)
   }
 
   async listAll(): Promise<readonly Resume[]> {
@@ -101,6 +105,7 @@ export class SqliteResumeRepository implements ResumeRepository {
     id: ResumeId,
     state: DocumentState,
     change: DocumentChangeMeta,
+    expectedRevisionId: RevisionId,
   ): Promise<Revision> {
     return this.#database.transaction(async (tx) => {
       const resumeRow = await this.#requireResumeRow(tx, id)
@@ -113,6 +118,16 @@ export class SqliteResumeRepository implements ResumeRepository {
       }
       const history = await this.#readHistory(tx, id)
       const cursor = this.#requireCursor(resumeRow, history)
+      if (cursor.id !== expectedRevisionId) {
+        // Reached from outside the queue this transaction holds: another commit
+        // appended a revision while this change was being prepared, so writing
+        // now would discard that edit.
+        throw new DomainError(
+          'cursorNotOnLiveChain',
+          'This resume took another revision while the change was being prepared. Reload it and try again.',
+          { entity: 'resume', id, blockers: [expectedRevisionId, cursor.id] },
+        )
+      }
       if (cursor.supersededAt !== null) {
         throw new DomainError(
           'cursorNotOnLiveChain',
@@ -252,6 +267,22 @@ export class SqliteResumeRepository implements ResumeRepository {
       )
       await this.#insertRevision(tx, revision)
     })
+  }
+
+  async #readRevisionAt(revisionId: string, resumeId: ResumeId): Promise<Revision> {
+    const rows = await this.#database.select<DocumentRevisionRow>(
+      'SELECT * FROM document_revision WHERE id = $1 AND resume_id = $2',
+      [revisionId, resumeId],
+    )
+    const row = rows[0]
+    if (row === undefined) {
+      throw new RowMappingError(
+        'resume.current_revision_id',
+        'names a revision that does not belong to this resume',
+        revisionId,
+      )
+    }
+    return fromDocumentRevisionRow(row)
   }
 
   async #insertRevision(tx: SqlDatabase, revision: Revision): Promise<void> {

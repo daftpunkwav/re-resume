@@ -22,11 +22,17 @@ export interface ResumeRepository {
    * Appends a revision (full DocumentState), advances the cursor, supersedes
    * the abandoned branch and applies the trim rule — atomically. Partial
    * application of any of these steps is a contract violation.
+   *
+   * `expectedRevisionId` is the revision the caller read `state` from. Two
+   * commits that both read the same revision would otherwise each overwrite the
+   * other with a state derived from the same base, and both would report
+   * success; the second one to reach this call is refused instead.
    */
   saveDocument(
     id: ResumeId,
     state: DocumentState,
     change: DocumentChangeMeta,
+    expectedRevisionId: RevisionId,
   ): Promise<Revision>
   /** Undo/redo: moves the cursor without creating a revision. Refused for frozen resumes. */
   moveCursor(id: ResumeId, revisionId: RevisionId): Promise<void>

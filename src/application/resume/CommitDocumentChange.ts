@@ -41,7 +41,7 @@ export async function commitDocumentChange(
   })
   assertUniqueBlocks(resumeId, state.blocks)
   await assertBlocksMayBeReferenced(experienceRepo, state.blocks)
-  return resumeRepo.saveDocument(resumeId, state, change)
+  return resumeRepo.saveDocument(resumeId, state, change, resume.currentRevision)
 }
 
 /**

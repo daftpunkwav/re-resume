@@ -13,7 +13,9 @@
 //!
 //! Replacing the pool with a one-connection pool settles both: there is only one
 //! connection to be on, and the connect option applies `PRAGMA foreign_keys = ON`
-//! to it. The TypeScript seam keeps a statement mutex on top, so two write
+//! to it. Retirement is disabled as well, because a pool that replaces its one
+//! connection does so between statements, and a transaction is a series of
+//! statements. The TypeScript seam keeps a statement mutex on top, so two write
 //! transactions still cannot interleave on that single connection.
 
 use sqlx::sqlite::SqlitePoolOptions;
@@ -37,8 +39,17 @@ pub async fn pin_sqlite_connection(
         return Err(format!("database {db} is not a loaded SQLite database"));
     };
     let options: SqliteConnectOptions = pool.connect_options().as_ref().clone();
+    // Retirement is off: the plugin acquires a connection per statement, so a
+    // connection closed between BEGIN IMMEDIATE and COMMIT would roll the
+    // transaction back on one connection and let the statements that follow run
+    // in autocommit on another. The default lifetime (30 min) and idle timeout
+    // (10 min) are both long enough to catch a slow application, and neither
+    // is observable from here - a database this application opens is opened
+    // once per process and closed with it.
     let pinned = SqlitePoolOptions::new()
         .max_connections(1)
+        .max_lifetime(None)
+        .idle_timeout(None)
         .connect_with(options.foreign_keys(true))
         .await
         .map_err(|error| error.to_string())?;

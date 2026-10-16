@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { SqliteResumeRepository } from '../../../src/infrastructure/persistence/SqliteResumeRepository'
 import type { SqlDatabase, SqlQueryResult, SqlValue } from '../../../src/infrastructure/persistence/sqlite'
 import type { DocumentState } from '../../../src/domain/resume/DocumentChange'
+import type { Revision } from '../../../src/domain/resume/Revision'
 import type { ResumeSnapshot } from '../../../src/domain/resume/ResumeSnapshot'
 import type { RevisionId } from '../../../src/domain/shared/branded-id'
 import { createResume } from '../../../src/domain/resume/Resume'
@@ -85,10 +86,24 @@ describe('SqliteResumeRepository', () => {
 
   const userChange = (label: string) => ({ label, origin: 'user', runId: null }) as const
 
+  /**
+   * Saves the way the use case does: the state is derived from the revision the
+   * cursor names, and that revision is what the save expects to still be there.
+   */
+  async function saveNext(
+    repository: SqliteResumeRepository,
+    state: DocumentState,
+    label: string,
+  ): Promise<Revision> {
+    const current = await repository.findById(RESUME_ID)
+    if (current === null) throw new Error('the seeded resume should exist')
+    return repository.saveDocument(RESUME_ID, state, userChange(label), current.currentRevision)
+  }
+
   it('appends a revision at the next sequence number and moves the cursor', async () => {
     const { repository } = await newRepository()
 
-    const revision = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('添加文本'))
+    const revision = await saveNext(repository, FIRST_STATE, '添加文本')
 
     expect(revision.seq).toBe(2)
     expect(revision.label).toBe('添加文本')
@@ -111,19 +126,46 @@ describe('SqliteResumeRepository', () => {
   it('runs the append, the cursor move and the trim inside one transaction', async () => {
     const { database, repository } = await newRepository()
 
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('添加文本'))
+    await saveNext(repository, FIRST_STATE, '添加文本')
 
-    expect(database.executedSql[0]).toBe('BEGIN IMMEDIATE')
-    expect(database.executedSql).toContain('COMMIT')
-    expect(database.executedSql).not.toContain('ROLLBACK')
+    const statements = database.executedSql
+    const opened = statements.indexOf('BEGIN IMMEDIATE')
+    const appended = statements.findIndex((sql) => sql.startsWith('INSERT INTO document_revision'))
+    const committed = statements.indexOf('COMMIT')
+    expect(opened).toBeGreaterThanOrEqual(0)
+    expect(appended).toBeGreaterThan(opened)
+    expect(committed).toBeGreaterThan(appended)
+    expect(statements).not.toContain('ROLLBACK')
+  })
+
+  it('refuses a save derived from a revision the cursor has already left', async () => {
+    const { repository } = await newRepository()
+    const loaded = await repository.findById(RESUME_ID)
+    if (loaded === null) throw new Error('the seeded resume should exist')
+    await saveNext(repository, FIRST_STATE, '先改一次')
+
+    // A second caller that read the resume before the first commit landed would
+    // otherwise write a state derived from the same base and silently discard
+    // the first edit.
+    await expect(
+      repository.saveDocument(
+        RESUME_ID,
+        SECOND_STATE,
+        userChange('后改一次'),
+        loaded.currentRevision,
+      ),
+    ).rejects.toMatchObject({ code: 'cursorNotOnLiveChain' })
+
+    const reloaded = await repository.findById(RESUME_ID)
+    expect(reloaded?.blocks).toEqual(FIRST_STATE.blocks)
   })
 
   it('supersedes the abandoned branch but keeps its rows for audit', async () => {
     const { repository } = await newRepository()
-    const second = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    const second = await saveNext(repository, FIRST_STATE, '第二版')
     await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
 
-    const third = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第三版'))
+    const third = await saveNext(repository, FIRST_STATE, '第三版')
 
     expect(third.seq).toBe(3)
     const abandoned = await repository.readRevision(second.id)
@@ -132,10 +174,10 @@ describe('SqliteResumeRepository', () => {
 
   it('never reuses a sequence number, even after a branch is abandoned', async () => {
     const { repository } = await newRepository()
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    await saveNext(repository, FIRST_STATE, '第二版')
     await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
 
-    const third = await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第三版'))
+    const third = await saveNext(repository, SECOND_STATE, '第三版')
 
     expect(third.seq).toBe(3)
   })
@@ -144,17 +186,17 @@ describe('SqliteResumeRepository', () => {
     const { repository } = await newRepository()
     await repository.appendSnapshot(frozenSnapshot())
 
-    await expect(repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('再改一次'))).rejects.toMatchObject(
+    await expect(saveNext(repository, FIRST_STATE, '再改一次')).rejects.toMatchObject(
       { code: 'frozenResumeImmutable' },
     )
   })
 
   it('trims to the newest live revisions and never below the cursor', async () => {
     const { repository } = await newRepository(2)
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
-    await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第三版'))
-    const fourth = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第四版'))
-    const fifth = await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第五版'))
+    await saveNext(repository, FIRST_STATE, '第二版')
+    await saveNext(repository, SECOND_STATE, '第三版')
+    const fourth = await saveNext(repository, FIRST_STATE, '第四版')
+    const fifth = await saveNext(repository, SECOND_STATE, '第五版')
 
     expect(await repository.readRevision(INITIAL_REVISION_ID)).toBeNull()
     expect(await repository.readRevision(fourth.id)).not.toBeNull()
@@ -165,19 +207,19 @@ describe('SqliteResumeRepository', () => {
 
   it('keeps the whole redo path that leads back to the trimmed window', async () => {
     const { repository } = await newRepository(2)
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
-    await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第三版'))
-    const fourth = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第四版'))
+    await saveNext(repository, FIRST_STATE, '第二版')
+    await saveNext(repository, SECOND_STATE, '第三版')
+    const fourth = await saveNext(repository, FIRST_STATE, '第四版')
 
     expect((await repository.readRevision(fourth.id))?.seq).toBe(4)
   })
 
   it('never trims a superseded row, which is kept for audit', async () => {
     const { repository } = await newRepository(2)
-    const second = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    const second = await saveNext(repository, FIRST_STATE, '第二版')
     await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
-    const third = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第三版'))
-    await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第四版'))
+    const third = await saveNext(repository, FIRST_STATE, '第三版')
+    await saveNext(repository, SECOND_STATE, '第四版')
 
     expect(await repository.readRevision(second.id)).not.toBeNull()
     expect(await repository.readRevision(third.id)).not.toBeNull()
@@ -185,8 +227,8 @@ describe('SqliteResumeRepository', () => {
 
   it('restores the document state the cursor lands on', async () => {
     const { repository } = await newRepository()
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
-    await repository.saveDocument(RESUME_ID, SECOND_STATE, userChange('第三版'))
+    await saveNext(repository, FIRST_STATE, '第二版')
+    await saveNext(repository, SECOND_STATE, '第三版')
 
     await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
 
@@ -197,7 +239,7 @@ describe('SqliteResumeRepository', () => {
 
   it('refuses to move the cursor on a frozen resume', async () => {
     const { repository } = await newRepository()
-    const second = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    const second = await saveNext(repository, FIRST_STATE, '第二版')
     await repository.appendSnapshot(frozenSnapshot())
 
     await expect(repository.moveCursor(RESUME_ID, second.id)).rejects.toMatchObject({
@@ -207,9 +249,9 @@ describe('SqliteResumeRepository', () => {
 
   it('refuses to move the cursor onto a superseded revision', async () => {
     const { repository } = await newRepository()
-    const second = await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    const second = await saveNext(repository, FIRST_STATE, '第二版')
     await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第三版'))
+    await saveNext(repository, FIRST_STATE, '第三版')
 
     await expect(repository.moveCursor(RESUME_ID, second.id)).rejects.toMatchObject({
       code: 'cursorNotOnLiveChain',
@@ -237,7 +279,7 @@ describe('SqliteResumeRepository', () => {
     const { database, repository } = await newRepository()
     database.failWhenStatementContains = 'INSERT INTO document_revision'
 
-    await expect(repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('会失败'))).rejects.toThrow()
+    await expect(saveNext(repository, FIRST_STATE, '会失败')).rejects.toThrow()
 
     const reloaded = await repository.findById(RESUME_ID)
     expect(reloaded?.currentRevision).toBe(INITIAL_REVISION_ID)
@@ -247,7 +289,7 @@ describe('SqliteResumeRepository', () => {
 
   it('freezes the resume together with the snapshot that justifies it', async () => {
     const { repository } = await newRepository()
-    await repository.saveDocument(RESUME_ID, FIRST_STATE, userChange('第二版'))
+    await saveNext(repository, FIRST_STATE, '第二版')
 
     await repository.appendSnapshot(frozenSnapshot())
 

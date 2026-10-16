@@ -70,6 +70,7 @@ async function resumeReferencing(
       pageSetup: A4_PAGE_SETUP,
     },
     { label: '加入经历块', origin: 'user', runId: null },
+    revisionId,
   )
 }
 
