@@ -95,8 +95,8 @@ describe('BlockPalette', () => {
 
   it('falls back to the first variant when the chosen one is withdrawn', async () => {
     const user = userEvent.setup()
-    const { onAddBlock } = renderPalette()
     givenLibrary([libraryWith('var-arch', 'var-sell')])
+    const { onAddBlock } = renderPalette()
 
     await user.selectOptions(await screen.findByLabelText('经历表述'), 'exp-one::var-sell')
 
