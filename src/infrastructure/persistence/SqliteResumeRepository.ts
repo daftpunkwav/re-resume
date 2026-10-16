@@ -227,6 +227,14 @@ export class SqliteResumeRepository implements ResumeRepository {
    * Freezing is two writes: the snapshot that justifies the status, and the
    * status itself. Invariant 3 holds because both land together — a frozen
    * resume without its snapshot is unreachable, not merely unlikely.
+   *
+   * Both conditions the freeze was prepared against are re-read here rather
+   * than trusted: the caller read the resume and materialized it before calling,
+   * and a commit or a second freeze landing in that window would otherwise leave
+   * a snapshot describing a revision the resume is no longer on, or a second
+   * snapshot on a resume that is already frozen. The refusal is raised before
+   * the insert, so nothing is written; the status is in the UPDATE's condition
+   * as well, so the transition itself cannot apply to a frozen row.
    */
   async appendSnapshot(
     snapshot: ResumeSnapshot,
@@ -234,25 +242,31 @@ export class SqliteResumeRepository implements ResumeRepository {
   ): Promise<void> {
     const row = toResumeSnapshotRow(snapshot)
     await this.#database.transaction(async (tx) => {
-      await tx.execute(
-        `INSERT INTO resume_snapshot (id, resume_id, seq, materialized_json, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [row.id, row.resume_id, row.seq, row.materialized_json, row.created_at],
-      )
-      // The cursor is part of the condition rather than a separate read: the
-      // rowsAffected count is what says the resume was still where the
-      // snapshot was cut from, and it is taken inside this transaction.
-      const frozen = await tx.execute(
-        'UPDATE resume SET status = $1, updated_at = $2 WHERE id = $3 AND current_revision_id = $4',
-        ['frozen', snapshot.createdAt, snapshot.resumeId, expectedRevisionId],
-      )
-      if (frozen.rowsAffected !== 1) {
+      const resumeRow = await this.#requireResumeRow(tx, snapshot.resumeId)
+      if (resumeRow.status === 'frozen') {
+        throw new DomainError(
+          'frozenResumeImmutable',
+          'This resume is already frozen and keeps the snapshot it was frozen at.',
+          { entity: 'resume', id: snapshot.resumeId, blockers: [] },
+        )
+      }
+      if (resumeRow.current_revision_id !== expectedRevisionId) {
         throw new DomainError(
           'cursorNotOnLiveChain',
           'This resume took another revision while it was being finalized. Reload it and try again.',
           { entity: 'resume', id: snapshot.resumeId, blockers: [expectedRevisionId] },
         )
       }
+      await tx.execute(
+        `INSERT INTO resume_snapshot (id, resume_id, seq, materialized_json, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [row.id, row.resume_id, row.seq, row.materialized_json, row.created_at],
+      )
+      await tx.execute(
+        `UPDATE resume SET status = $1, updated_at = $2
+         WHERE id = $3 AND current_revision_id = $4 AND status = $5`,
+        ['frozen', snapshot.createdAt, snapshot.resumeId, expectedRevisionId, 'draft'],
+      )
     })
   }
 

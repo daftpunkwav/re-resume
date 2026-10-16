@@ -210,6 +210,20 @@ describe('SqliteResumeRepository', () => {
     expect(reloaded?.snapshots).toHaveLength(0)
   })
 
+  it('refuses a second freeze of a resume that is already frozen', async () => {
+    const { repository } = await newRepository()
+    await freezeAsOfCurrent(repository)
+
+    // The cursor has not moved, so the expected-revision check alone would let a
+    // second snapshot land on a resume that is frozen read-only.
+    await expect(
+      repository.appendSnapshot(frozenSnapshot({ seq: 2, id: asSnapshotId('snap-2') }), await currentRevisionOf(repository)),
+    ).rejects.toMatchObject({ code: 'frozenResumeImmutable' })
+
+    const reloaded = await repository.findById(RESUME_ID)
+    expect(reloaded?.snapshots).toHaveLength(1)
+  })
+
   it('refuses a new revision on a frozen resume', async () => {
     const { repository } = await newRepository()
     await freezeAsOfCurrent(repository)
@@ -355,7 +369,9 @@ describe('SqliteResumeRepository', () => {
   })
 })
 
-function frozenSnapshot(): ResumeSnapshot {
+function frozenSnapshot(
+  overrides: Partial<Pick<ResumeSnapshot, 'id' | 'seq'>> = {},
+): ResumeSnapshot {
   return {
     id: asSnapshotId('snap-1'),
     resumeId: RESUME_ID,
@@ -363,7 +379,14 @@ function frozenSnapshot(): ResumeSnapshot {
     materializedBlocks: [],
     pageSetup: { ...A4_PAGE_SETUP, marginLeft: 48 },
     createdAt: NOW,
+    ...overrides,
   }
+}
+
+async function currentRevisionOf(repository: SqliteResumeRepository): Promise<RevisionId> {
+  const current = await repository.findById(RESUME_ID)
+  if (current === null) throw new Error('the seeded resume should exist')
+  return current.currentRevision
 }
 
 async function seedForeignResume(repository: SqliteResumeRepository): Promise<RevisionId> {

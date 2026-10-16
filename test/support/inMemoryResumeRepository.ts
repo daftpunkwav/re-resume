@@ -147,6 +147,13 @@ export class InMemoryResumeRepository implements ResumeRepository {
     expectedRevisionId: RevisionId,
   ): Promise<void> {
     const resume = this.requireResume(snapshot.resumeId)
+    if (resume.status === 'frozen') {
+      throw new DomainError(
+        'frozenResumeImmutable',
+        'This resume is already frozen and keeps the snapshot it was frozen at.',
+        { entity: 'resume', id: snapshot.resumeId, blockers: [] },
+      )
+    }
     if (resume.currentRevision !== expectedRevisionId) {
       throw new DomainError(
         'cursorNotOnLiveChain',
