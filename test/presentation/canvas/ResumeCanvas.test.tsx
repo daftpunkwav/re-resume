@@ -9,7 +9,7 @@
  * not covered here and cannot be in jsdom.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
@@ -29,6 +29,7 @@ import {
 import type { LaidOutBlock } from '../../../src/domain/resume/PageLayout'
 import { konvaNodePositions, resetKonvaNodePositions } from '../konvaDouble'
 import { absoluteBlock, dividerBlock, layoutWithPages, textBlock } from '../resumeFixtures'
+import { TestResizeObserver } from '../../setup'
 
 vi.mock('react-konva', async () => {
   const double = await import('../konvaDouble')
@@ -314,6 +315,40 @@ describe('ResumeCanvas', () => {
     release(blockNode('block-one'), 24, 30)
 
     expect(onMoveBlock).not.toHaveBeenCalled()
+  })
+
+  it('re-fits when the frame itself changes size and the window does not', () => {
+    renderCanvas()
+    // jsdom never lays out, so fit-to-width starts pinned at the floor.
+    expect(screen.getByText('25%')).toBeInTheDocument()
+
+    const observer = TestResizeObserver.watching()[0]
+    expect(observer).toBeDefined()
+    const host = observer?.targets[0] as HTMLElement
+    host.getBoundingClientRect = () => ({ width: 1200, height: 900 }) as DOMRect
+
+    act(() => observer?.report(1200, 900))
+
+    expect(screen.getByText('185%')).toBeInTheDocument()
+  })
+
+  it('stops watching the frame when it unmounts', () => {
+    const { unmount } = render(
+      <ResumeCanvas
+        layout={layoutWithPages([TWO_LINE_BLOCK])}
+        page={A4_PAGE_SETUP}
+        blocks={[textBlock('block-one', '甲\n乙')]}
+        editable
+        selectedBlockId={null}
+        onSelectBlock={vi.fn()}
+        onMoveBlock={vi.fn()}
+      />,
+    )
+    expect(TestResizeObserver.watching()).not.toHaveLength(0)
+
+    unmount()
+
+    expect(TestResizeObserver.watching()).toHaveLength(0)
   })
 
   it('removes its resize listener when it unmounts', () => {

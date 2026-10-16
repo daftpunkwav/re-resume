@@ -264,7 +264,17 @@ export function ResumeCanvas({
     }
     measure()
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    // The window is not the only thing that resizes the frame: a pane opening
+    // beside it, a sidebar collapsing or a zoom change all move the host's box
+    // without a window resize ever firing. Fit-to-width reads the host width,
+    // so a stale measurement leaves the zoom describing a width that is no
+    // longer there.
+    const observer = new ResizeObserver(measure)
+    observer.observe(host)
+    return () => {
+      window.removeEventListener('resize', measure)
+      observer.disconnect()
+    }
   }, [])
 
   const zoom = zoomOverride ?? fitWidthZoom(page.pageWidth, viewport.width)
