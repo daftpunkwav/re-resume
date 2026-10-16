@@ -37,6 +37,12 @@
     // a schema-version table.
     "sql:allow-execute",
 
+    // The connection pool itself is not covered by a permission: it is pinned
+    // to one connection by pin_sqlite_connection (src-tauri/src/connection.rs),
+    // an application command rather than a plugin one, so it carries no entry
+    // here. It takes the connection string and changes how the database is
+    // pooled — it reads no user data and opens no other file.
+
     // --- Outbound HTTP --------------------------------------------------
     // `http:default` enables the fetch command family and nothing else. The
     // origins below are what narrow it: the WebView's own fetch cannot reach a

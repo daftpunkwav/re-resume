@@ -7,16 +7,18 @@
  * Node without a WebView.
  *
  * Constraints:
- * - `@tauri-apps/plugin-sql` 2.6.0 exposes execute, select and close only —
- *   there is no transaction command. Transactions are therefore issued as SQL
- *   (`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`). Whether the plugin keeps one
- *   transaction open across several execute calls is unverified (spec section
- *   11); if it does not, the repository composition must move to a single Rust
- *   command and this file is the only place that changes.
- * - SQLite defaults foreign keys OFF, and the schema's ON DELETE CASCADE and
- *   ON DELETE RESTRICT clauses are inert until it is on. The pragma is set
- *   explicitly on open and read back, because a pragma that silently does not
- *   apply would turn every cascade delete into an orphaned row.
+ * - The plugin pools its connections and routes each execute/select call to
+ *   whichever one is free, so BEGIN IMMEDIATE and COMMIT issued as separate
+ *   calls are not guaranteed to reach the same connection. openSqliteDatabase
+ *   therefore asks the native shell to pin the database to a single connection
+ *   (src-tauri/src/connection.rs), which is also where foreign key enforcement
+ *   is configured for that connection rather than issued once and forgotten.
+ * - Statements are serialised through a promise chain. SQLite tolerates one
+ *   writer, and without the chain a second transaction would BEGIN while the
+ *   first is still open — which SQLite answers with an error, and whose outcome
+ *   depends on which caller got there first. Statements issued inside an open
+ *   transaction bypass the chain; that is what the transaction-scoped
+ *   SqlDatabase handed to work is for.
  * - IMMEDIATE, not DEFERRED: saveDocument reads the chain before it writes, and
  *   a deferred transaction that upgrades from a read to a write is the classic
  *   way to hit SQLITE_BUSY.
@@ -37,8 +39,12 @@ export interface SqlDatabase {
    * Runs work in a write transaction. The work either completes and commits,
    * or every statement it issued is rolled back — partial application of a
    * composite write is a contract violation, not a degraded outcome.
+   *
+   * The database handed to work is scoped to this transaction: its statements go
+   * straight to the connection instead of queueing behind the lock the
+   * transaction itself holds.
    */
-  transaction<T>(work: () => Promise<T>): Promise<T>
+  transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T>
 }
 
 /**
@@ -48,44 +54,48 @@ export interface SqlDatabase {
  * (spec section 6.2).
  */
 export async function openSqliteDatabase(connectionString: string): Promise<SqlDatabase> {
-  const { default: Database } = await import('@tauri-apps/plugin-sql')
-  return new PluginSqlDatabase(await Database.load(connectionString))
+  const [{ default: Database }, { invoke }] = await Promise.all([
+    import('@tauri-apps/plugin-sql'),
+    import('@tauri-apps/api/core'),
+  ])
+  const connection = await Database.load(connectionString)
+  // Before the first query: the plugin's own pool is still in place, and this is
+  // the only point at which it can be replaced.
+  await invoke('pin_sqlite_connection', { db: connectionString })
+  return new PluginSqlDatabase(connection)
 }
 
 /** The only place `@tauri-apps/plugin-sql` is referenced at runtime. */
 class PluginSqlDatabase implements SqlDatabase {
   readonly #connection: PluginDatabase
-  #transactionDepth = 0
+  /** Resolves when every statement queued before the last one has settled. */
+  #queue: Promise<unknown> = Promise.resolve()
 
   constructor(connection: PluginDatabase) {
     this.#connection = connection
   }
 
-  async execute(query: string, bindValues?: readonly SqlValue[]): Promise<SqlQueryResult> {
-    return this.#connection.execute(query, bindValues === undefined ? undefined : [...bindValues])
+  execute(query: string, bindValues?: readonly SqlValue[]): Promise<SqlQueryResult> {
+    return this.#queued(() => this.#connection.execute(query, spread(bindValues)))
   }
 
-  async select<T>(query: string, bindValues?: readonly SqlValue[]): Promise<readonly T[]> {
-    return this.#connection.select<T[]>(query, bindValues === undefined ? undefined : [...bindValues])
+  select<T>(query: string, bindValues?: readonly SqlValue[]): Promise<readonly T[]> {
+    return this.#queued(() => this.#connection.select<T[]>(query, spread(bindValues)))
   }
 
-  async transaction<T>(work: () => Promise<T>): Promise<T> {
-    // SQLite has no nested transactions: a second BEGIN fails outright. Work
-    // issued from inside an open transaction therefore joins that transaction,
-    // which preserves all-or-nothing for the whole nest.
-    if (this.#transactionDepth > 0) return work()
-    await this.execute('BEGIN IMMEDIATE')
-    this.#transactionDepth += 1
-    try {
-      const result = await work()
-      await this.execute('COMMIT')
-      return result
-    } catch (error) {
-      await this.#rollbackAfterFailure(error)
-      throw error
-    } finally {
-      this.#transactionDepth -= 1
-    }
+  async transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T> {
+    return this.#queued(async () => {
+      const tx = new OpenTransaction(this.#connection)
+      await tx.execute('BEGIN IMMEDIATE')
+      try {
+        const result = await work(tx)
+        await tx.execute('COMMIT')
+        return result
+      } catch (error) {
+        await this.#rollbackAfterFailure(error)
+        throw error
+      }
+    })
   }
 
   async close(): Promise<boolean> {
@@ -95,7 +105,9 @@ class PluginSqlDatabase implements SqlDatabase {
   /**
    * Enables and then verifies foreign key enforcement. The read-back is what
    * turns "the pragma did not apply" from a silent data-integrity problem into
-   * a startup failure with a message naming the setting.
+   * a startup failure with a message naming the setting. It is a verification
+   * rather than the configuration itself: the native shell enables the pragma
+   * for the pinned connection when it opens it.
    */
   async enableForeignKeys(): Promise<void> {
     await this.execute('PRAGMA foreign_keys = ON')
@@ -110,9 +122,22 @@ class PluginSqlDatabase implements SqlDatabase {
     }
   }
 
+  /**
+   * Runs one statement after every statement queued before it. The queue never
+   * rejects, so a failed statement does not strand the ones behind it.
+   */
+  #queued<T>(statement: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(statement)
+    this.#queue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
   async #rollbackAfterFailure(failure: unknown): Promise<void> {
     try {
-      await this.execute('ROLLBACK')
+      await new OpenTransaction(this.#connection).execute('ROLLBACK')
     } catch (rollbackFailure) {
       throw new Error(
         `Rolling back the failed transaction threw, so the connection may hold an open write lock: ` +
@@ -121,6 +146,40 @@ class PluginSqlDatabase implements SqlDatabase {
       )
     }
   }
+}
+
+/**
+ * The statements of one open transaction. They reach the connection directly:
+ * queueing behind the lock the enclosing transaction holds would deadlock, and
+ * the pinned connection serves one statement at a time in any case.
+ */
+class OpenTransaction implements SqlDatabase {
+  readonly #connection: PluginDatabase
+
+  constructor(connection: PluginDatabase) {
+    this.#connection = connection
+  }
+
+  execute(query: string, bindValues?: readonly SqlValue[]): Promise<SqlQueryResult> {
+    return this.#connection.execute(query, spread(bindValues))
+  }
+
+  select<T>(query: string, bindValues?: readonly SqlValue[]): Promise<readonly T[]> {
+    return this.#connection.select<T[]>(query, spread(bindValues))
+  }
+
+  transaction<T>(): Promise<T> {
+    return Promise.reject(
+      new Error(
+        'SQLite has no nested transaction, and the one already open covers every statement issued ' +
+          'inside it: whichever of the two commits, both sets of writes land together.',
+      ),
+    )
+  }
+}
+
+function spread(bindValues: readonly SqlValue[] | undefined): SqlValue[] | undefined {
+  return bindValues === undefined ? undefined : [...bindValues]
 }
 
 function describe(error: unknown): string {

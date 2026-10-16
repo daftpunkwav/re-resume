@@ -409,11 +409,11 @@ class FakeSqlDatabase implements SqlDatabase {
       .map((row) => ({ ...row }) as T)
   }
 
-  async transaction<T>(work: () => Promise<T>): Promise<T> {
+  async transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T> {
     const snapshot = new Map([...this.tables].map(([name, rows]) => [name, rows.map((row) => ({ ...row }))]))
     this.executedSql.push('BEGIN IMMEDIATE')
     try {
-      const result = await work()
+      const result = await work(this)
       this.executedSql.push('COMMIT')
       return result
     } catch (error) {

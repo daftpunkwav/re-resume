@@ -27,7 +27,7 @@ import type { DocumentChangeMeta, DocumentState } from '../../domain/resume/Docu
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { Clock } from '../../domain/catalog/ports/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
-import type { ResumeId, RevisionId } from '../../domain/shared/branded-id'
+import type { ResumeId, RevisionId, SnapshotId } from '../../domain/shared/branded-id'
 import { RowMappingError } from './mappers/JsonEnvelope'
 import {
   fromDocumentRevisionRow,
@@ -73,7 +73,7 @@ export class SqliteResumeRepository implements ResumeRepository {
     const rows = await this.#database.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
     const row = rows[0]
     if (row === undefined) return null
-    const revisions = await this.#readHistory(id)
+    const revisions = await this.#readHistory(this.#database, id)
     const snapshots = await this.#readSnapshots(id)
     return hydrateResume(row, this.#requireCursor(row, revisions), snapshots)
   }
@@ -102,8 +102,8 @@ export class SqliteResumeRepository implements ResumeRepository {
     state: DocumentState,
     change: DocumentChangeMeta,
   ): Promise<Revision> {
-    return this.#database.transaction(async () => {
-      const resumeRow = await this.#requireResumeRow(id)
+    return this.#database.transaction(async (tx) => {
+      const resumeRow = await this.#requireResumeRow(tx, id)
       if (resumeRow.status === 'frozen') {
         throw new DomainError(
           'frozenResumeImmutable',
@@ -111,7 +111,7 @@ export class SqliteResumeRepository implements ResumeRepository {
           { entity: 'resume', id, blockers: [] },
         )
       }
-      const history = await this.#readHistory(id)
+      const history = await this.#readHistory(tx, id)
       const cursor = this.#requireCursor(resumeRow, history)
       if (cursor.supersededAt !== null) {
         throw new DomainError(
@@ -121,7 +121,7 @@ export class SqliteResumeRepository implements ResumeRepository {
         )
       }
       const now = this.#clock.now()
-      await this.#database.execute(
+      await tx.execute(
         `UPDATE document_revision SET superseded_at = $1
          WHERE resume_id = $2 AND seq > $3 AND superseded_at IS NULL`,
         [now, id, cursor.seq],
@@ -137,19 +137,19 @@ export class SqliteResumeRepository implements ResumeRepository {
         supersededAt: null,
         createdAt: now,
       }
-      await this.#insertRevision(revision)
-      await this.#database.execute(
+      await this.#insertRevision(tx, revision)
+      await tx.execute(
         'UPDATE resume SET current_revision_id = $1, updated_at = $2 WHERE id = $3',
         [revision.id, now, id],
       )
-      await this.#trimHistory(id, revision.id)
+      await this.#trimHistory(tx, id, revision.id)
       return revision
     })
   }
 
   async moveCursor(id: ResumeId, revisionId: RevisionId): Promise<void> {
-    await this.#database.transaction(async () => {
-      const resumeRow = await this.#requireResumeRow(id)
+    await this.#database.transaction(async (tx) => {
+      const resumeRow = await this.#requireResumeRow(tx, id)
       if (resumeRow.status === 'frozen') {
         throw new DomainError(
           'frozenResumeImmutable',
@@ -157,7 +157,7 @@ export class SqliteResumeRepository implements ResumeRepository {
           { entity: 'resume', id, blockers: [] },
         )
       }
-      const targets = await this.#database.select<DocumentRevisionRow>(
+      const targets = await tx.select<DocumentRevisionRow>(
         'SELECT * FROM document_revision WHERE id = $1',
         [revisionId],
       )
@@ -183,11 +183,20 @@ export class SqliteResumeRepository implements ResumeRepository {
           { entity: 'resume', id, blockers: [revisionId] },
         )
       }
-      await this.#database.execute(
+      await tx.execute(
         'UPDATE resume SET current_revision_id = $1, updated_at = $2 WHERE id = $3',
         [revisionId, this.#clock.now(), id],
       )
     })
+  }
+
+  async findSnapshotById(id: SnapshotId): Promise<ResumeSnapshot | null> {
+    const rows = await this.#database.select<ResumeSnapshotRow>(
+      'SELECT * FROM resume_snapshot WHERE id = $1',
+      [id],
+    )
+    const row = rows[0]
+    return row === undefined ? null : fromResumeSnapshotRow(row)
   }
 
   async readRevision(id: RevisionId): Promise<Revision | null> {
@@ -206,13 +215,13 @@ export class SqliteResumeRepository implements ResumeRepository {
    */
   async appendSnapshot(snapshot: ResumeSnapshot): Promise<void> {
     const row = toResumeSnapshotRow(snapshot)
-    await this.#database.transaction(async () => {
-      await this.#database.execute(
+    await this.#database.transaction(async (tx) => {
+      await tx.execute(
         `INSERT INTO resume_snapshot (id, resume_id, seq, materialized_json, created_at)
          VALUES ($1, $2, $3, $4, $5)`,
         [row.id, row.resume_id, row.seq, row.materialized_json, row.created_at],
       )
-      await this.#database.execute(
+      await tx.execute(
         'UPDATE resume SET status = $1, updated_at = $2 WHERE id = $3',
         ['frozen', snapshot.createdAt, snapshot.resumeId],
       )
@@ -227,8 +236,8 @@ export class SqliteResumeRepository implements ResumeRepository {
    */
   async insertWithInitialRevision(resume: Resume, revision: Revision): Promise<void> {
     const resumeRow = toResumeRow(resume)
-    await this.#database.transaction(async () => {
-      await this.#database.execute(
+    await this.#database.transaction(async (tx) => {
+      await tx.execute(
         `INSERT INTO resume (id, title, target_role, status, current_revision_id, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
@@ -241,13 +250,13 @@ export class SqliteResumeRepository implements ResumeRepository {
           resumeRow.updated_at,
         ],
       )
-      await this.#insertRevision(revision)
+      await this.#insertRevision(tx, revision)
     })
   }
 
-  async #insertRevision(revision: Revision): Promise<void> {
+  async #insertRevision(tx: SqlDatabase, revision: Revision): Promise<void> {
     const row = toDocumentRevisionRow(revision)
-    await this.#database.execute(
+    await tx.execute(
       `INSERT INTO document_revision
          (id, resume_id, seq, label, origin, run_id, blocks_json, page_setup_json, superseded_at, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -273,8 +282,12 @@ export class SqliteResumeRepository implements ResumeRepository {
    * from it by redo are never trimmed. Superseded rows are never deleted — an
    * abandoned branch is kept for audit.
    */
-  async #trimHistory(resumeId: ResumeId, cursorRevisionId: RevisionId): Promise<void> {
-    const liveRows = await this.#database.select<RevisionSeqRow>(
+  async #trimHistory(
+    tx: SqlDatabase,
+    resumeId: ResumeId,
+    cursorRevisionId: RevisionId,
+  ): Promise<void> {
+    const liveRows = await tx.select<RevisionSeqRow>(
       `SELECT id, seq FROM document_revision
        WHERE resume_id = $1 AND superseded_at IS NULL ORDER BY seq ASC`,
       [resumeId],
@@ -285,15 +298,15 @@ export class SqliteResumeRepository implements ResumeRepository {
     if (cursor === undefined) return
     const oldestKept = newest[0]
     if (oldestKept === undefined) return
-    await this.#database.execute(
+    await tx.execute(
       `DELETE FROM document_revision
        WHERE resume_id = $1 AND superseded_at IS NULL AND seq < $2`,
       [resumeId, Math.min(oldestKept.seq, cursor.seq)],
     )
   }
 
-  async #requireResumeRow(id: ResumeId): Promise<ResumeRow> {
-    const rows = await this.#database.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
+  async #requireResumeRow(tx: SqlDatabase, id: ResumeId): Promise<ResumeRow> {
+    const rows = await tx.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
     const row = rows[0]
     if (row === undefined) {
       throw new DomainError('cursorNotOnLiveChain', 'No such resume.', {
@@ -305,8 +318,8 @@ export class SqliteResumeRepository implements ResumeRepository {
     return row
   }
 
-  async #readHistory(id: ResumeId): Promise<readonly Revision[]> {
-    const rows = await this.#database.select<DocumentRevisionRow>(
+  async #readHistory(tx: SqlDatabase, id: ResumeId): Promise<readonly Revision[]> {
+    const rows = await tx.select<DocumentRevisionRow>(
       'SELECT * FROM document_revision WHERE resume_id = $1 ORDER BY seq ASC',
       [id],
     )

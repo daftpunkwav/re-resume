@@ -76,16 +76,16 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     const row = toExperienceRow(experience)
     const variantRows = toVariantRows(experience)
     const claimRows = toClaimRows(experience)
-    await this.#database.transaction(async () => {
-      await this.#upsertExperience(row)
+    await this.#database.transaction(async (tx) => {
+      await this.#upsertExperience(tx, row)
       // Absent rows go first: removing one variant and adding another that
       // reuses its label is a legal edit of the aggregate, and the unique index
       // on (experience_id, label) would reject the insert while the row it
       // displaces is still there.
-      await this.#deleteVariantsAbsentFrom(experience.id, variantRows.map((each) => each.id))
-      await this.#deleteClaimsAbsentFrom(experience.id, claimRows.map((each) => each.id))
-      for (const variantRow of variantRows) await this.#upsertVariant(variantRow)
-      for (const claimRow of claimRows) await this.#upsertClaim(claimRow)
+      await this.#deleteVariantsAbsentFrom(tx, experience.id, variantRows.map((each) => each.id))
+      await this.#deleteClaimsAbsentFrom(tx, experience.id, claimRows.map((each) => each.id))
+      for (const variantRow of variantRows) await this.#upsertVariant(tx, variantRow)
+      for (const claimRow of claimRows) await this.#upsertClaim(tx, claimRow)
     })
   }
 
@@ -109,8 +109,8 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     )
   }
 
-  async #upsertExperience(row: ExperienceRow): Promise<void> {
-    await this.#database.execute(
+  async #upsertExperience(tx: SqlDatabase, row: ExperienceRow): Promise<void> {
+    await tx.execute(
       `INSERT INTO experience
          (id, kind, title, organization, start_date, end_date, is_current, detail_json, fact_version, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -140,8 +140,8 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     )
   }
 
-  async #upsertVariant(row: VariantRow): Promise<void> {
-    await this.#database.execute(
+  async #upsertVariant(tx: SqlDatabase, row: VariantRow): Promise<void> {
+    await tx.execute(
       `INSERT INTO variant
          (id, experience_id, label, content, emphasis, drafted_by_run_id, confirmed_at, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -167,8 +167,8 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     )
   }
 
-  async #upsertClaim(row: ClaimRow): Promise<void> {
-    await this.#database.execute(
+  async #upsertClaim(tx: SqlDatabase, row: ClaimRow): Promise<void> {
+    await tx.execute(
       `INSERT INTO claim
          (id, experience_id, kind, statement, source_field, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -183,15 +183,24 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     )
   }
 
-  async #deleteVariantsAbsentFrom(experienceId: ExperienceId, keepIds: readonly string[]): Promise<void> {
-    await this.#deleteAbsentFrom('variant', experienceId, keepIds)
+  async #deleteVariantsAbsentFrom(
+    tx: SqlDatabase,
+    experienceId: ExperienceId,
+    keepIds: readonly string[],
+  ): Promise<void> {
+    await this.#deleteAbsentFrom(tx, 'variant', experienceId, keepIds)
   }
 
-  async #deleteClaimsAbsentFrom(experienceId: ExperienceId, keepIds: readonly string[]): Promise<void> {
-    await this.#deleteAbsentFrom('claim', experienceId, keepIds)
+  async #deleteClaimsAbsentFrom(
+    tx: SqlDatabase,
+    experienceId: ExperienceId,
+    keepIds: readonly string[],
+  ): Promise<void> {
+    await this.#deleteAbsentFrom(tx, 'claim', experienceId, keepIds)
   }
 
   async #deleteAbsentFrom(
+    tx: SqlDatabase,
     table: 'variant' | 'claim',
     experienceId: ExperienceId,
     keepIds: readonly string[],
@@ -199,11 +208,11 @@ export class SqliteExperienceRepository implements ExperienceRepository {
     // An empty IN () list is a syntax error, so an aggregate that emptied its
     // own collection is written as an unconditional delete.
     if (keepIds.length === 0) {
-      await this.#database.execute(`DELETE FROM ${table} WHERE experience_id = $1`, [experienceId])
+      await tx.execute(`DELETE FROM ${table} WHERE experience_id = $1`, [experienceId])
       return
     }
     const placeholders = keepIds.map((_, index) => `$${index + 2}`).join(', ')
-    await this.#database.execute(
+    await tx.execute(
       `DELETE FROM ${table} WHERE experience_id = $1 AND id NOT IN (${placeholders})`,
       [experienceId, ...keepIds] satisfies SqlValue[],
     )

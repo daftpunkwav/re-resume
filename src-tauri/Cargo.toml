@@ -20,6 +20,12 @@ tauri-build = { version = "2.7.3", features = ["config-json5"] }
 [dependencies]
 tauri = { version = "2.12.4", features = ["config-json5"] }
 tauri-plugin-sql = { version = "2.6.0", features = ["sqlite"] }
+# The SQL plugin does not re-export the pool it opens, and connection.rs has to
+# replace that pool with a one-connection one — see the module for why. The
+# version is the one tauri-plugin-sql already resolves to, so this adds no
+# second copy of the driver. Only the SQLite driver is enabled; the pool and the
+# connect options are sqlx core.
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 tauri-plugin-http = "2.8.3"
 tauri-plugin-fs = "2.7.1"
 tauri-plugin-dialog = "2.8.3"
