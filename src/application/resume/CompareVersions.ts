@@ -16,7 +16,6 @@
  */
 
 import { DomainError } from '../../domain/shared/DomainError'
-import type { ResumeSnapshot } from '../../domain/resume/ResumeSnapshot'
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { BlockId, RevisionId, SnapshotId } from '../../domain/shared/branded-id'
@@ -130,8 +129,8 @@ async function resolveVersion(
       pageSetup: revision.state.pageSetup,
     }
   }
-  const snapshot = await findSnapshot(resumeRepo, selector.id)
-  if (snapshot === undefined) throw missingVersion('snapshot', selector.id)
+  const snapshot = await resumeRepo.findSnapshotById(selector.id)
+  if (snapshot === null) throw missingVersion('snapshot', selector.id)
   return {
     descriptor: { kind: 'snapshot', id: snapshot.id, label: `快照 #${snapshot.seq}` },
     blocks: snapshot.materializedBlocks,
@@ -148,18 +147,6 @@ function missingVersion(kind: 'revision' | 'snapshot', id: string): DomainError 
     id: '',
     blockers: [id],
   })
-}
-
-/** Snapshots live on their resume, and the port exposes them through listAll. */
-async function findSnapshot(
-  resumeRepo: ResumeRepository,
-  snapshotId: SnapshotId,
-): Promise<ResumeSnapshot | undefined> {
-  for (const resume of await resumeRepo.listAll()) {
-    const found = resume.snapshots.find((snapshot) => snapshot.id === snapshotId)
-    if (found !== undefined) return found
-  }
-  return undefined
 }
 
 function isSameBlock(left: ComparableBlock, right: ComparableBlock): boolean {

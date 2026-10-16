@@ -42,14 +42,16 @@ interface Violation {
 
 /**
  * Line-anchored, so a commented-out or documented example of an import is not
- * read as a real one. The three forms cover static import/export ... from,
- * a bare side-effect import and import(). Backtick quoting counts as well:
- * it is valid syntax and would otherwise be an unpoliced way in.
+ * read as a real one. The forms cover static import/export ... from, a named
+ * import whose brace closes on a later line, a bare side-effect import and
+ * import(). Backtick quoting counts in every form: a template literal is valid
+ * syntax and would otherwise be an unpoliced way in.
  */
 const IMPORT_FORMS = [
-  /^[ \t]*(?:import|export)\b[^'"]*?\bfrom[ \t]*['"]([^'"]+)['"]/gm,
-  /^[ \t]*import[ \t]*['"]([^'"]+)['"]/gm,
-  /\bimport\([ \t]*['"]([^'"]+)['"][ \t]*\)/g,
+  /^[ \t]*(?:import|export)\b[^'"`]*?\bfrom[ \t]*['"`]([^'"`]+)['"`]/gm,
+  /^[ \t]*\}[ \t]*from[ \t]*['"`]([^'"`]+)['"`]/gm,
+  /^[ \t]*import[ \t]*['"`]([^'"`]+)['"`]/gm,
+  /\bimport\([ \t]*['"`]([^'"`]+)['"`][ \t]*\)/g,
 ]
 
 function readSpecifiers(source: string): readonly string[] {

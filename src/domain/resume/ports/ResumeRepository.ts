@@ -12,7 +12,7 @@ import type { Resume } from '../Resume'
 import type { Revision } from '../Revision'
 import type { ResumeSnapshot } from '../ResumeSnapshot'
 import type { DocumentChangeMeta, DocumentState } from '../DocumentChange'
-import type { ResumeId, RevisionId } from '../../shared/branded-id'
+import type { ResumeId, RevisionId, SnapshotId } from '../../shared/branded-id'
 
 export interface ResumeRepository {
   /** Hydrates the aggregate from resume + its current revision (blocks, pageSetup). */
@@ -31,5 +31,12 @@ export interface ResumeRepository {
   /** Undo/redo: moves the cursor without creating a revision. Refused for frozen resumes. */
   moveCursor(id: ResumeId, revisionId: RevisionId): Promise<void>
   readRevision(id: RevisionId): Promise<Revision | null>
+  /**
+   * Reads one snapshot by its own identifier; null when no snapshot carries it.
+   * A snapshot is addressed without its resume, so it is the port rather than
+   * findById that has to make that lookup — reading every resume to find one
+   * snapshot is what a comparison must not do.
+   */
+  findSnapshotById(id: SnapshotId): Promise<ResumeSnapshot | null>
   appendSnapshot(snapshot: ResumeSnapshot): Promise<void>
 }

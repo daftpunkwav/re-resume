@@ -15,7 +15,7 @@ import type { ResumeSnapshot } from '../../src/domain/resume/ResumeSnapshot'
 import type { DocumentChangeMeta, DocumentState } from '../../src/domain/resume/DocumentChange'
 import type { ResumeRepository } from '../../src/domain/resume/ports/ResumeRepository'
 import type { DateTime } from '../../src/domain/shared/DateTime'
-import type { ResumeId, RevisionId } from '../../src/domain/shared/branded-id'
+import type { ResumeId, RevisionId, SnapshotId } from '../../src/domain/shared/branded-id'
 import { asRevisionId } from '../../src/domain/shared/branded-id'
 
 export const DEFAULT_REVISION_LIMIT = 200
@@ -36,6 +36,14 @@ export class InMemoryResumeRepository implements ResumeRepository {
 
   async listAll(): Promise<readonly Resume[]> {
     return [...this.resumes.values()]
+  }
+
+  async findSnapshotById(id: SnapshotId): Promise<ResumeSnapshot | null> {
+    for (const resume of this.resumes.values()) {
+      const snapshot = resume.snapshots.find((entry) => entry.id === id)
+      if (snapshot !== undefined) return snapshot
+    }
+    return null
   }
 
   async saveDocument(
@@ -170,7 +178,7 @@ export class InMemoryResumeRepository implements ResumeRepository {
     if (live.length <= this.revisionLimit) return
     const cursor = this.requireRevision(cursorId)
     // Keep the newest window, but never cut past the cursor: redo must remain
-    // reachable. The cut point is whichever starts later.
+    // reachable.
     const windowStart = live[live.length - this.revisionLimit]
     if (windowStart === undefined) return
     // Cut below whichever starts earlier: the window the limit allows, or the

@@ -11,10 +11,23 @@ pass=0; fail=0
 # symlinked by another local process before we open it.
 OUT="$(mktemp)" || exit 1
 
-# Fixtures are staged in the real index, so an interrupted run would leave them
-# staged and let them ride along in a later commit. Record every fixture this
-# run creates and unstage it on any exit path. Never clean with a `_t_*`
-# wildcard: that would also match a real file the user already had.
+# The hook reads the git index and nothing else, so the self-test hands it one
+# of its own. Anything the user has staged is invisible to it, and the fixtures
+# this run adds leave the real index exactly as it was.
+GIT_INDEX_FILE="$(mktemp -d)/index"
+export GIT_INDEX_FILE
+git read-tree HEAD || {
+  echo "SKIP  the self-test needs a commit to seed its index; repository has no HEAD"
+  exit 0
+}
+
+# Inside the working tree, because that is the only place `git add` will take a
+# path from. Under a name this run invented, so a fixture can never land on a
+# file the user already had.
+FIXTURES="$(mktemp -d -p "$ROOT" .hook-selftest.XXXXXXXX)" || exit 1
+
+# Fixtures are removed on any exit path, including an interrupted one. Never
+# clean with a `_t_*` wildcard: that would also match a real file.
 fixtures=()
 
 # release is idempotent - cleanup may call it again for a fixture a test has
@@ -29,14 +42,22 @@ cleanup() {
   for f in "${fixtures[@]+"${fixtures[@]}"}"; do
     release "$f"
   done
+  rm -rf -- "$FIXTURES"
   rm -f -- "$OUT"
+  rm -rf -- "$(dirname "$GIT_INDEX_FILE")"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# fixture <name> -> a path nothing else in the repository can be using
+fixture() {
+  local path="$FIXTURES/$1"
+  fixtures+=("$path")
+  printf '%s' "$path"
+}
+
 stage() {
-  fixtures+=("$1")
   git add -f -- "$1"
 }
 
@@ -63,50 +84,57 @@ expect_pass() {
 }
 
 # 1. trailing whitespace
-printf 'ok line\nbad line   \n' > _t_ws.txt
-stage _t_ws.txt
-expect_fail "trailing whitespace" "trailing whitespace in _t_ws.txt" _t_ws.txt
+ws=$(fixture _t_ws.txt)
+printf 'ok line\nbad line   \n' > "$ws"
+stage "$ws"
+expect_fail "trailing whitespace" "trailing whitespace in ${ws#"$ROOT"/}" "$ws"
 
 # 2. CRLF. Note this does NOT exercise the hook: .gitattributes (`* text=auto
 #    eol=lf`) normalises at `git add` time, so the index blob is already LF and
 #    the hook's CRLF check is a backstop that cannot normally fire. The
 #    invariant worth asserting is the one git actually guarantees - that no CR
 #    reaches the stored blob.
-printf 'first\r\nsecond\r\n' > _t_crlf.txt
-stage _t_crlf.txt
-if git cat-file blob :_t_crlf.txt | grep -q "$(printf '\r')"; then
+crlf=$(fixture _t_crlf.txt)
+printf 'first\r\nsecond\r\n' > "$crlf"
+stage "$crlf"
+if git cat-file blob ":${crlf#"$ROOT"/}" | grep -q "$(printf '\r')"; then
   echo "FAIL  CRLF normalisation -> CR present in the stored blob"; fail=$((fail+1))
 else
   echo "ok    CRLF normalisation -> .gitattributes stripped CR at add time"; pass=$((pass+1))
 fi
-release _t_crlf.txt
+release "$crlf"
 
 # 3. merge conflict marker
-printf 'a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> other\n' > _t_conflict.txt
-stage _t_conflict.txt
-expect_fail "conflict marker" "merge conflict marker in _t_conflict.txt" _t_conflict.txt
+conflict=$(fixture _t_conflict.txt)
+printf 'a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> other\n' > "$conflict"
+stage "$conflict"
+expect_fail "conflict marker" "merge conflict marker in ${conflict#"$ROOT"/}" "$conflict"
 
 # 4. missing final newline
-printf 'no trailing newline' > _t_nonl.txt
-stage _t_nonl.txt
-expect_fail "missing final newline" "does not end with a newline" _t_nonl.txt
+nonl=$(fixture _t_nonl.txt)
+printf 'no trailing newline' > "$nonl"
+stage "$nonl"
+expect_fail "missing final newline" "does not end with a newline" "$nonl"
 
 # 5. markdown hard line break must be ALLOWED
-printf 'line one  \nline two\n' > _t_hardbreak.md
-stage _t_hardbreak.md
-expect_pass "markdown hard break" _t_hardbreak.md
+hardbreak=$(fixture _t_hardbreak.md)
+printf 'line one  \nline two\n' > "$hardbreak"
+stage "$hardbreak"
+expect_pass "markdown hard break" "$hardbreak"
 
 # 6. clean file must be ALLOWED
-printf 'clean content\n' > _t_clean.txt
-stage _t_clean.txt
-expect_pass "clean text" _t_clean.txt
+clean=$(fixture _t_clean.txt)
+printf 'clean content\n' > "$clean"
+stage "$clean"
+expect_pass "clean text" "$clean"
 
 # 7. binary file must be SKIPPED, not read as text. It carries trailing
 #    whitespace on purpose: a hook that failed to skip it would block on the
 #    whitespace check, so "allowed" only holds while the skip works.
-printf 'bin\000ary content   \n' > _t_bin.bin
-stage _t_bin.bin
-expect_pass "binary skip" _t_bin.bin
+binary=$(fixture _t_bin.bin)
+printf 'bin\000ary content   \n' > "$binary"
+stage "$binary"
+expect_pass "binary skip" "$binary"
 
 echo "----"
 echo "pass=$pass fail=$fail"
