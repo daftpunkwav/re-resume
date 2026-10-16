@@ -141,6 +141,17 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
   const selectExperience = useNavigation((state) => state.selectExperience)
   const [creating, setCreating] = useState(false)
 
+  // Create mode belongs to a moment with nothing selected: choosing a row in
+  // the index is a decision to edit that row, so it ends the create form
+  // rather than leaving the panel offering to record a new experience while
+  // the chosen row sits ignored beside it. Clearing the flag here rather than
+  // in an effect also means a later empty selection cannot resurrect a form
+  // the user has already left.
+  const showingCreate = creating && selectedExperienceId === null
+  if (creating && selectedExperienceId !== null) {
+    setCreating(false)
+  }
+
   const startCreating = () => {
     selectExperience(null)
     setCreating(true)
@@ -156,19 +167,24 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
     <Panel
       title="经历详情"
       actions={
-        !creating && selectedExperienceId !== null ? (
+        !showingCreate && selectedExperienceId !== null ? (
           <Button size="small" icon="plus" onClick={startCreating}>
             新建经历
           </Button>
         ) : undefined
       }
     >
-      {creating ? (
+      {showingCreate ? (
         <div className="stack">
           <EmptyState
             icon="plus"
             title="记录一条新经历"
             description="先选类型，再填事实。表述和断言可以随后补充。"
+            action={
+              <Button variant="ghost" onClick={() => setCreating(false)}>
+                取消
+              </Button>
+            }
           />
           <ExperienceForm
             library={library}
@@ -179,7 +195,7 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
         </div>
       ) : null}
 
-      {!creating && selectedExperienceId === null ? (
+      {!showingCreate && selectedExperienceId === null ? (
         <EmptyState
           icon="library"
           title="选择一条经历"
@@ -192,7 +208,7 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
         />
       ) : null}
 
-      {!creating && selectedExperienceId !== null ? (
+      {!showingCreate && selectedExperienceId !== null ? (
         <SelectedExperience
           library={library}
           experienceId={selectedExperienceId}

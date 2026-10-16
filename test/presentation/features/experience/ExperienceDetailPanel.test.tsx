@@ -98,6 +98,35 @@ describe('experience detail', () => {
     expect(await screen.findByText('选择一条经历')).toBeVisible()
   })
 
+  it('leaves the create form when a listed experience is chosen', async () => {
+    const user = userEvent.setup()
+    givenLibrary({ list: async () => [PROJECT], get: async () => PROJECT })
+    render(<ExperienceWorkspace />)
+
+    await user.click(await screen.findByRole('button', { name: '新建经历' }))
+    expect(await screen.findByRole('button', { name: '创建经历' })).toBeVisible()
+
+    await openRow('看板工具')
+
+    expect(screen.queryByRole('button', { name: '创建经历' })).toBeNull()
+    expect(await screen.findByLabelText('角色')).toHaveValue('独立开发')
+  })
+
+  it('cancels out of the create form without saving anything', async () => {
+    const user = userEvent.setup()
+    const create = vi.fn()
+    givenLibrary({ list: async () => [], create })
+    render(<ExperienceWorkspace />)
+
+    await user.click(await screen.findByRole('button', { name: '新建经历' }))
+    await user.type(await screen.findByLabelText('标题'), '前端工程师')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('button', { name: '创建经历' })).toBeNull()
+    expect(await screen.findByText('选择一条经历')).toBeVisible()
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('reports a refused create as a message on the form', async () => {
     const user = userEvent.setup()
     givenLibrary({
