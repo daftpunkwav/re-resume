@@ -6,7 +6,7 @@
  * lifecycle actually offers.
  */
 
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseDateTime } from '../../../../src/domain/shared/DateTime'
@@ -159,6 +159,67 @@ describe('experience detail', () => {
     await user.click(screen.getByRole('button', { name: '保存修改' }))
 
     expect(await screen.findByText(/^角色：/)).toBeVisible()
+  })
+
+  it('does not file one experience under another when the selection moves mid-command', async () => {
+    const user = userEvent.setup()
+    const release: { current: (() => void) | null } = { current: null }
+    const slow = makeExperience({
+      id: 'exp-slow',
+      kind: 'project',
+      title: '慢的那条',
+      detail: { technologies: ['TypeScript'], role: '慢', highlights: ['慢'] },
+      variants: [makeVariant({
+        id: 'var-slow',
+        label: '慢表述',
+        content: '慢的正文。',
+        draftedByRunId: 'run-9',
+        confirmedAt: null,
+      })],
+    })
+    const fast = makeExperience({
+      id: 'exp-fast',
+      kind: 'project',
+      title: '快的那条',
+      detail: { technologies: ['Go'], role: '快', highlights: ['快'] },
+    })
+    givenLibrary({
+      list: async () => [slow, fast],
+      get: async (id: unknown) => (String(id) === 'exp-slow' ? slow : fast),
+      confirmVariant: async () => {
+        // Still running when the user picks the other row.
+        await new Promise<void>((resolve) => {
+          release.current = resolve
+        })
+        return {
+          ...slow,
+          variants: [
+            {
+              ...slow.variants[0]!,
+              confirmedAt: parseDateTime('2026-03-02T09:00:00.000Z') as DateTime,
+            },
+          ],
+        }
+      },
+    })
+    render(<ExperienceWorkspace />)
+
+    await openRow('慢的那条')
+    await user.click(screen.getByRole('tab', { name: '表述' }))
+    await user.click(await screen.findByRole('button', { name: '确认' }))
+
+    await openRow('快的那条')
+    expect(await screen.findByLabelText('角色')).toHaveValue('快')
+
+    release.current?.()
+    await waitFor(() =>
+      expect(screen.queryByText('慢的正文。')).toBeNull(),
+    )
+
+    // The confirmation belonged to the other experience. Its result must not
+    // replace what the row now open is showing.
+    expect(screen.getByLabelText('角色')).toHaveValue('快')
+    expect(screen.getByLabelText('标题')).toHaveValue('快的那条')
   })
 
   it('clears the draft badge once a variant is confirmed', async () => {

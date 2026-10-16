@@ -60,10 +60,21 @@ function SelectedExperience({ library, experienceId, onListChanged }: SelectedEx
    * different rows for the same experience. A command that returns the
    * aggregate replaces the loaded one; one that returns nothing — a removal —
    * has to be re-read, because the row it removed is gone from the server too.
+   *
+   * The index stays usable while a command is in flight, so the user can pick
+   * another experience before this one finishes. The result belongs to the
+   * experience it was started for: writing it into whichever row is open now
+   * would file one experience's facts under another's name. A reload needs no
+   * such check — the resource discards a response that a newer load has
+   * already overtaken — but set() writes straight through.
    */
   const applyChange = async (updated: Experience | null) => {
-    if (updated === null) await experience.reload()
-    else experience.set(updated)
+    const startedFor = experienceId
+    if (updated === null) {
+      await experience.reload()
+    } else if (useNavigation.getState().selectedExperienceId === startedFor) {
+      experience.set(updated)
+    }
     await onListChanged()
   }
 
@@ -204,6 +215,12 @@ export function ExperienceDetailPanel({ library, onListChanged }: ExperienceDeta
 
       {!showingCreate && selectedExperienceId !== null ? (
         <SelectedExperience
+          // The index stays usable, so the selection can move while a command
+          // is in flight. Keying the panel makes the selection authoritative
+          // over what it was holding: otherwise the new row opens on the tab
+          // the previous one was showing, and a command still running against
+          // the old one has somewhere to land.
+          key={selectedExperienceId}
           library={library}
           experienceId={selectedExperienceId}
           onListChanged={onListChanged}
