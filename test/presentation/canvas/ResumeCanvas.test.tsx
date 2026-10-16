@@ -42,8 +42,6 @@ vi.mock('react-konva', async () => {
   }
 })
 
-// React only exposes act() from its development build, and testing-library
-
 const CONTENT_WIDTH = A4_PAGE_SETUP.pageWidth - A4_PAGE_SETUP.marginLeft - A4_PAGE_SETUP.marginRight
 
 function laidOut(overrides: Partial<LaidOutBlock> & Pick<LaidOutBlock, 'blockId'>): LaidOutBlock {

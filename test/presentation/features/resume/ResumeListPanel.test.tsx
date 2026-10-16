@@ -10,8 +10,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { ResumeListPanel } from '../../../../src/presentation/features/resume/ResumeListPanel'
 import { DRAFT_ID, FROZEN_ID, makeResume } from '../../resumeFixtures'
 
-// React only exposes act() from its development build; a shell that exports
-
 function renderList(
   resumes = [
     makeResume({ id: DRAFT_ID, title: '后端简历' }),
