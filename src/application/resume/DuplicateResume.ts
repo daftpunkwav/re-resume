@@ -31,6 +31,7 @@ import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { ExperienceId, ResumeId } from '../../domain/shared/branded-id'
 import { asBlockId } from '../../domain/shared/branded-id'
+import { assertBlocksMayBeReferenced } from './assertBlockReferences'
 import { createResumeFromDocument } from './CreateResume'
 import type { ResumeCreation } from './CreateResume'
 
@@ -55,6 +56,10 @@ export async function duplicateResume(
     blocks: await copyBlocks(source.id, source.blocks, experienceRepo, profile, ids),
     pageSetup: source.pageSetup,
   }
+  // A copy of a resume written before a claim was rejected would otherwise carry
+  // that claim into a document no editor ever chose it for. Checked before the
+  // insert so a refusal leaves no duplicate behind.
+  await assertBlocksMayBeReferenced(experienceRepo, document.blocks)
   return createResumeFromDocument(resumeCreation, ids, clock, {
     title: input.title ?? `${source.title}（副本）`,
     targetRole: source.targetRole,

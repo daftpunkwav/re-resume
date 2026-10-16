@@ -383,7 +383,10 @@ describe('runAgentTask', () => {
       schemas: [],
     })
     // The credential is intact once the row is parsed, and absent from its text.
-    const escaped = String.raw`sk-live-do-not-store`
+    // The first character as a JSON escape, assembled at run time so the
+    // fixture cannot be reduced to the plain secret by any earlier step.
+    const escaped = String.raw`\u0073k-live-do-not-store`
+    expect(escaped).not.toBe(secret)
     const model = new ScriptedModel([
       [{ type: 'toolCall', name: 'echo', argsJson: `{"text":"${escaped}"}` }],
       [{ type: 'text', textDelta: 'done' }],
@@ -398,6 +401,46 @@ describe('runAgentTask', () => {
     const invocation = harness.invocations.list().at(0)
     expect(invocation?.argsJson).not.toContain(secret)
     expect(invocation?.argsJson).toContain('[redacted]')
+  })
+
+  it('ends a run whose provider has gone quiet once the caller cancels', async () => {
+    const harness = newHarness()
+    const echo = echoTool()
+    const tools: (runId: AgentRunId) => AgentTools = () => ({
+      registry: { list: () => [echo], get: () => echo },
+      schemas: [],
+    })
+    let cancelled = false
+    let aborted = false
+    // The model connects and then never answers, so nothing but the caller's
+    // cancellation can end the turn: the loop is parked on the next chunk.
+    const stalled: ModelProvider = {
+      id: 'stalled',
+      modelId: 'stalled-1',
+      stream: (_request, _tools, signal) => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            new Promise<IteratorResult<ModelChunk>>((_, reject) => {
+              signal?.addEventListener('abort', () => {
+                aborted = true
+                reject(new Error('the request was aborted'))
+              })
+            }),
+        }),
+      }),
+    }
+    setTimeout(() => {
+      cancelled = true
+    }, 20)
+
+    const run = await runAgentTask(
+      harness.ctx,
+      { model: stalled, invocations: harness.invocations, ids: harness.registryDeps.ids },
+      { prompt: '写点东西', tools, isCancelled: () => cancelled },
+    )
+
+    expect(run.status).toBe('cancelled')
+    expect(aborted).toBe(true)
   })
 })
 

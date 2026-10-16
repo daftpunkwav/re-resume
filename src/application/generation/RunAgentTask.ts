@@ -164,20 +164,78 @@ async function readTurn(
   const chunks = model.stream(request, schemas, abort.signal)[Symbol.asyncIterator]()
   let text = ''
   const toolCalls: PendingToolCall[] = []
-  for (;;) {
-    if (isCancelled?.() === true) {
-      abort.abort()
-      return { text, toolCalls, cancelled: true }
+  try {
+    for (;;) {
+      if (isCancelled?.() === true) return cancelledTurn(abort, text, toolCalls)
+      // The next chunk is waited on together with the caller's cancellation:
+      // waiting on the chunk alone would leave a run open for as long as the
+      // provider takes to answer, however long that is, and nothing would ever
+      // reach the controller that could abort the request.
+      let stopWatching = (): void => {}
+      const next = await Promise.race([
+        chunks.next(),
+        new Promise<typeof CANCELLED>((resolve) => {
+          stopWatching = watchForCancellation(isCancelled, () => resolve(CANCELLED))
+        }),
+      ])
+      stopWatching()
+      if (next === CANCELLED) return cancelledTurn(abort, text, toolCalls)
+      if (next.done === true) return { text, toolCalls, cancelled: false }
+      const chunk = next.value
+      if (chunk.type === 'text') {
+        text += chunk.textDelta
+        onTextDelta?.(chunk.textDelta)
+        continue
+      }
+      toolCalls.push({ name: chunk.name, argsJson: chunk.argsJson })
     }
-    const next = await chunks.next()
-    if (next.done === true) return { text, toolCalls, cancelled: false }
-    const chunk = next.value
-    if (chunk.type === 'text') {
-      text += chunk.textDelta
-      onTextDelta?.(chunk.textDelta)
-      continue
+  } finally {
+    // Releases the adapter's connection without waiting for it: a generator
+    // suspended inside its own await does not settle return() until it does,
+    // and the abort above is what ends that await.
+    const closing = chunks.return?.()
+    if (closing !== undefined) void closing.catch(() => undefined)
+  }
+}
+
+const CANCELLED = Symbol('cancelled')
+
+/** How often a pending chunk waits are re-checked against the cancellation. */
+const CANCELLATION_POLL_MS = 100
+
+function cancelledTurn(
+  abort: AbortController,
+  text: string,
+  toolCalls: readonly PendingToolCall[],
+): ModelTurn {
+  abort.abort()
+  return { text, toolCalls, cancelled: true }
+}
+
+/**
+ * Calls back when the caller reports cancellation, and returns the function that
+ * stops watching. The request carries a predicate rather than a signal, so the
+ * watch polls; stopping it leaves at most one pending timer, which is what
+ * keeps a finished turn from polling for the rest of the process.
+ */
+function watchForCancellation(
+  isCancelled: (() => boolean) | undefined,
+  onCancelled: () => void,
+): () => void {
+  let stopped = false
+  const poll = async (): Promise<void> => {
+    for (;;) {
+      if (stopped) return
+      if (isCancelled?.() === true) {
+        onCancelled()
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, CANCELLATION_POLL_MS))
     }
-    toolCalls.push({ name: chunk.name, argsJson: chunk.argsJson })
+  }
+  void poll()
+  return () => {
+    stopped = true
   }
 }
 

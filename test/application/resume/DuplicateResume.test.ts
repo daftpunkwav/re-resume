@@ -9,11 +9,17 @@ import { createResume, setDocument } from '../../../src/domain/resume/Resume'
 import type { Block } from '../../../src/domain/resume/Block'
 import { describeChange } from '../../../src/domain/resume/DocumentChange'
 import { updateProfile } from '../../../src/domain/catalog/Profile'
-import { addVariant, createExperience, updateFact } from '../../../src/domain/catalog/Experience'
+import {
+  addClaim,
+  addVariant,
+  createExperience,
+  updateFact,
+} from '../../../src/domain/catalog/Experience'
 import { parseDateTime } from '../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
 import {
   asBlockId,
+  asClaimId,
   asExperienceId,
   asResumeId,
   asRevisionId,
@@ -84,9 +90,11 @@ function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
   return (resumeId) => repo.historyOf(resumeId)
 }
 
-async function seededResume(): Promise<InMemoryResumeRepository> {
+async function seededResume(
+  blocks: readonly Block[] = sourceBlocks(),
+): Promise<InMemoryResumeRepository> {
   const repo = new InMemoryResumeRepository(() => NOW)
-  const state = { blocks: sourceBlocks(), pageSetup: A4_PAGE_SETUP }
+  const state = { blocks, pageSetup: A4_PAGE_SETUP }
   await repo.insertWithInitialRevision(
     // Hydrated from its current revision, the way a repository reading the
     // row would return it.
@@ -259,6 +267,48 @@ describe('duplicateResume', () => {
         { sourceResumeId: RESUME_ID },
       ),
     ).rejects.toMatchObject({ code: 'variantNotInExperience' })
+  })
+
+  it('refuses to carry a claim the user rejected after the revision was saved', async () => {
+    // The document was saved while the claim was still accepted; rejecting it
+    // afterwards has to stop the copy rather than carry it into a new resume
+    // that no editor ever chose it for.
+    const source = sourceBlocks().map((block) =>
+      block.content.type === 'experience'
+        ? { ...block, content: { ...block.content, claimIds: [asClaimId('claim-1')] } }
+        : block,
+    )
+    const repo = await seededResume(source)
+    const catalog = new InMemoryExperienceRepository()
+    const experience = await experienceRepoWithFactsBumped().findById(EXPERIENCE_ID)
+    if (experience === null) throw new Error('the seeded experience should exist')
+    catalog.seed(
+      addClaim(
+        experience,
+        {
+          id: asClaimId('claim-1'),
+          kind: 'metric',
+          statement: '日均千万笔',
+          sourceField: null,
+          status: 'rejected',
+        },
+        NOW,
+      ),
+    )
+
+    await expect(
+      duplicateResume(
+        repo,
+        repo,
+        catalog,
+        await profileRepoAtVersion(1),
+        new SequentialIdGenerator('copy'),
+        new FixedClock(),
+        { sourceResumeId: RESUME_ID },
+      ),
+    ).rejects.toMatchObject({ code: 'claimRejected' })
+
+    expect(await repo.listAll()).toHaveLength(1)
   })
 
   it('copies the profile fields the source document holds', async () => {

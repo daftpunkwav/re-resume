@@ -14,12 +14,9 @@ OUT="$(mktemp)" || exit 1
 # The hook reads the git index and nothing else, so the self-test hands it one
 # of its own. Anything the user has staged is invisible to it, and the fixtures
 # this run adds leave the real index exactly as it was.
-GIT_INDEX_FILE="$(mktemp -d)/index"
+INDEX_DIR="$(mktemp -d)" || exit 1
+GIT_INDEX_FILE="$INDEX_DIR/index"
 export GIT_INDEX_FILE
-git read-tree HEAD || {
-  echo "SKIP  the self-test needs a commit to seed its index; repository has no HEAD"
-  exit 0
-}
 
 # Inside the working tree, because that is the only place `git add` will take a
 # path from. Under a name this run invented, so a fixture can never land on a
@@ -27,7 +24,10 @@ git read-tree HEAD || {
 FIXTURES="$(mktemp -d -p "$ROOT" .hook-selftest.XXXXXXXX)" || exit 1
 
 # Fixtures are removed on any exit path, including an interrupted one. Never
-# clean with a `_t_*` wildcard: that would also match a real file.
+# clean with a `_t_*` wildcard: that would also match a real file. The trap is
+# installed before the index is seeded, because seeding is a step that can fail
+# on a repository with no commit and skipping it must not leak what is already
+# allocated.
 fixtures=()
 
 # release is idempotent - cleanup may call it again for a fixture a test has
@@ -44,11 +44,16 @@ cleanup() {
   done
   rm -rf -- "$FIXTURES"
   rm -f -- "$OUT"
-  rm -rf -- "$(dirname "$GIT_INDEX_FILE")"
+  rm -rf -- "$INDEX_DIR"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+git read-tree HEAD || {
+  echo "SKIP  the self-test needs a commit to seed its index; repository has no HEAD"
+  exit 0
+}
 
 # fixture <name> -> a path nothing else in the repository can be using
 fixture() {

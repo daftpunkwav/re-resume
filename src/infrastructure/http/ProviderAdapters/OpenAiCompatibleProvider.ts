@@ -112,7 +112,17 @@ interface StreamDelta {
 
 function readDelta(data: string): StreamDelta {
   const payload = requireRecord(parseJsonFrame(data), 'stream frame')
+  // An error is reported inside a 200 response, and it carries no choices.
+  // Falling through to the empty-delta branch would turn a provider failure
+  // into a turn that simply said nothing, which the loop reports as completed.
+  if (payload.error !== undefined && payload.error !== null) {
+    throw new Error(
+      `The stream reported an error: ${JSON.stringify(payload.error)}`,
+    )
+  }
   const choices = payload.choices
+  // An empty choices array is how a usage-only frame arrives; that is not an
+  // error, and the frame is simply skipped.
   if (!Array.isArray(choices)) return { toolCalls: [] }
   const choice = choices[0]
   if (choice === null || typeof choice !== 'object' || Array.isArray(choice)) {
