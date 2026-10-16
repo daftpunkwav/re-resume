@@ -51,6 +51,39 @@ describe('useResource', () => {
     expect(result.current.data).toEqual(['后端简历'])
   })
 
+  it('lets the newest load win when two are in flight at once', async () => {
+    const slow = deferred<string[]>()
+    const fast = deferred<string[]>()
+    let call = 0
+    const load = (): Promise<string[]> => {
+      call += 1
+      return call === 1 ? slow.promise : fast.promise
+    }
+
+    const { result } = renderHook(() => useResource(load, []))
+
+    let pending: Promise<void> = Promise.resolve()
+    act(() => {
+      pending = result.current.reload()
+    })
+    act(() => {
+      pending = result.current.reload()
+    })
+
+    // The first reload answers last. It still holds the answer to a question
+    // the region has already moved on from.
+    await act(async () => {
+      fast.resolve(['新的一份'])
+      await pending
+    })
+    expect(result.current.data).toEqual(['新的一份'])
+
+    await act(async () => {
+      slow.resolve(['旧的一份'])
+    })
+    expect(result.current.data).toEqual(['新的一份'])
+  })
+
   it('shows the loading state again when a dependency changes after a failure', async () => {
     const retry = deferred<string[]>()
     const load = (attempt: number): (() => Promise<string[]>) => () =>

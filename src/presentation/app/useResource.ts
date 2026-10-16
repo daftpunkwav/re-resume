@@ -6,7 +6,7 @@
  * refresh is always one call away.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { describeError } from './errorMessages'
 import type { ReadableError } from './errorMessages'
 
@@ -34,9 +34,17 @@ export function useResource<T>(
     error: null,
     loaded: false,
   })
+  /**
+   * A reload started by the caller and the load the dependency effect started
+   * are two requests the component has no way to cancel, and either can settle
+   * after the other. Numbering them means only the newest one may write, so a
+   * slow response cannot replace a value the user has already moved past.
+   */
+  const newest = useRef(0)
 
   useEffect(() => {
-    let cancelled = false
+    const request = newest.current + 1
+    newest.current = request
     // Marking the load as pending is what stops the previous value from
     // standing on screen while a new one loads. The error goes with it:
     // `loading` is derived from it, so a failure left in place would show
@@ -45,26 +53,35 @@ export function useResource<T>(
 
     load()
       .then((next) => {
-        if (!cancelled) setState({ data: next, error: null, loaded: true })
+        if (newest.current === request) setState({ data: next, error: null, loaded: true })
       })
       .catch((thrown: unknown) => {
-        if (!cancelled) setState((previous) => ({ ...previous, error: describeError(thrown) }))
+        if (newest.current === request) {
+          setState((previous) => ({ ...previous, error: describeError(thrown) }))
+        }
       })
 
     return () => {
-      cancelled = true
+      // Settling after the panel is gone must not write. Bumping only when this
+      // request is still the newest leaves a request that has already been
+      // superseded alone.
+      if (newest.current === request) newest.current += 1
     }
     // The dependency list is the caller's contract; `load` is rebuilt with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, dependencies)
 
   const reload = async (): Promise<void> => {
+    const request = newest.current + 1
+    newest.current = request
     setState((previous) => ({ ...previous, error: null, loaded: false }))
     try {
       const next = await load()
-      setState({ data: next, error: null, loaded: true })
+      if (newest.current === request) setState({ data: next, error: null, loaded: true })
     } catch (thrown) {
-      setState((previous) => ({ ...previous, error: describeError(thrown) }))
+      if (newest.current === request) {
+        setState((previous) => ({ ...previous, error: describeError(thrown) }))
+      }
     }
   }
 
