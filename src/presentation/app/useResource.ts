@@ -38,8 +38,10 @@ export function useResource<T>(
   useEffect(() => {
     let cancelled = false
     // Marking the load as pending is what stops the previous value from
-    // standing on screen while a new one loads.
-    setState((previous) => ({ ...previous, loaded: false }))
+    // standing on screen while a new one loads. The error goes with it:
+    // `loading` is derived from it, so a failure left in place would show
+    // the old message instead of the spinner for the whole retry.
+    setState((previous) => ({ ...previous, error: null, loaded: false }))
 
     load()
       .then((next) => {
@@ -57,7 +59,7 @@ export function useResource<T>(
   }, dependencies)
 
   const reload = async (): Promise<void> => {
-    setState((previous) => ({ ...previous, loaded: false }))
+    setState((previous) => ({ ...previous, error: null, loaded: false }))
     try {
       const next = await load()
       setState({ data: next, error: null, loaded: true })
