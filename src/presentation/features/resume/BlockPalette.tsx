@@ -44,7 +44,13 @@ export function BlockPalette({ disabled, onAddBlock }: BlockPaletteProps) {
   const [chosenVariant, setChosenVariant] = useState('')
 
   const choices = useMemo(() => confirmedVariantChoices(library.data), [library.data])
-  const activeChoice = chosenVariant === '' ? (choices[0]?.value ?? '') : chosenVariant
+  // A chosen variant that is no longer offered — deleted, or confirmed then
+  // rolled back — would leave the control holding a value it has no option for.
+  // Fall back to the first one that is still there, and keep the user's own
+  // choice whenever it survived.
+  const activeChoice = choices.some((choice) => choice.value === chosenVariant)
+    ? chosenVariant
+    : (choices[0]?.value ?? '')
 
   const addTextBlock = (): void => {
     if (text.trim() === '') {
