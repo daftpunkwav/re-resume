@@ -8,7 +8,7 @@
  * provider surfaces the reason instead of leaving a blank window.
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createCompositionRoot } from '../../bootstrap/compositionRoot'
 import type { CompositionRoot } from '../../bootstrap/compositionRoot'
@@ -33,7 +33,12 @@ export interface ApplicationServicesProviderProps {
 
 type BootState =
   | { readonly status: 'booting' }
-  | { readonly status: 'ready'; readonly root: CompositionRoot }
+  | {
+      readonly status: 'ready'
+      readonly root: CompositionRoot
+      /** Set when a rebuild failed and this root is the one that survived. */
+      readonly rebuildError: string | null
+    }
   | { readonly status: 'failed'; readonly reason: string }
 
 async function defaultSnapshotPath(): Promise<string> {
@@ -50,6 +55,11 @@ export function ApplicationServicesProvider({
   const [boot, setBoot] = useState<BootState>({ status: 'booting' })
   const settings = useProviderSettings((state) => state.settings)
   const vaultPassword = useProviderSettings((state) => state.vaultPassword)
+  // The root that is serving the interface right now. A rebuild that fails
+  // leaves this one in place and records the reason beside it, so the settings
+  // that triggered it — a vault password, a saved provider — cannot replace a
+  // working session with a failure screen the user did nothing to earn.
+  const serving = useRef<CompositionRoot | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -69,11 +79,17 @@ export function ApplicationServicesProvider({
           void root.shutdown()
           return
         }
-        setBoot({ status: 'ready', root })
+        serving.current = root
+        setBoot({ status: 'ready', root, rebuildError: null })
       } catch (thrown) {
         if (cancelled) return
         const reason = thrown instanceof Error ? thrown.message : '未知原因'
-        setBoot({ status: 'failed', reason })
+        const running = serving.current
+        if (running === null) {
+          setBoot({ status: 'failed', reason })
+          return
+        }
+        setBoot({ status: 'ready', root: running, rebuildError: reason })
       }
     }
 
@@ -83,15 +99,18 @@ export function ApplicationServicesProvider({
     }
   }, [createRoot, resolveSnapshotPath, settings, vaultPassword])
 
+  // Keyed on the root rather than on the whole state, so recording a rebuild
+  // error does not read as a new root and shut down the one still serving.
+  const activeRoot = boot.status === 'ready' ? boot.root : null
   useEffect(() => {
-    if (boot.status !== 'ready') return
-    const root = boot.root
+    if (activeRoot === null) return
     return () => {
-      void root.shutdown()
+      if (serving.current === activeRoot) serving.current = null
+      void activeRoot.shutdown()
     }
-  }, [boot])
+  }, [activeRoot])
 
-  const value = useMemo(() => (boot.status === 'ready' ? boot.root : null), [boot])
+  const value = useMemo(() => activeRoot, [activeRoot])
 
   if (boot.status === 'booting') {
     return (
@@ -116,7 +135,19 @@ export function ApplicationServicesProvider({
     )
   }
 
-  return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>
+  return (
+    <ServicesContext.Provider value={value}>
+      {boot.rebuildError === null ? null : (
+        <div className="boot-screen">
+          <Notice tone="warning" title="新的设置没有生效">
+            <p>界面仍在使用上一个可用的应用容器。下面是重建时失败的原因：</p>
+            <p className="boot-reason">{boot.rebuildError}</p>
+          </Notice>
+        </div>
+      )}
+      {children}
+    </ServicesContext.Provider>
+  )
 }
 
 export function useServices(): CompositionRoot {
