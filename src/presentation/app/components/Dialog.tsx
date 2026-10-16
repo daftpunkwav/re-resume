@@ -113,6 +113,14 @@ export function Dialog({
   return (
     <div
       className="dialog-scrim"
+      // The backdrop carries no meaning of its own: closing a dialog is
+      // already offered by Escape, by 取消 and by the header's close button,
+      // all of which are properly labelled and reachable from the keyboard.
+      // Clicking outside is a pointer shortcut on top of those, so the overlay
+      // itself stays out of the tab order and out of the accessibility tree
+      // rather than becoming a fourth stop that a screen reader would have to
+      // announce without adding a way out.
+      role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) dismiss()
       }}
