@@ -40,6 +40,33 @@ const COLUMN_OPTIONS = [
 
 const INVALID_POINT = '请输入大于 0 的数字。'
 
+function isPoint(raw: string): boolean {
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0
+}
+
+function mark(
+  fields: ReadonlySet<PointField>,
+  field: PointField,
+  valid: boolean,
+): ReadonlySet<PointField> {
+  const next = new Set(fields)
+  if (valid) next.delete(field)
+  else next.add(field)
+  return next
+}
+
+function rawPoints(pageSetup: PageSetup): Readonly<Record<PointField, string>> {
+  return {
+    pageWidth: String(pageSetup.pageWidth),
+    pageHeight: String(pageSetup.pageHeight),
+    marginTop: String(pageSetup.marginTop),
+    marginRight: String(pageSetup.marginRight),
+    marginBottom: String(pageSetup.marginBottom),
+    marginLeft: String(pageSetup.marginLeft),
+  }
+}
+
 export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormProps) {
   // The draft follows the stored setup, so the committed value always wins
   // once a revision comes back — including one an undo has just rolled back.
@@ -47,23 +74,36 @@ export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormPr
   // from showing a value for a render that the store has already replaced.
   const [draft, setDraft] = useState<PageSetup>(pageSetup)
   const [draftedFrom, setDraftedFrom] = useState<PageSetup>(pageSetup)
+  // What each field shows is what the user has typed, which is not always a
+  // number: a half-typed 620 reads as 6 or 62, and clearing a field reads as
+  // nothing at all. Reporting any of those as a change would write a revision
+  // per keystroke, so the draft only moves once the edit is finished.
+  const [typed, setTyped] = useState<Readonly<Record<PointField, string>>>(rawPoints(pageSetup))
   const [invalid, setInvalid] = useState<ReadonlySet<PointField>>(new Set())
 
   if (draftedFrom !== pageSetup) {
     setDraftedFrom(pageSetup)
     setDraft(pageSetup)
+    setTyped(rawPoints(pageSetup))
+    setInvalid(new Set())
   }
 
   const readPoint = (field: PointField, raw: string): void => {
-    const value = Number(raw)
-    const next = new Set(invalid)
-    if (!Number.isFinite(value) || value <= 0) {
-      next.add(field)
-      setInvalid(next)
+    setTyped((previous) => ({ ...previous, [field]: raw }))
+    setInvalid((previous) => mark(previous, field, isPoint(raw)))
+  }
+
+  const commitPoint = (field: PointField): void => {
+    const raw = typed[field]
+    if (!isPoint(raw)) {
+      setInvalid((previous) => mark(previous, field, false))
       return
     }
-    next.delete(field)
-    setInvalid(next)
+    setInvalid((previous) => mark(previous, field, true))
+    const value = Number(raw)
+    // An edit that lands back on the value it started from has nothing to say,
+    // and a revision would undo to a document identical to this one.
+    if (draft[field] === value) return
     const nextPageSetup: PageSetup = { ...draft, [field]: value }
     setDraft(nextPageSetup)
     onChange(nextPageSetup)
@@ -80,9 +120,13 @@ export function PageSetupForm({ pageSetup, disabled, onChange }: PageSetupFormPr
             min={1}
             step={1}
             disabled={disabled}
-            value={String(draft[entry.field])}
+            value={typed[entry.field]}
             error={invalid.has(entry.field) ? INVALID_POINT : null}
             onChange={(event) => readPoint(entry.field, event.target.value)}
+            onBlur={() => commitPoint(entry.field)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitPoint(entry.field)
+            }}
           />
         ))}
         <SelectField

@@ -145,7 +145,9 @@ describe('ResumeEditorPanel', () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)
 
-    fireEvent.change(screen.getByLabelText('页面宽度（pt）'), { target: { value: '620' } })
+    const width = screen.getByLabelText('页面宽度（pt）')
+    fireEvent.change(width, { target: { value: '620' } })
+    fireEvent.blur(width)
 
     await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
     const [resumeId, change] = harness.services.resumes.commit.mock.calls[0] as [string, { label: string; next: (state: DocumentState) => DocumentState }]
@@ -155,11 +157,46 @@ describe('ResumeEditorPanel', () => {
     expect(harness.stored().pageSetup.pageWidth).toBe(620)
   })
 
+  it('writes one revision for a whole typed measurement, not one per keystroke', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    // 5 → 6 → 62 → 620: three intermediate values are not measurements, and
+    // none of them may reach the document.
+    const width = screen.getByLabelText('页面宽度（pt）')
+    fireEvent.change(width, { target: { value: '6' } })
+    fireEvent.change(width, { target: { value: '62' } })
+    fireEvent.change(width, { target: { value: '620' } })
+    expect(harness.services.resumes.commit).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(width, { key: 'Enter' })
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.stored().pageSetup.pageWidth).toBe(620)
+  })
+
   it('refuses a page measurement that is not a positive number', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)
 
-    fireEvent.change(screen.getByLabelText('页面高度（pt）'), { target: { value: '0' } })
+    const height = screen.getByLabelText('页面高度（pt）')
+    fireEvent.change(height, { target: { value: '0' } })
+    fireEvent.blur(height)
+
+    expect(screen.getByText('请输入大于 0 的数字。')).toBeInTheDocument()
+    expect(harness.services.resumes.commit).not.toHaveBeenCalled()
+    expect(harness.resume.pageSetup.pageHeight).not.toBe(0)
+  })
+
+  it('writes nothing while a measurement is still half typed', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    // Clearing a number field is the shortest possible half-measurement: an
+    // empty string parses to nothing and must not reach the document.
+    const width = screen.getByLabelText('页面宽度（pt）')
+    fireEvent.change(width, { target: { value: '' } })
+    fireEvent.blur(width)
 
     expect(screen.getByText('请输入大于 0 的数字。')).toBeInTheDocument()
     expect(harness.services.resumes.commit).not.toHaveBeenCalled()
@@ -215,6 +252,7 @@ describe('ResumeEditorPanel', () => {
     await renderEditor(harness)
 
     fireEvent.change(screen.getByLabelText('页面宽度（pt）'), { target: { value: '620' } })
+    fireEvent.blur(screen.getByLabelText('页面宽度（pt）'))
 
     expect(await screen.findByText('这份简历已定稿，复制一份新的草稿再继续修改。')).toBeInTheDocument()
   })
