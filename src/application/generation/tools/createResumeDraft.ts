@@ -4,6 +4,11 @@
  * targeted at a job posting. The selection is identifiers only, so the agent
  * assembles a document out of text the user already wrote.
  *
+ * Responsibilities:
+ * - Assemble the draft's blocks and refuse the ones the library cannot back
+ * - Write the resume and its first revision together, so a refused block leaves
+ *   no empty draft behind
+ *
  * Constraints:
  * - A profile block is always copied from the current Profile and placed at the
  *   head. The copy is unconditional, takes no part in the blockIds selection,
@@ -11,13 +16,15 @@
  *   stale name is how contact details silently go out of date.
  * - Every copied block gets a fresh id and a reference version rebased on the
  *   current library, so the draft shares no identity with its source.
+ * - The references are checked before the insert rather than through
+ *   commitDocumentChange: that use case appends a second revision to a resume
+ *   that already exists, which is the shape this tool must not have.
  */
 
 import { z } from 'zod'
-import { createResume } from '../../resume/CreateResume'
+import { createResumeFromDocument } from '../../resume/CreateResume'
 import type { ResumeCreation } from '../../resume/CreateResume'
-import { commitDocumentChange } from '../../resume/CommitDocumentChange'
-import { describeChange } from '../../../domain/resume/DocumentChange'
+import { assertBlocksMayBeReferenced } from '../../resume/assertBlockReferences'
 import { A4_PAGE_SETUP } from '../../../domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../domain/resume/Layout'
 import { isExperienceContent, isProfileContent } from '../../../domain/resume/Block'
@@ -104,21 +111,15 @@ export function buildCreateResumeDraftTool(
 
       const profileBlock = await profileBlockFrom(ctx, deps.ids)
       const copied = await copyBlocks(source.id, selected.blocks, ctx, deps.ids)
+      const blocks: readonly Block[] = [profileBlock, ...copied]
+      await assertBlocksMayBeReferenced(ctx.experiences, blocks)
       const title = posting.parsed?.title ?? source.title
-      const newResumeId = await createResume(deps.resumeCreation, deps.ids, ctx.clock, {
+      const newResumeId = await createResumeFromDocument(deps.resumeCreation, deps.ids, ctx.clock, {
         title,
         targetRole: posting.parsed?.title ?? null,
+        document: { blocks, pageSetup: A4_PAGE_SETUP },
+        provenance: { label: REVISION_LABEL, origin: 'agent', runId: deps.runId },
       })
-      const blocks: readonly Block[] = [profileBlock, ...copied]
-      await commitDocumentChange(
-        ctx.resumes,
-        ctx.experiences,
-        newResumeId,
-        describeChange({ label: REVISION_LABEL, origin: 'agent', runId: deps.runId }, () => ({
-          blocks,
-          pageSetup: A4_PAGE_SETUP,
-        })),
-      )
       return {
         kind: 'created',
         resumeId: newResumeId,

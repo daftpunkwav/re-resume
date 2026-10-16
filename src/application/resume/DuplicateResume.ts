@@ -17,10 +17,8 @@
  */
 
 import { DomainError } from '../../domain/shared/DomainError'
-import { createResume, setDocument } from '../../domain/resume/Resume'
-import type { Resume } from '../../domain/resume/Resume'
 import { INITIAL_REVISION_LABEL } from '../../domain/resume/Revision'
-import type { Revision } from '../../domain/resume/Revision'
+import type { Resume } from '../../domain/resume/Resume'
 import type { DocumentState } from '../../domain/resume/DocumentChange'
 import { isExperienceContent, isProfileContent } from '../../domain/resume/Block'
 import type { Block } from '../../domain/resume/Block'
@@ -32,7 +30,8 @@ import type { ProfileRepository } from '../../domain/catalog/ports/ProfileReposi
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { ExperienceId, ResumeId } from '../../domain/shared/branded-id'
-import { asBlockId, asResumeId, asRevisionId } from '../../domain/shared/branded-id'
+import { asBlockId } from '../../domain/shared/branded-id'
+import { createResumeFromDocument } from './CreateResume'
 import type { ResumeCreation } from './CreateResume'
 
 export interface DuplicateResumeInput {
@@ -51,41 +50,17 @@ export async function duplicateResume(
   input: DuplicateResumeInput,
 ): Promise<ResumeId> {
   const source = await loadResume(resumeRepo, input.sourceResumeId)
-  const now = clock.now()
   const profile = await profileRepo.get()
-  const blocks = await copyBlocks(source.id, source.blocks, experienceRepo, profile, ids)
-  const pageSetup = source.pageSetup
-  const state: DocumentState = { blocks, pageSetup }
-  const copyId = asResumeId(ids.next())
-  const initialRevisionId = asRevisionId(ids.next())
-  const resume = setDocument(
-    createResume(
-      {
-        id: copyId,
-        title: input.title ?? `${source.title}（副本）`,
-        targetRole: source.targetRole,
-        pageSetup,
-        initialRevisionId,
-      },
-      now,
-    ),
-    state,
-    initialRevisionId,
-    now,
-  )
-  const initial: Revision = {
-    id: initialRevisionId,
-    resumeId: copyId,
-    seq: 1,
-    label: INITIAL_REVISION_LABEL,
-    origin: 'user',
-    runId: null,
-    state,
-    supersededAt: null,
-    createdAt: now,
+  const document: DocumentState = {
+    blocks: await copyBlocks(source.id, source.blocks, experienceRepo, profile, ids),
+    pageSetup: source.pageSetup,
   }
-  await resumeCreation.insertWithInitialRevision(resume, initial)
-  return copyId
+  return createResumeFromDocument(resumeCreation, ids, clock, {
+    title: input.title ?? `${source.title}（副本）`,
+    targetRole: source.targetRole,
+    document,
+    provenance: { label: INITIAL_REVISION_LABEL, origin: 'user', runId: null },
+  })
 }
 
 /**

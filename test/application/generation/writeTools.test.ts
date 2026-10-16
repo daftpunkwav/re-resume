@@ -463,4 +463,31 @@ describe('write tools', () => {
       ),
     ).toEqual({ kind: 'unknownBlock', unknownBlockIds: ['nope'] })
   })
+
+  it('leaves no draft behind when a selected block cannot be referenced', async () => {
+    const refused: Block = {
+      ...experienceBlock('var-1'),
+      content: {
+        type: 'experience',
+        experienceId: asExperienceId('exp-1'),
+        variantId: asVariantId('var-1'),
+        refVersion: 1,
+        claimIds: [asClaimId('clm-bad')],
+      },
+    }
+    const fixture = await newFixture([refused])
+    const tool = draftTool(fixture)
+
+    await expect(
+      tool.execute(
+        { jobPostingId: POSTING.id, sourceResumeId: SOURCE_RESUME_ID, blockIds: ['block-exp'] },
+        fixture.ctx,
+      ),
+    ).rejects.toThrow(DomainError)
+
+    // The draft is written with its blocks in one insert, so a block the library
+    // cannot back stops the whole call rather than leaving an empty resume that
+    // no run points at.
+    expect(await fixture.resumes.listAll()).toHaveLength(1)
+  })
 })
