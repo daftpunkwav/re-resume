@@ -1,0 +1,148 @@
+/**
+ * Catalog region styles. Only the shapes the shared classes do not already
+ * provide; colour, spacing and type come from the theme tokens so one palette
+ * serves every section.
+ */
+
+/* Index ----------------------------------------------------------------- */
+
+.experience-groups {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+
+.experience-group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.experience-row-select {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.experience-row-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* Detail ----------------------------------------------------------------- */
+
+.experience-hint {
+  font-size: var(--text-size-sm);
+  color: var(--text-tertiary);
+}
+
+.experience-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.experience-editor {
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.experience-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.experience-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.experience-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.experience-row:last-child {
+  border-bottom: none;
+}
+
+.experience-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.experience-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.experience-excerpt {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Claims ----------------------------------------------------------------- */
+
+.claim-row {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border-subtle);
+}
+
+.claim-row-confirmed {
+  border-left-color: var(--status-success);
+}
+
+/* The unverified case has to read as unverified without opening the row. */
+.claim-row-pending {
+  border-left-color: var(--status-warning);
+  background: var(--status-warning-soft);
+}
+
+.claim-row-rejected {
+  border-left-color: var(--status-danger);
+}
+
+.claim-kind {
+  color: var(--text-tertiary);
+  font-size: var(--text-size-xs);
+}
+
+.claim-statement {
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+/* Failure detail --------------------------------------------------------- */
+
+.experience-blockers {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+}
+
+.experience-blockers li {
+  font-family: var(--font-mono);
+  font-size: var(--text-size-xs);
+}
