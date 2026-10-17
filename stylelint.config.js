@@ -9,8 +9,9 @@ export default {
   rules: {
     /**
      * Feature support is judged against the shared browserslist targets in
-     * package.json (safari >= 15, chrome >= 118) — one source of truth for
-     * build.target, eslint-plugin-compat and this rule alike.
+     * package.json (safari >= 15, chrome >= 118) — the same source
+     * eslint-plugin-compat reads. The bundler states the Safari 15 baseline
+     * separately, as build.target in vite.config.ts.
      */
     'plugin/no-unsupported-browser-features': [true, { ignorePartialSupport: true }],
     /**

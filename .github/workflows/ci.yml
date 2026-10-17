@@ -13,6 +13,11 @@ on:
   push:
     branches: [main]
 
+# The pipeline only reads the repository; granting the default token more than
+# that would widen the blast radius of a compromised step for no benefit.
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest

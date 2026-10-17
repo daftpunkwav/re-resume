@@ -261,7 +261,7 @@ importers:
         specifier: 40.0.0
         version: 40.0.0(stylelint@17.16.0(supports-color@10.2.2)(typescript@5.9.3))
       stylelint-no-unsupported-browser-features:
-        specifier: ^8.1.2
+        specifier: 8.1.2
         version: 8.1.2(stylelint@17.16.0(supports-color@10.2.2)(typescript@5.9.3))
       typescript:
         specifier: 5.9.3
