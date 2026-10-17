@@ -16,7 +16,7 @@
  */
 
 import { removeVariant as removeVariantAggregate } from '../../domain/catalog/Experience'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { ExperienceId, VariantId } from '../../domain/shared/branded-id'
 import { DomainError } from '../../domain/shared/DomainError'

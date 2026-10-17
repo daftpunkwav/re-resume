@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { duplicateResume } from '../../../src/application/resume/DuplicateResume'
 import { freezeResume } from '../../../src/application/resume/FreezeResume'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
 import { createResume, setDocument } from '../../../src/domain/resume/Resume'
@@ -84,10 +83,6 @@ function sourceBlocks(): Block[] {
       textStyle: null,
     },
   ]
-}
-
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
 }
 
 async function seededResume(
@@ -193,7 +188,6 @@ describe('duplicateResume', () => {
     await freezeResume(
       repo,
       experienceRepo,
-      chainOf(repo),
       new SequentialIdGenerator('snapshot'),
       new FixedClock(),
       RESUME_ID,

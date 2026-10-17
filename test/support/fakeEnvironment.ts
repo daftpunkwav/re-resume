@@ -7,7 +7,7 @@
 
 import { parseDateTime } from '../../src/domain/shared/DateTime'
 import type { DateTime } from '../../src/domain/shared/DateTime'
-import type { Clock } from '../../src/domain/catalog/ports/Clock'
+import type { Clock } from '../../src/domain/shared/Clock'
 import type { IdGenerator } from '../../src/domain/shared/IdGenerator'
 
 const EPOCH: DateTime = parseDateTime('2026-01-01T00:00:00.000Z') as DateTime

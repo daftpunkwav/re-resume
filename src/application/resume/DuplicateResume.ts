@@ -24,7 +24,7 @@ import { isExperienceContent, isProfileContent } from '../../domain/resume/Block
 import type { Block } from '../../domain/resume/Block'
 import type { Experience } from '../../domain/catalog/Experience'
 import type { Profile } from '../../domain/catalog/Profile'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { ProfileRepository } from '../../domain/catalog/ports/ProfileRepository'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'

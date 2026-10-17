@@ -6,7 +6,7 @@
  */
 
 import type { Result } from '../../shared/Result'
-import type { Clock } from '../../catalog/ports/Clock'
+import type { Clock } from '../../shared/Clock'
 import type { ExperienceRepository } from '../../catalog/ports/ExperienceRepository'
 import type { ProfileRepository } from '../../catalog/ports/ProfileRepository'
 import type { ResumeRepository } from '../../resume/ports/ResumeRepository'

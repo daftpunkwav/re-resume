@@ -17,10 +17,11 @@
  *   this file only decides which implementation each port receives.
  */
 
-import type { Clock } from '../domain/catalog/ports/Clock'
+import type { Clock } from '../domain/shared/Clock'
 import type { Experience } from '../domain/catalog/Experience'
 import type { Profile } from '../domain/catalog/Profile'
 import type { ExperienceRepository } from '../domain/catalog/ports/ExperienceRepository'
+import type { ResumeRepository } from '../domain/resume/ports/ResumeRepository'
 import type { ProfileRepository } from '../domain/catalog/ports/ProfileRepository'
 import type { IdGenerator } from '../domain/shared/IdGenerator'
 import type { Result } from '../domain/shared/Result'
@@ -53,8 +54,6 @@ import { SqliteProfileRepository } from '../infrastructure/persistence/SqlitePro
 import { SqliteResumeRepository } from '../infrastructure/persistence/SqliteResumeRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/SqliteAgentRunRepository'
 import { SqliteJobPostingRepository } from '../infrastructure/persistence/SqliteJobPostingRepository'
-import { fromDocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
-import type { DocumentRevisionRow } from '../infrastructure/persistence/mappers/ResumeRowMapper'
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
@@ -86,7 +85,6 @@ import { duplicateResume } from '../application/resume/DuplicateResume'
 import type { DuplicateResumeInput } from '../application/resume/DuplicateResume'
 import { commitDocumentChange } from '../application/resume/CommitDocumentChange'
 import { undoDocumentChange } from '../application/resume/UndoDocumentChange'
-import type { LiveRevisionChain } from '../application/resume/UndoDocumentChange'
 import { redoDocumentChange } from '../application/resume/RedoDocumentChange'
 import { freezeResume } from '../application/resume/FreezeResume'
 import { compareVersions } from '../application/resume/CompareVersions'
@@ -247,9 +245,8 @@ interface Wiring {
   readonly measurer: TextMeasurer
   readonly experienceRepo: ExperienceRepository
   readonly profileRepo: ProfileRepository
-  /** Concrete: the resume creation use cases need insertWithInitialRevision,
-   *  which ResumeRepository does not declare. */
-  readonly resumeRepo: SqliteResumeRepository
+  /** The port plus the creation capability CreateResume and DuplicateResume declare. */
+  readonly resumeRepo: ResumeRepository & ResumeCreation
   readonly runRepo: SqliteAgentRunRepository
   readonly secretStore: SecretStore
   readonly provider: ModelProvider
@@ -362,7 +359,6 @@ function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
   // declare; SqliteResumeRepository answers it with insertWithInitialRevision,
   // which writes the resume row and its first revision in one transaction.
   const resumeCreation: ResumeCreation = wiring.resumeRepo
-  const readChain = revisionChainReader(wiring.database)
   const measurer = wiring.measurer
   return {
     list: () => wiring.resumeRepo.listAll(),
@@ -380,13 +376,12 @@ function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
       ),
     commit: (resumeId, change) =>
       commitDocumentChange(wiring.resumeRepo, wiring.experienceRepo, resumeId, change),
-    undo: (resumeId) => undoDocumentChange(wiring.resumeRepo, readChain, resumeId),
-    redo: (resumeId) => redoDocumentChange(wiring.resumeRepo, readChain, resumeId),
+    undo: (resumeId) => undoDocumentChange(wiring.resumeRepo, resumeId),
+    redo: (resumeId) => redoDocumentChange(wiring.resumeRepo, resumeId),
     freeze: (resumeId) =>
       freezeResume(
         wiring.resumeRepo,
         wiring.experienceRepo,
-        readChain,
         wiring.ids,
         wiring.clock,
         resumeId,
@@ -477,23 +472,6 @@ function buildAgentConsole(wiring: Wiring): AgentConsole {
       },
       runId,
     )
-  }
-}
-
-/**
- * The revision chain the undo, redo and freeze use cases walk. ResumeRepository
- * addresses one revision at a time and offers no listing, and the port is not
- * this build's to widen, so the read is issued here against the connection the
- * root already opened. Superseded rows are returned as they are: each use case
- * filters them itself.
- */
-function revisionChainReader(database: SqlDatabase): LiveRevisionChain {
-  return async (resumeId) => {
-    const rows = await database.select<DocumentRevisionRow>(
-      'SELECT * FROM document_revision WHERE resume_id = $1 ORDER BY seq ASC',
-      [resumeId],
-    )
-    return rows.map(fromDocumentRevisionRow)
   }
 }
 

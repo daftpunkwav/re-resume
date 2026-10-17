@@ -29,28 +29,25 @@ import type { ResumeSnapshot } from '../../domain/resume/ResumeSnapshot'
 import { isExperienceContent } from '../../domain/resume/Block'
 import type { ExperienceContent } from '../../domain/resume/Block'
 import { isLiveRevision } from '../../domain/resume/Revision'
-import type { Revision } from '../../domain/resume/Revision'
 import type { Experience } from '../../domain/catalog/Experience'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { ExperienceId, ResumeId } from '../../domain/shared/branded-id'
 import { asSnapshotId } from '../../domain/shared/branded-id'
 import { materializeBlocks } from './materializeBlocks'
-import type { LiveRevisionChain } from './UndoDocumentChange'
 
 export async function freezeResume(
   resumeRepo: ResumeRepository,
   experienceRepo: ExperienceRepository,
-  readChain: LiveRevisionChain,
   ids: IdGenerator,
   clock: Clock,
   resumeId: ResumeId,
 ): Promise<ResumeSnapshot> {
   const resume = await loadResume(resumeRepo, resumeId)
   assertMutable(resume)
-  await assertCursorIsNewest(readChain, resume)
+  await assertCursorIsNewest(resumeRepo, resume)
   await assertNoPendingClaim(experienceRepo, resume)
   assertHasSubstantiveContent(resume.id, resume.blocks)
   const frozen = freezeResumeAggregate(
@@ -79,10 +76,10 @@ export async function freezeResume(
 }
 
 async function assertCursorIsNewest(
-  readChain: LiveRevisionChain,
+  resumeRepo: ResumeRepository,
   resume: Resume,
 ): Promise<void> {
-  const revisions: readonly Revision[] = await readChain(resume.id)
+  const revisions = await resumeRepo.listRevisions(resume.id)
   const live = revisions.filter(isLiveRevision).sort((left, right) => left.seq - right.seq)
   const newest = live[live.length - 1]
   if (newest !== undefined && newest.id === resume.currentRevision) return

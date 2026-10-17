@@ -142,6 +142,10 @@ export class InMemoryResumeRepository implements ResumeRepository {
     return this.revisions.get(id) ?? null
   }
 
+  async listRevisions(id: ResumeId): Promise<readonly Revision[]> {
+    return this.historyOf(id)
+  }
+
   async appendSnapshot(
     snapshot: ResumeSnapshot,
     expectedRevisionId: RevisionId,

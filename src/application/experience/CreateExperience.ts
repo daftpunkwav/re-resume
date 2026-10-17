@@ -21,7 +21,7 @@ import { createExperience as createExperienceAggregate } from '../../domain/cata
 import type { Experience } from '../../domain/catalog/Experience'
 import { EXPERIENCE_KINDS } from '../../domain/catalog/ExperienceKind'
 import type { ExperienceKind } from '../../domain/catalog/ExperienceKind'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import { parseIsoDate } from '../../domain/shared/DateTime'
 import { asExperienceId } from '../../domain/shared/branded-id'

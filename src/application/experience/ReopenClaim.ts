@@ -15,7 +15,7 @@
 
 import { reopenClaim as reopenClaimAggregate } from '../../domain/catalog/Experience'
 import type { Experience } from '../../domain/catalog/Experience'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { ClaimId, ExperienceId } from '../../domain/shared/branded-id'
 

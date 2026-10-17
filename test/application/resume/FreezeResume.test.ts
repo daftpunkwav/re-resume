@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { freezeResume } from '../../../src/application/resume/FreezeResume'
 import { undoDocumentChange } from '../../../src/application/resume/UndoDocumentChange'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
 import { createResume } from '../../../src/domain/resume/Resume'
@@ -85,10 +84,6 @@ function experienceBlock(claimIds: readonly ClaimId[]): Block {
   }
 }
 
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
-}
-
 async function seededResume(): Promise<InMemoryResumeRepository> {
   const repo = new InMemoryResumeRepository(() => NOW)
   await repo.insertWithInitialRevision(
@@ -130,7 +125,6 @@ describe('freezeResume', () => {
     const snapshot = await freezeResume(
       repo,
       experienceRepo,
-      chainOf(repo),
       new SequentialIdGenerator('snapshot'),
       new FixedClock(),
       RESUME_ID,
@@ -174,7 +168,6 @@ describe('freezeResume', () => {
       freezeResume(
         repo,
         experienceRepo,
-        chainOf(repo),
         new SequentialIdGenerator('snapshot'),
         new FixedClock(),
         RESUME_ID,
@@ -204,13 +197,12 @@ describe('freezeResume', () => {
         blocks: [...state.blocks, textBlock('block-2', '第二段。')],
       })),
     )
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
 
     await expect(
       freezeResume(
         repo,
         experienceRepo,
-        chainOf(repo),
         new SequentialIdGenerator('snapshot'),
         new FixedClock(),
         RESUME_ID,
@@ -225,7 +217,6 @@ describe('freezeResume', () => {
       freezeResume(
         repo,
         new InMemoryExperienceRepository(),
-        chainOf(repo),
         new SequentialIdGenerator('snapshot'),
         new FixedClock(),
         RESUME_ID,
@@ -247,10 +238,10 @@ describe('freezeResume', () => {
     )
     const ids = new SequentialIdGenerator('snapshot')
     const clock = new FixedClock()
-    await freezeResume(repo, experienceRepo, chainOf(repo), ids, clock, RESUME_ID)
+    await freezeResume(repo, experienceRepo, ids, clock, RESUME_ID)
 
     await expect(
-      freezeResume(repo, experienceRepo, chainOf(repo), ids, clock, RESUME_ID),
+      freezeResume(repo, experienceRepo, ids, clock, RESUME_ID),
     ).rejects.toMatchObject({ code: 'frozenResumeImmutable' })
   })
 })

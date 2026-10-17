@@ -20,7 +20,7 @@
 import { z } from 'zod'
 import { updateProfile as updateProfileAggregate } from '../../domain/catalog/Profile'
 import type { Profile } from '../../domain/catalog/Profile'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ProfileRepository } from '../../domain/catalog/ports/ProfileRepository'
 import { err, ok } from '../../domain/shared/Result'
 import type { Result } from '../../domain/shared/Result'

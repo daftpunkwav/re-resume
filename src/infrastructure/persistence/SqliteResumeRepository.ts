@@ -25,7 +25,7 @@ import type { Resume } from '../../domain/resume/Resume'
 import type { ResumeSnapshot } from '../../domain/resume/ResumeSnapshot'
 import type { DocumentChangeMeta, DocumentState } from '../../domain/resume/DocumentChange'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeId, RevisionId, SnapshotId } from '../../domain/shared/branded-id'
 import { RowMappingError } from './mappers/JsonEnvelope'
@@ -212,6 +212,10 @@ export class SqliteResumeRepository implements ResumeRepository {
     )
     const row = rows[0]
     return row === undefined ? null : fromResumeSnapshotRow(row)
+  }
+
+  async listRevisions(id: ResumeId): Promise<readonly Revision[]> {
+    return this.#readHistory(this.#database, id)
   }
 
   async readRevision(id: RevisionId): Promise<Revision | null> {
