@@ -5,7 +5,14 @@
  */
 export default {
   extends: ['stylelint-config-standard'],
+  plugins: ['stylelint-no-unsupported-browser-features'],
   rules: {
+    /**
+     * Feature support is judged against the shared browserslist targets in
+     * package.json (safari >= 15, chrome >= 118) — one source of truth for
+     * build.target, eslint-plugin-compat and this rule alike.
+     */
+    'plugin/no-unsupported-browser-features': [true, { ignorePartialSupport: true }],
     /**
      * The modern range syntax `(width <= 900px)` is what the rule asks for, and
      * it needs Safari 16.4. The WebView baseline is Safari 15, so the legacy
