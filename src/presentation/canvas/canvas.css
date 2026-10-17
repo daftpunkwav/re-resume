@@ -52,9 +52,15 @@
   border-radius: var(--radius-lg);
 }
 
-.canvas-viewport:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+/* Gated because :focus-visible needs Safari 15.4; on 15.0-15.3 the global
+   :focus fallback in base.css is the ring this rule would otherwise replace. */
+@supports selector(:focus-visible) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features --
+     Gated by the @supports condition above, which the checker cannot read. */
+  .canvas-viewport:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
 }
 
 /* The stage fills the scrollable viewport; Konva sizes its canvas from the
