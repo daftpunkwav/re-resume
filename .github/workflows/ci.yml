@@ -27,6 +27,12 @@ jobs:
       # in a workflow as a supply-chain vulnerability. The comment names the
       # release each SHA corresponds to.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Later steps run package lifecycle scripts, which on a pull request
+          # are PR-controlled code. Checkout leaves the job token in the local
+          # Git config by default, where those scripts could read it; nothing
+          # in this pipeline needs it after checkout.
+          persist-credentials: false
 
       # Installs the pnpm version from the packageManager field.
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0

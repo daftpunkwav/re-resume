@@ -199,7 +199,9 @@ describe('SqliteResumeRepository', () => {
       third.id,
     ])
     const abandoned = chain.find((revision) => revision.id === second.id)
-    expect(abandoned?.supersededAt).not.toBeNull()
+    // `?? null` so a mapper that drops the field reports undefined as null and
+    // fails here, instead of slipping past not.toBeNull().
+    expect(abandoned?.supersededAt ?? null).not.toBeNull()
   })
 
   /** Freezes against the revision the snapshot was cut from, as the use case does. */

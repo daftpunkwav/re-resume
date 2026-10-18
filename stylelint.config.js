@@ -12,6 +12,16 @@ export default {
      * package.json (safari >= 15, chrome >= 118) — the same source
      * eslint-plugin-compat reads. The bundler states the Safari 15 baseline
      * separately, as build.target in vite.config.ts.
+     *
+     * Partial support is ignored because the checker reports the feature
+     * family, not the syntax actually used: the "css-overflow" entry is
+     * "partially supported" on every Safari 15.x because the modern spec
+     * added overflow: clip, yet every overflow declaration in this codebase
+     * is hidden/auto — fully supported since Safari 1/3. Enabling strict
+     * mode turns those thirteen pre-existing declarations into failures
+     * while catching nothing real, so the flag stays on; a genuinely
+     * partial feature used by a rule is a review question, not something
+     * this gate can decide.
      */
     'plugin/no-unsupported-browser-features': [true, { ignorePartialSupport: true }],
     /**
