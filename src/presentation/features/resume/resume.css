@@ -109,7 +109,8 @@
   color: var(--text-tertiary);
 }
 
-@media (width <= 1180px) {
+/* Legacy range form: the modern (width <= 1180px) needs Safari 16.4. */
+@media (max-width: 1180px) {
   .resume-editor-grid {
     grid-template-columns: 1fr;
   }

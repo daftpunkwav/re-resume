@@ -87,9 +87,15 @@
   opacity: 0.5;
 }
 
-.button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-ring);
+/* Gated because :focus-visible needs Safari 15.4; on 15.0-15.3 the global
+   :focus fallback in base.css is the ring this rule would otherwise replace. */
+@supports selector(:focus-visible) {
+  /* stylelint-disable-next-line plugin/no-unsupported-browser-features --
+     Gated by the @supports condition above, which the checker cannot read. */
+  .button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
 }
 
 /* Fields ----------------------------------------------------------------- */

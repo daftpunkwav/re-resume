@@ -13,7 +13,7 @@
  * - Must not cache the reading: two writes a microsecond apart are two events.
  */
 
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { DateTime } from '../../domain/shared/DateTime'
 import { parseDateTime } from '../../domain/shared/DateTime'
 

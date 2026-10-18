@@ -20,16 +20,14 @@ import { isLiveRevision } from '../../domain/resume/Revision'
 import type { Revision } from '../../domain/resume/Revision'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { ResumeId } from '../../domain/shared/branded-id'
-import type { LiveRevisionChain } from './UndoDocumentChange'
 
 export async function redoDocumentChange(
   resumeRepo: ResumeRepository,
-  readChain: LiveRevisionChain,
   resumeId: ResumeId,
 ): Promise<Revision> {
   const resume = await loadResume(resumeRepo, resumeId)
   assertMutable(resume)
-  const chain = await liveChain(readChain, resumeId)
+  const chain = await liveChain(resumeRepo, resumeId)
   const position = chain.findIndex((revision) => revision.id === resume.currentRevision)
   if (position < 0) {
     throw new DomainError(
@@ -51,10 +49,10 @@ export async function redoDocumentChange(
 }
 
 async function liveChain(
-  readChain: LiveRevisionChain,
+  resumeRepo: ResumeRepository,
   resumeId: ResumeId,
 ): Promise<readonly Revision[]> {
-  const revisions = await readChain(resumeId)
+  const revisions = await resumeRepo.listRevisions(resumeId)
   return revisions.filter(isLiveRevision).sort((left, right) => left.seq - right.seq)
 }
 

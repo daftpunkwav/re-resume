@@ -19,7 +19,7 @@
 import { z } from 'zod'
 import { updateFact } from '../../domain/catalog/Experience'
 import type { Experience, FactPatch } from '../../domain/catalog/Experience'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import { parseIsoDate } from '../../domain/shared/DateTime'
 import { asExperienceId } from '../../domain/shared/branded-id'

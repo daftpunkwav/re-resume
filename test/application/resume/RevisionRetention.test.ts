@@ -9,7 +9,6 @@ import { describe, expect, it } from 'vitest'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { redoDocumentChange } from '../../../src/application/resume/RedoDocumentChange'
 import { undoDocumentChange } from '../../../src/application/resume/UndoDocumentChange'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
 import { createResume } from '../../../src/domain/resume/Resume'
@@ -73,10 +72,6 @@ async function appendParagraph(repo: InMemoryResumeRepository, index: number): P
   )
 }
 
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
-}
-
 function seqsOf(repo: InMemoryResumeRepository): readonly number[] {
   return repo.historyOf(RESUME_ID).map((revision) => revision.seq)
 }
@@ -92,7 +87,7 @@ describe('revision retention', () => {
     await appendParagraph(repo, 2)
     const abandoned = repo.historyOf(RESUME_ID).find((revision) => revision.seq === 3)
 
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
     const added = await appendParagraph(repo, 3)
 
     const survivor = repo.historyOf(RESUME_ID).find((revision) => revision.seq === 3)
@@ -126,8 +121,8 @@ describe('revision retention', () => {
   it('never trims an abandoned branch', async () => {
     const repo = await resumeWithRevisionLimit()
     for (let index = 1; index <= 5; index += 1) await appendParagraph(repo, index)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
 
     await appendParagraph(repo, 6)
 
@@ -146,13 +141,13 @@ describe('revision retention', () => {
     const repo = await resumeWithRevisionLimit()
     for (let index = 1; index <= 5; index += 1) await appendParagraph(repo, index)
 
-    const first = await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const first = await undoDocumentChange(repo, RESUME_ID)
     expect(first.seq).toBe(5)
-    const second = await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const second = await undoDocumentChange(repo, RESUME_ID)
     expect(second.seq).toBe(4)
 
     // The window start is the floor of the chain, not the initial revision.
-    await expect(undoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(undoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'cursorNotOnLiveChain',
     })
   })
@@ -160,12 +155,12 @@ describe('revision retention', () => {
   it('keeps the redo path reachable after a trim', async () => {
     const repo = await resumeWithRevisionLimit()
     for (let index = 1; index <= 5; index += 1) await appendParagraph(repo, index)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
 
-    const forward = await redoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const forward = await redoDocumentChange(repo, RESUME_ID)
     expect(forward.seq).toBe(5)
-    const head = await redoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const head = await redoDocumentChange(repo, RESUME_ID)
     expect(head.seq).toBe(6)
     expect(seqsOf(repo)).toEqual([4, 5, 6])
   })

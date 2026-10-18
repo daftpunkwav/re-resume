@@ -18,7 +18,7 @@
 import { z } from 'zod'
 import { addVariant as addVariantAggregate } from '../../domain/catalog/Experience'
 import type { Experience } from '../../domain/catalog/Experience'
-import type { Clock } from '../../domain/catalog/ports/Clock'
+import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import { asAgentRunId, asExperienceId, asVariantId } from '../../domain/shared/branded-id'
 import type { AgentRunId } from '../../domain/shared/branded-id'

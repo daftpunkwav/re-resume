@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { freezeResume } from '../../../src/application/resume/FreezeResume'
 import { undoDocumentChange } from '../../../src/application/resume/UndoDocumentChange'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { isLiveRevision } from '../../../src/domain/resume/Revision'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
@@ -34,10 +33,6 @@ function appending(block: Block, label: string) {
     ...state,
     blocks: [...state.blocks, block],
   }))
-}
-
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
 }
 
 /** A resume with three revisions: the initial one plus two committed blocks. */
@@ -82,7 +77,7 @@ describe('undoDocumentChange', () => {
     const repo = await resumeWithTwoCommits()
     const before = repo.historyOf(RESUME_ID)
 
-    const target = await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const target = await undoDocumentChange(repo, RESUME_ID)
 
     expect(target.seq).toBe(2)
     const after = repo.historyOf(RESUME_ID)
@@ -98,10 +93,10 @@ describe('undoDocumentChange', () => {
   it('stops at the initial revision', async () => {
     const repo = await resumeWithTwoCommits()
 
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
 
-    await expect(undoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(undoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'cursorNotOnLiveChain',
     })
     const stored = await repo.findById(RESUME_ID)
@@ -113,7 +108,7 @@ describe('undoDocumentChange', () => {
   it('supersedes the abandoned branch when a change is committed after undo', async () => {
     const repo = await resumeWithTwoCommits()
     const abandoned = repo.historyOf(RESUME_ID).find((entry) => entry.seq === 3)
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
 
     const revision = await commitDocumentChange(
       repo,
@@ -131,7 +126,7 @@ describe('undoDocumentChange', () => {
 
     // The abandoned state is unreachable: undo lands on the revision the cursor
     // was on before the branch was abandoned, never on the abandoned row.
-    const target = await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const target = await undoDocumentChange(repo, RESUME_ID)
     expect(target.seq).toBe(2)
     expect(target.id).not.toBe(abandoned?.id)
     const stored = await repo.findById(RESUME_ID)
@@ -143,13 +138,12 @@ describe('undoDocumentChange', () => {
     await freezeResume(
       repo,
       new InMemoryExperienceRepository(),
-      chainOf(repo),
       new SequentialIdGenerator('snapshot'),
       new FixedClock(),
       RESUME_ID,
     )
 
-    await expect(undoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(undoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'frozenResumeImmutable',
     })
   })

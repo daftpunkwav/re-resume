@@ -3,7 +3,6 @@ import { compareVersions } from '../../../src/application/resume/CompareVersions
 import type { VersionSelector } from '../../../src/application/resume/CompareVersions'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { freezeResume } from '../../../src/application/resume/FreezeResume'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import type { PageSetup } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
@@ -29,10 +28,6 @@ function textBlock(id: string, text: string): Block {
     layout: DEFAULT_FLOW_LAYOUT,
     textStyle: null,
   }
-}
-
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
 }
 
 function revisionAt(repo: InMemoryResumeRepository, seq: number): VersionSelector {
@@ -153,7 +148,6 @@ describe('compareVersions', () => {
     const snapshot = await freezeResume(
       repo,
       new InMemoryExperienceRepository(),
-      chainOf(repo),
       new SequentialIdGenerator('snapshot'),
       new FixedClock(),
       RESUME_ID,

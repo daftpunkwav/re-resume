@@ -182,6 +182,28 @@ describe('SqliteResumeRepository', () => {
     expect(third.seq).toBe(3)
   })
 
+  it('lists the whole chain in seq order, superseded rows included', async () => {
+    const { repository } = await newRepository()
+    const second = await saveNext(repository, FIRST_STATE, '第二版')
+    await repository.moveCursor(RESUME_ID, INITIAL_REVISION_ID)
+    const third = await saveNext(repository, FIRST_STATE, '第三版')
+
+    const chain = await repository.listRevisions(RESUME_ID)
+
+    // The undo, redo and freeze use cases filter superseded rows themselves;
+    // the read hands over everything it stored, oldest first.
+    expect(chain.map((revision) => revision.seq)).toEqual([1, 2, 3])
+    expect(chain.map((revision) => revision.id)).toEqual([
+      INITIAL_REVISION_ID,
+      second.id,
+      third.id,
+    ])
+    const abandoned = chain.find((revision) => revision.id === second.id)
+    // `?? null` so a mapper that drops the field reports undefined as null and
+    // fails here, instead of slipping past not.toBeNull().
+    expect(abandoned?.supersededAt ?? null).not.toBeNull()
+  })
+
   /** Freezes against the revision the snapshot was cut from, as the use case does. */
   async function freezeAsOfCurrent(
     repository: SqliteResumeRepository,

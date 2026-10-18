@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { freezeResume } from '../../../src/application/resume/FreezeResume'
 import { redoDocumentChange } from '../../../src/application/resume/RedoDocumentChange'
-import type { LiveRevisionChain } from '../../../src/application/resume/UndoDocumentChange'
 import { undoDocumentChange } from '../../../src/application/resume/UndoDocumentChange'
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
@@ -34,10 +33,6 @@ function appending(block: Block, label: string) {
     ...state,
     blocks: [...state.blocks, block],
   }))
-}
-
-function chainOf(repo: InMemoryResumeRepository): LiveRevisionChain {
-  return (resumeId) => repo.historyOf(resumeId)
 }
 
 async function resumeWithTwoCommits(): Promise<InMemoryResumeRepository> {
@@ -79,10 +74,10 @@ async function resumeWithTwoCommits(): Promise<InMemoryResumeRepository> {
 describe('redoDocumentChange', () => {
   it('moves the cursor forward one revision without creating one', async () => {
     const repo = await resumeWithTwoCommits()
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
     const before = repo.historyOf(RESUME_ID)
 
-    const target = await redoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    const target = await redoDocumentChange(repo, RESUME_ID)
 
     expect(target.seq).toBe(3)
     expect(repo.historyOf(RESUME_ID)).toHaveLength(before.length)
@@ -97,7 +92,7 @@ describe('redoDocumentChange', () => {
   it('refuses to move past the newest revision', async () => {
     const repo = await resumeWithTwoCommits()
 
-    await expect(redoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(redoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'cursorNotOnLiveChain',
     })
     expect(repo.historyOf(RESUME_ID)).toHaveLength(3)
@@ -105,7 +100,7 @@ describe('redoDocumentChange', () => {
 
   it('does not offer an abandoned branch as redoable history', async () => {
     const repo = await resumeWithTwoCommits()
-    await undoDocumentChange(repo, chainOf(repo), RESUME_ID)
+    await undoDocumentChange(repo, RESUME_ID)
     await commitDocumentChange(
       repo,
       new InMemoryExperienceRepository(),
@@ -113,7 +108,7 @@ describe('redoDocumentChange', () => {
       appending(textBlock('block-3', '改写后的第一段。'), '改写第一段'),
     )
 
-    await expect(redoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(redoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'cursorNotOnLiveChain',
     })
     const stored = await repo.findById(RESUME_ID)
@@ -128,13 +123,12 @@ describe('redoDocumentChange', () => {
     await freezeResume(
       repo,
       new InMemoryExperienceRepository(),
-      chainOf(repo),
       new SequentialIdGenerator('snapshot'),
       new FixedClock(),
       RESUME_ID,
     )
 
-    await expect(redoDocumentChange(repo, chainOf(repo), RESUME_ID)).rejects.toMatchObject({
+    await expect(redoDocumentChange(repo, RESUME_ID)).rejects.toMatchObject({
       code: 'frozenResumeImmutable',
     })
   })

@@ -36,6 +36,12 @@ export interface ResumeRepository {
   ): Promise<Revision>
   /** Undo/redo: moves the cursor without creating a revision. Refused for frozen resumes. */
   moveCursor(id: ResumeId, revisionId: RevisionId): Promise<void>
+  /**
+   * The resume's full revision chain, ascending by seq, superseded rows
+   * included. The use cases that walk the chain (undo, redo, the freeze guard)
+   * filter superseded rows themselves; this read takes no side in that choice.
+   */
+  listRevisions(id: ResumeId): Promise<readonly Revision[]>
   readRevision(id: RevisionId): Promise<Revision | null>
   /**
    * Reads one snapshot by its own identifier; null when no snapshot carries it.
