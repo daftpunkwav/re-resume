@@ -33,7 +33,7 @@ import { useResource } from '../../app/useResource'
 import type { ResumeWorkbench } from '../../../bootstrap/compositionRoot'
 import type { Block } from '../../../domain/resume/Block'
 import type { DocumentChange, DocumentState } from '../../../domain/resume/DocumentChange'
-import { isAbsoluteLayout } from '../../../domain/resume/Layout'
+import { DEFAULT_FLOW_LAYOUT, isAbsoluteLayout, isFlowLayout } from '../../../domain/resume/Layout'
 import type { LayoutOutput } from '../../../domain/resume/PageLayout'
 import type { PageSetup } from '../../../domain/resume/PageSetup'
 import type { Resume } from '../../../domain/resume/Resume'
@@ -44,6 +44,7 @@ import { ResumeCanvas } from '../../canvas/ResumeCanvas'
 import type { BlockMove } from '../../canvas/ResumeCanvas'
 import { BlockPalette } from './BlockPalette'
 import { PageSetupForm } from './PageSetupForm'
+import { SelectedBlockPanel } from './SelectedBlockPanel'
 
 import './resume.css'
 
@@ -128,6 +129,66 @@ export function updateBlockText(label: string, blockId: BlockId, text: string): 
       ),
     }
   })
+}
+
+export function removeBlock(label: string, blockId: BlockId): DocumentChange {
+  return userChange(label, (state) => {
+    if (!state.blocks.some((block) => block.id === blockId)) return state
+    return { ...state, blocks: state.blocks.filter((block) => block.id !== blockId) }
+  })
+}
+
+/**
+ * Pins a flow block where the layout drew it. The box arrives from the current
+ * LayoutOutput, so nothing moves on conversion — and a box that does not fit
+ * the content box stays as it is, for layout() to report as an overflow.
+ */
+export function convertBlockToAbsolute(
+  label: string,
+  blockId: BlockId,
+  box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  zIndex: number,
+): DocumentChange {
+  return userChange(label, (state) => {
+    if (!state.blocks.some((block) => block.id === blockId && isFlowLayout(block.layout))) {
+      return state
+    }
+    return {
+      ...state,
+      blocks: state.blocks.map((block) =>
+        block.id === blockId && isFlowLayout(block.layout)
+          ? { ...block, layout: { mode: 'absolute', ...box, zIndex, rotation: 0 } }
+          : block,
+      ),
+    }
+  })
+}
+
+export function convertBlockToFlow(label: string, blockId: BlockId): DocumentChange {
+  return userChange(label, (state) => {
+    if (!state.blocks.some((block) => block.id === blockId && isAbsoluteLayout(block.layout))) {
+      return state
+    }
+    return {
+      ...state,
+      blocks: state.blocks.map((block) =>
+        block.id === blockId && isAbsoluteLayout(block.layout)
+          ? { ...block, layout: DEFAULT_FLOW_LAYOUT }
+          : block,
+      ),
+    }
+  })
+}
+
+/** A converted block lands on top: above every absolute block already there. */
+export function nextAbsoluteZIndex(blocks: readonly Block[]): number {
+  let highest = 0
+  for (const block of blocks) {
+    if (isAbsoluteLayout(block.layout) && block.layout.zIndex > highest) {
+      highest = block.layout.zIndex
+    }
+  }
+  return highest + 1
 }
 
 export function changePageSetup(label: string, pageSetup: PageSetup): DocumentChange {
@@ -216,6 +277,14 @@ export function ResumeEditorPanel({
     selectedBlockId !== null && resume.blocks.some((block) => block.id === selectedBlockId)
       ? selectedBlockId
       : null
+  const selectedBlock =
+    selected === null ? undefined : resume.blocks.find((block) => block.id === selected)
+  // The drawn box a conversion pins: without a layout there is nowhere honest
+  // to put the block, so the affordance waits until the preview exists.
+  const selectedLaidOut =
+    selected === null
+      ? undefined
+      : preview.data?.layout.blocks.find((entry) => entry.blockId === selected)
 
   const commit = (change: DocumentChange): Promise<unknown> => resumes.commit(resumeId, change)
 
@@ -235,6 +304,31 @@ export function ResumeEditorPanel({
 
   const editBlockText = (blockId: BlockId, text: string): void => {
     dispatch(() => commit(updateBlockText('编辑文字', blockId, text)))
+  }
+
+  const removeSelected = (): void => {
+    if (selectedBlock === undefined) return
+    const blockId = selectedBlock.id
+    dispatch(() => commit(removeBlock('删除区块', blockId)))
+  }
+
+  const pinSelectedAbsolute = (): void => {
+    if (selectedBlock === undefined || selectedLaidOut === undefined) return
+    const blockId = selectedBlock.id
+    const box = {
+      x: selectedLaidOut.x,
+      y: selectedLaidOut.y,
+      width: selectedLaidOut.width,
+      height: selectedLaidOut.height,
+    }
+    const zIndex = nextAbsoluteZIndex(resume.blocks)
+    dispatch(() => commit(convertBlockToAbsolute('转为绝对定位', blockId, box, zIndex)))
+  }
+
+  const releaseSelectedToFlow = (): void => {
+    if (selectedBlock === undefined) return
+    const blockId = selectedBlock.id
+    dispatch(() => commit(convertBlockToFlow('转为常规流', blockId)))
   }
 
   const copyResume = (): void => {
@@ -275,6 +369,16 @@ export function ResumeEditorPanel({
             onChange={(pageSetup) => dispatch(() => commit(changePageSetup('调整页面设置', pageSetup)))}
           />
           <BlockPalette disabled={!editable} onAddBlock={addBlock} />
+          {selectedBlock === undefined ? null : (
+            <SelectedBlockPanel
+              block={selectedBlock}
+              disabled={!editable}
+              canMakeAbsolute={selectedLaidOut !== undefined}
+              onDelete={removeSelected}
+              onMakeAbsolute={pinSelectedAbsolute}
+              onMakeFlow={releaseSelectedToFlow}
+            />
+          )}
         </div>
 
         <div className="resume-editor-canvas">

@@ -13,19 +13,30 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
-import { ResumeEditorPanel, updateBlockText } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
+import {
+  convertBlockToAbsolute,
+  convertBlockToFlow,
+  nextAbsoluteZIndex,
+  removeBlock,
+  ResumeEditorPanel,
+  updateBlockText,
+} from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { OperationOutcome } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { FakeResumeServices } from '../../fakeResumeServices'
 import { createFakeResumeServices } from '../../fakeResumeServices'
 import {
   DRAFT_ID,
   FROZEN_ID,
+  absoluteBlock,
   dividerBlock,
   layOutFixture,
   makeResume,
   materializedOf,
   textBlock,
 } from '../../resumeFixtures'
+import { DEFAULT_FLOW_LAYOUT } from '../../../../src/domain/resume/Layout'
+import { A4_PAGE_SETUP } from '../../../../src/domain/resume/PageSetup'
+import type { Block } from '../../../../src/domain/resume/Block'
 import { resetKonvaNodePositions } from '../../konvaDouble'
 import type { DocumentState } from '../../../../src/domain/resume/DocumentChange'
 import type { Resume } from '../../../../src/domain/resume/Resume'
@@ -260,6 +271,74 @@ describe('ResumeEditorPanel', () => {
     const state = { blocks: [], pageSetup: makeResume().pageSetup }
 
     expect(change.next(state)).toBe(state)
+  })
+
+  it('removes the selected block through the same commit path', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-one'))
+    expect(screen.getByText('选中区块')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '删除区块' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('删除区块')
+    expect(harness.stored().blocks.map((block) => block.id)).toEqual(['block-two'])
+    // The panel follows the document: no block, no actions row.
+    await waitFor(() => expect(screen.queryByText('选中区块')).not.toBeInTheDocument())
+  })
+
+  it('pins a flow block where the layout drew it', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-one'))
+    fireEvent.click(screen.getByRole('button', { name: '转为绝对定位' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    const layout = harness.stored().blocks[0]?.layout
+    expect(layout).toEqual({
+      mode: 'absolute',
+      x: 0,
+      y: 0,
+      width: A4_PAGE_SETUP.pageWidth - A4_PAGE_SETUP.marginLeft - A4_PAGE_SETUP.marginRight,
+      height: 20,
+      zIndex: 1,
+      rotation: 0,
+    })
+  })
+
+  it('returns an absolute block to the flow sequence', async () => {
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), absoluteBlock('block-pinned', 30, 40)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-pinned'))
+    fireEvent.click(screen.getByRole('button', { name: '转为常规流' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.stored().blocks[1]?.layout).toEqual(DEFAULT_FLOW_LAYOUT)
+  })
+
+  it('hands a converted block the next z position above the ones already there', () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const blocks = [pinned('block-low', 2), textBlock('block-mid', '正文'), pinned('block-high', 5)]
+
+    expect(nextAbsoluteZIndex(blocks)).toBe(6)
+  })
+
+  it('refuses conversions and removals for blocks the document does not hold', () => {
+    const state = { blocks: [], pageSetup: makeResume().pageSetup }
+    const box = { x: 0, y: 0, width: 100, height: 20 }
+
+    expect(removeBlock('删除区块', asBlockId('block-gone')).next(state)).toBe(state)
+    expect(convertBlockToAbsolute('转为绝对定位', asBlockId('block-gone'), box, 1).next(state)).toBe(state)
+    expect(convertBlockToFlow('转为常规流', asBlockId('block-gone')).next(state)).toBe(state)
   })
 
   it('reports an overflow instead of letting the block disappear', async () => {
