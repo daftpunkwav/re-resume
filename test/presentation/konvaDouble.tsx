@@ -13,7 +13,7 @@
  * before it waits for the commit.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 
 const MEASURED_FIELDS = [
@@ -135,7 +135,10 @@ export function Rect(props: KonvaDoubleProps) {
   // which is why a test can fire a drag the component would really receive.
   // Whether a node can be dragged is decided here, at mount, so the effect has
   // to run again when the canvas takes a document read-only or writable.
-  useEffect(() => {
+  // A layout effect, because Konva binds when a node enters the tree, not a
+  // tick later: a passive effect would leave a window where the node is in the
+  // DOM but a click fired at it reaches no one.
+  useLayoutEffect(() => {
     const element = elementRef.current
     if (element === null) return
     const attached: [string, EventListener][] = []

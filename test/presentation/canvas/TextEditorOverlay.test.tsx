@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { TextEditorOverlay } from '../../../src/presentation/canvas/TextEditorOverlay'
 
-const TRANSFORM = { x: 20, y: 30, scale: 1.5, width: 300, height: 66 }
+const TRANSFORM = { x: 20, y: 30, width: 300, height: 66 }
 
 function renderOverlay(
   overrides: {

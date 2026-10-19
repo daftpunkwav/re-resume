@@ -20,7 +20,12 @@ import { useEffect, useRef, useState } from 'react'
 export interface TextEditorOverlayProps {
   readonly initialText: string
   /** Screen-pixel placement of the block's drawn box. */
-  readonly transform: { x: number; y: number; scale: number; width: number; height: number }
+  readonly transform: {
+    readonly x: number
+    readonly y: number
+    readonly width: number
+    readonly height: number
+  }
   /** Screen-pixel text metrics, taken from the laid-out style times the zoom. */
   readonly fontSize: number
   readonly lineHeight: number

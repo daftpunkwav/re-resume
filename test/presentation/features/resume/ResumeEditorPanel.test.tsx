@@ -248,11 +248,14 @@ describe('ResumeEditorPanel', () => {
       '[data-konva="rect"][data-node-id="resize-block-pinned"]',
     )
     if (handle === null) throw new Error('The canvas drew no resize handle for "block-pinned".')
-    drag(handle, [130.82, 28], [[200, 100]])
+    drag(handle, [130.82, 28], [[100, 80]])
 
     await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
     expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整区块大小')
-    expect(harness.stored().blocks[1]?.layout).toMatchObject({ width: 182, height: 77 })
+    // The corner travelled (82, 57) screen pixels; at the canvas's 25%
+    // fit-width zoom that is (328, 228) content points — the units the stored
+    // box is written in, and neither size meets the paper edge.
+    expect(harness.stored().blocks[1]?.layout).toMatchObject({ width: 328, height: 228 })
   })
 
   it('anchors a reorder against the flow sequence, even with a pinned block between', async () => {
@@ -302,6 +305,26 @@ describe('ResumeEditorPanel', () => {
     expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整层级')
     expect(harness.stored().blocks[1]?.layout).toMatchObject({ zIndex: 2 })
     expect(harness.stored().blocks[2]?.layout).toMatchObject({ zIndex: 1 })
+  })
+
+  it('offers no z swap between blocks the draw order cannot separate', async () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), pinned('block-a', 1), pinned('block-b', 1)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-a'))
+
+    // Equal z draws in document order, so a swap would write a revision that
+    // changes nothing; both affordances stay off rather than recording one.
+    expect(screen.getByRole('button', { name: '上移一层' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下移一层' })).toBeDisabled()
+    expect(harness.services.resumes.commit).not.toHaveBeenCalled()
   })
 
   it('adds a block through the same commit path', async () => {

@@ -352,7 +352,9 @@ export function ResumeEditorPanel({
       ? undefined
       : preview.data?.layout.blocks.find((entry) => entry.blockId === selected)
   // The z neighbours of the selected block: who it would swap places with.
-  // Array#sort is stable, so equal z positions keep document order.
+  // Array#sort is stable, so equal z positions keep document order — and a
+  // swap between equal positions would write a revision that changes nothing,
+  // so a neighbour on the same z offers no move at all.
   const zOrder: { readonly id: BlockId; readonly zIndex: number }[] = []
   for (const block of resume.blocks) {
     if (isAbsoluteLayout(block.layout)) {
@@ -362,8 +364,15 @@ export function ResumeEditorPanel({
   zOrder.sort((left, right) => left.zIndex - right.zIndex)
   const selectedZPosition =
     selected === null ? -1 : zOrder.findIndex((entry) => entry.id === selected)
-  const zAbove = selectedZPosition < 0 ? null : (zOrder[selectedZPosition + 1]?.id ?? null)
-  const zBelow = selectedZPosition < 1 ? null : (zOrder[selectedZPosition - 1]?.id ?? null)
+  const selectedEntry = selectedZPosition < 0 ? undefined : zOrder[selectedZPosition]
+  const zNeighbour = (offset: -1 | 1): BlockId | null => {
+    if (selectedEntry === undefined) return null
+    const other = zOrder[selectedZPosition + offset]
+    if (other === undefined || other.zIndex === selectedEntry.zIndex) return null
+    return other.id
+  }
+  const zAbove = zNeighbour(1)
+  const zBelow = zNeighbour(-1)
 
   const commit = (change: DocumentChange): Promise<unknown> => resumes.commit(resumeId, change)
 

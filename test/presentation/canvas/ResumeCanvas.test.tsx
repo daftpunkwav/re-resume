@@ -357,6 +357,34 @@ describe('ResumeCanvas', () => {
     })
   })
 
+  it('anchors a drop on a later page against that page, not the document head', () => {
+    const secondPage = laidOut({ blockId: asBlockId('block-two'), pageIndex: 1 })
+    const lastOnSecondPage = laidOut({ blockId: asBlockId('block-three'), pageIndex: 1, y: 33 })
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, secondPage, lastOnSecondPage]),
+      blocks: [
+        textBlock('block-one', '甲\n乙'),
+        textBlock('block-two', '乙'),
+        textBlock('block-three', '丙'),
+      ],
+    })
+
+    // The drop lands in the top margin of page 2, above every block's
+    // midpoint — including page 1's, whose lines restart at y 0. The anchor
+    // must come from the drop's own page, or the block would be yanked to the
+    // head of the document.
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    grab(blockNode('block-two'), 20, 10)
+    release(blockNode('block-two'), 20, 10)
+
+    expect(onGesture).toHaveBeenCalledWith({
+      kind: 'reorder',
+      blockId: 'block-two',
+      beforeBlockId: 'block-three',
+    })
+  })
+
   it('puts the dragged node back where the layout put it', () => {
     renderCanvas()
     const node = blockNode('block-one')
@@ -385,7 +413,7 @@ describe('ResumeCanvas', () => {
     expect(move.y).toBeCloseTo(657.89)
   })
 
-  it('turns a corner drag on an absolute block into one resize intent', () => {
+  it('turns a corner drag on an absolute block into one resize intent in content points', () => {
     const absolute = absoluteBlock('block-absolute', 0, 0)
     const { onGesture } = renderCanvas({
       layout: layoutWithPages([laidOut({ blockId: absolute.id })]),
@@ -394,17 +422,17 @@ describe('ResumeCanvas', () => {
     const handle = resizeHandleNode('block-absolute')
 
     grab(handle, 100, 60)
-    dragTo(handle, 140, 90)
-    release(handle, 140, 90)
+    release(handle, 90, 100)
 
     expect(onGesture).toHaveBeenCalledTimes(1)
     const resize = onGesture.mock.calls[0]?.[0]
     expect(resize.kind).toBe('resize')
     expect(resize.blockId).toBe('block-absolute')
-    // The pointer lands at content (122, 72) past the box corner; nothing
-    // needs clamping here, so the drawn numbers come straight back.
-    expect(resize.width).toBeCloseTo(122)
-    expect(resize.height).toBeCloseTo(72)
+    // The corner travelled (72, 82) screen pixels; at this canvas's 25%
+    // fit-width zoom that is (288, 328) content points — the units the stored
+    // box is written in — and neither size meets the paper edge.
+    expect(resize.width).toBeCloseTo(288)
+    expect(resize.height).toBeCloseTo(328)
     // The corner goes back to the laid-out geometry while the commit runs:
     // the drawn box is the content-width row the fixture layout produced.
     const reset = konvaNodePositions[0]

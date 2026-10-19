@@ -196,10 +196,12 @@ export function contentPointFromSheet(
 /**
  * Where a flow block lands. The block leaves the sequence and is reinserted
  * before the first remaining block whose vertical midpoint is below the
- * pointer. The list handed in holds the flow blocks in document order —
- * absolute blocks are not part of the sequence and say nothing about where it
- * continues — so the answer is an anchor the editor can splice against, not an
- * index that depends on where absolute blocks happen to sit.
+ * pointer. The list handed in holds the flow blocks of the drop's own page, in
+ * document order — absolute blocks are not part of the sequence and say
+ * nothing about where it continues, and a later page restarts at y 0, so
+ * blocks drawn on other pages cannot be judged against this pointer. The
+ * answer is an anchor the editor can splice against, not an index that depends
+ * on where absolute blocks happen to sit.
  */
 export function reorderAnchorForDrop(
   laidOutFlowBlocks: readonly LaidOutBlock[],
@@ -412,13 +414,15 @@ export function ResumeCanvas({
         onGesture({ kind: 'place', blockId, x: placed.x, y: placed.y })
         return
       }
-      // The flow blocks, in document order, each with the geometry layout()
-      // drew for it: the list a drop anchor is read from.
+      // The flow blocks of the drop's own page, in document order, each with
+      // the geometry layout() drew for it: the list a drop anchor is read
+      // from. A later page restarts at y 0, so blocks drawn on other pages
+      // cannot be judged against this pointer.
       const flowLaidOut = blocks
         .filter((entry) => !isAbsoluteLayout(entry.layout))
         .flatMap((entry) => {
           const drawn = layout.blocks.find((laidOut) => laidOut.blockId === entry.id)
-          return drawn === undefined ? [] : [drawn]
+          return drawn !== undefined && drawn.pageIndex === laidOut.pageIndex ? [drawn] : []
         })
       onGesture({
         kind: 'reorder',
@@ -439,30 +443,37 @@ export function ResumeCanvas({
   )
 
   /**
-   * The corner whose drag is stretching an absolute block. Same ref pattern as
-   * the move drag: the moves belong to the gesture, the release belongs to the
-   * document.
+   * The block whose corner is being stretched by a handle drag. Same ref
+   * pattern as the move drag: the moves belong to the gesture, the release
+   * belongs to the document.
    */
-  const resizingCorner = useRef<BlockId | null>(null)
+  const resizingBlockId = useRef<BlockId | null>(null)
 
   const beginResize = useCallback((blockId: BlockId): void => {
-    resizingCorner.current = blockId
+    resizingBlockId.current = blockId
   }, [])
 
   const endResize = useCallback(
     (box: CanvasBlockBox, event: KonvaEventObject<DragEvent>): void => {
-      const blockId = resizingCorner.current
-      resizingCorner.current = null
+      const blockId = resizingBlockId.current
+      resizingBlockId.current = null
       const node = event.target
       const corner: CanvasPoint = { x: node.x(), y: node.y() }
       node.position({ x: box.x + box.width, y: box.y + box.height })
       if (blockId === null || blockId !== box.blockId) return
       const live = blocks.find((entry) => entry.id === blockId)
       if (live === undefined || !isAbsoluteLayout(live.layout)) return
-      const size = clampResizeSize(page, live.layout, corner.x - box.x, corner.y - box.y)
+      // The corner travelled in screen pixels; the stored box lives in content
+      // points — the same projection a place intent is converted through.
+      const size = clampResizeSize(
+        page,
+        live.layout,
+        (corner.x - box.x) / zoom,
+        (corner.y - box.y) / zoom,
+      )
       onGesture({ kind: 'resize', blockId, width: size.width, height: size.height })
     },
-    [blocks, onGesture, page],
+    [blocks, onGesture, page, zoom],
   )
 
   const changeZoom = (delta: number): void => {
@@ -514,7 +525,6 @@ export function ResumeCanvas({
         transform={{
           x: box.x,
           y: box.y,
-          scale: zoom,
           width: box.width,
           height: Math.max(box.height, step),
         }}

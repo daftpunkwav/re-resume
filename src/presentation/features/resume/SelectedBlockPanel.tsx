@@ -27,7 +27,11 @@ export interface SelectedBlockPanelProps {
   readonly disabled: boolean
   /** A flow block needs laid-out geometry to be pinned where it is drawn. */
   readonly canMakeAbsolute: boolean
-  /** An absolute block raises or lowers by swapping z positions with its neighbour. */
+  /**
+   * An absolute block raises or lowers by swapping z positions with its
+   * neighbour. A neighbour on the same z is not offered: swapping equal
+   * positions would change nothing the stable draw order does not already do.
+   */
   readonly canRaise: boolean
   readonly canLower: boolean
   readonly onDelete: () => void
