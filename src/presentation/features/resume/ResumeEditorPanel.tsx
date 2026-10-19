@@ -41,7 +41,7 @@ import type { MaterializedBlock } from '../../../domain/resume/ResumeSnapshot'
 import type { BlockId, ResumeId } from '../../../domain/shared/branded-id'
 
 import { ResumeCanvas } from '../../canvas/ResumeCanvas'
-import type { BlockMove } from '../../canvas/ResumeCanvas'
+import type { BlockGesture } from '../../canvas/ResumeCanvas'
 import { BlockPalette } from './BlockPalette'
 import { PageSetupForm } from './PageSetupForm'
 import { SelectedBlockPanel } from './SelectedBlockPanel'
@@ -191,6 +191,28 @@ export function nextAbsoluteZIndex(blocks: readonly Block[]): number {
   return highest + 1
 }
 
+/** The committed box of a corner drag. Only an absolute block can be resized. */
+export function resizeAbsoluteBlock(
+  label: string,
+  blockId: BlockId,
+  width: number,
+  height: number,
+): DocumentChange {
+  return userChange(label, (state) => {
+    if (!state.blocks.some((block) => block.id === blockId && isAbsoluteLayout(block.layout))) {
+      return state
+    }
+    return {
+      ...state,
+      blocks: state.blocks.map((block) =>
+        block.id === blockId && isAbsoluteLayout(block.layout)
+          ? { ...block, layout: { ...block.layout, width, height } }
+          : block,
+      ),
+    }
+  })
+}
+
 export function changePageSetup(label: string, pageSetup: PageSetup): DocumentChange {
   return userChange(label, (state) => ({ ...state, pageSetup }))
 }
@@ -292,12 +314,14 @@ export function ResumeEditorPanel({
     dispatch(() => commit(appendBlock('添加区块', block)))
   }
 
-  const moveBlock = (move: BlockMove): void => {
+  const handleGesture = (gesture: BlockGesture): void => {
     dispatch(() =>
       commit(
-        move.kind === 'reorder'
-          ? reorderBlocks('移动区块', move.blockId, move.toIndex)
-          : placeAbsoluteBlock('移动区块', move.blockId, move.x, move.y),
+        gesture.kind === 'reorder'
+          ? reorderBlocks('移动区块', gesture.blockId, gesture.toIndex)
+          : gesture.kind === 'place'
+            ? placeAbsoluteBlock('移动区块', gesture.blockId, gesture.x, gesture.y)
+            : resizeAbsoluteBlock('调整区块大小', gesture.blockId, gesture.width, gesture.height),
       ),
     )
   }
@@ -389,7 +413,7 @@ export function ResumeEditorPanel({
             editable={editable}
             selectedBlockId={selected}
             onSelectBlock={setSelectedBlockId}
-            onMoveBlock={moveBlock}
+            onGesture={handleGesture}
             onEditText={editBlockText}
           />
         </div>
@@ -489,7 +513,7 @@ function ResumeCanvasArea({
   editable,
   selectedBlockId,
   onSelectBlock,
-  onMoveBlock,
+  onGesture,
   onEditText,
 }: {
   readonly preview: ResumePreview | null
@@ -498,7 +522,7 @@ function ResumeCanvasArea({
   readonly editable: boolean
   readonly selectedBlockId: BlockId | null
   readonly onSelectBlock: (blockId: BlockId | null) => void
-  readonly onMoveBlock: (move: BlockMove) => void
+  readonly onGesture: (gesture: BlockGesture) => void
   readonly onEditText: (blockId: BlockId, text: string) => void
 }) {
   if (preview === null) {
@@ -518,7 +542,7 @@ function ResumeCanvasArea({
       editable={editable}
       selectedBlockId={selectedBlockId}
       onSelectBlock={onSelectBlock}
-      onMoveBlock={onMoveBlock}
+      onGesture={onGesture}
       onEditText={onEditText}
     />
   )

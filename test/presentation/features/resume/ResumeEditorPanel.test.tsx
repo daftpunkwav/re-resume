@@ -237,6 +237,24 @@ describe('ResumeEditorPanel', () => {
     expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('移动区块')
   })
 
+  it('commits a corner drag as one resize revision', async () => {
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), absoluteBlock('block-pinned', 0, 0)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    const handle = document.querySelector<HTMLElement>(
+      '[data-konva="rect"][data-node-id="resize-block-pinned"]',
+    )
+    if (handle === null) throw new Error('The canvas drew no resize handle for "block-pinned".')
+    drag(handle, [130.82, 28], [[200, 100]])
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整区块大小')
+    expect(harness.stored().blocks[1]?.layout).toMatchObject({ width: 182, height: 77 })
+  })
+
   it('adds a block through the same commit path', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)

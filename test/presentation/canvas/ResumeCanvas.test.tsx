@@ -18,9 +18,11 @@ import { DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import { asBlockId } from '../../../src/domain/shared/branded-id'
 import {
   MAX_ZOOM,
+  MIN_ABSOLUTE_SIZE,
   MIN_ZOOM,
   ResumeCanvas,
   clampAbsolutePoint,
+  clampResizeSize,
   contentPointFromSheet,
   describeOverflow,
   fitWidthZoom,
@@ -144,6 +146,28 @@ describe('clampAbsolutePoint', () => {
   })
 })
 
+describe('clampResizeSize', () => {
+  const box = { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex: 0, rotation: 0 } as const
+
+  it('keeps a box that fits the content box as it was drawn', () => {
+    expect(clampResizeSize(A4_PAGE_SETUP, box, 200, 60)).toEqual({ width: 200, height: 60 })
+  })
+
+  it('never produces a block smaller than one that can be grabbed', () => {
+    expect(clampResizeSize(A4_PAGE_SETUP, box, 2, -10)).toEqual({
+      width: MIN_ABSOLUTE_SIZE,
+      height: MIN_ABSOLUTE_SIZE,
+    })
+  })
+
+  it('stops the corner at the paper rather than spilling past it', () => {
+    const pinned = { ...box, x: 400, y: 600 } as const
+    const size = clampResizeSize(A4_PAGE_SETUP, pinned, 500, 500)
+    expect(size.width).toBeCloseTo(595.28 - 72 - 72 - 400)
+    expect(size.height).toBeCloseTo(841.89 - 72 - 72 - 600)
+  })
+})
+
 describe('fitWidthZoom', () => {
   it('fills the viewport minus the padding', () => {
     expect(fitWidthZoom(595.28, 1200)).toBeCloseTo((1200 - 96) / 595.28)
@@ -163,13 +187,13 @@ describe('describeOverflow', () => {
 })
 
 interface CanvasHarness {
-  readonly onMoveBlock: ReturnType<typeof vi.fn>
+  readonly onGesture: ReturnType<typeof vi.fn>
   readonly onSelectBlock: ReturnType<typeof vi.fn>
   readonly onEditText: ReturnType<typeof vi.fn>
 }
 
 function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
-  const onMoveBlock = vi.fn()
+  const onGesture = vi.fn()
   const onSelectBlock = vi.fn()
   const onEditText = vi.fn()
   render(
@@ -180,12 +204,12 @@ function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
       editable
       selectedBlockId={null}
       onSelectBlock={onSelectBlock}
-      onMoveBlock={onMoveBlock}
+      onGesture={onGesture}
       onEditText={onEditText}
       {...overrides}
     />,
   )
-  return { onMoveBlock, onSelectBlock, onEditText }
+  return { onGesture, onSelectBlock, onEditText }
 }
 
 /** A canvas that can lose a block the way an undo would, mid editing session. */
@@ -200,7 +224,7 @@ function renderEditorWithBlocks(blocks: readonly Block[]): {
       editable
       selectedBlockId={null}
       onSelectBlock={vi.fn()}
-      onMoveBlock={vi.fn()}
+      onGesture={vi.fn()}
       onEditText={vi.fn()}
     />
   )
@@ -228,6 +252,16 @@ function blockNode(name: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(`[data-konva="rect"][data-node-id="${name}"]`)
   if (found === null) throw new Error(`The canvas drew no interactive node for "${name}".`)
   return found
+}
+
+function resizeHandleNode(name: string): HTMLElement {
+  const found = resizeHandleNodeOrNull(name)
+  if (found === null) throw new Error(`The canvas drew no resize handle for "${name}".`)
+  return found
+}
+
+function resizeHandleNodeOrNull(name: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-konva="rect"][data-node-id="resize-${name}"]`)
 }
 
 describe('ResumeCanvas', () => {
@@ -285,7 +319,7 @@ describe('ResumeCanvas', () => {
   })
 
   it('turns one continuous drag into one revision-sized intent', () => {
-    const { onMoveBlock } = renderCanvas()
+    const { onGesture } = renderCanvas()
     const node = blockNode('block-one')
 
     grab(node, 20, 10)
@@ -294,8 +328,8 @@ describe('ResumeCanvas', () => {
     dragTo(node, 24, 30)
     release(node, 24, 30)
 
-    expect(onMoveBlock).toHaveBeenCalledTimes(1)
-    expect(onMoveBlock).toHaveBeenCalledWith({
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
       toIndex: 1,
@@ -303,7 +337,7 @@ describe('ResumeCanvas', () => {
   })
 
   it('drops a flow block by its own centre rather than its top edge', () => {
-    const { onMoveBlock } = renderCanvas()
+    const { onGesture } = renderCanvas()
     const node = blockNode('block-one')
 
     // The block's top edge lands above the divider's middle, but the block's
@@ -312,7 +346,7 @@ describe('ResumeCanvas', () => {
     grab(node, 20, 24.25)
     release(node, 20, 24.25)
 
-    expect(onMoveBlock).toHaveBeenCalledWith({
+    expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
       toIndex: 1,
@@ -331,7 +365,7 @@ describe('ResumeCanvas', () => {
 
   it('places an absolute block where it was dropped, inside the paper', () => {
     const absolute = absoluteBlock('block-absolute', 0, 0)
-    const { onMoveBlock } = renderCanvas({
+    const { onGesture } = renderCanvas({
       layout: layoutWithPages([laidOut({ blockId: absolute.id })]),
       blocks: [absolute],
     })
@@ -339,22 +373,56 @@ describe('ResumeCanvas', () => {
     grab(blockNode('block-absolute'), 300, 400)
     release(blockNode('block-absolute'), 300, 400)
 
-    expect(onMoveBlock).toHaveBeenCalledTimes(1)
-    const move = onMoveBlock.mock.calls[0]?.[0]
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    const move = onGesture.mock.calls[0]?.[0]
     expect(move.kind).toBe('place')
     expect(move.blockId).toBe('block-absolute')
     expect(move.x).toBeCloseTo(251.28)
     expect(move.y).toBeCloseTo(657.89)
   })
 
+  it('turns a corner drag on an absolute block into one resize intent', () => {
+    const absolute = absoluteBlock('block-absolute', 0, 0)
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([laidOut({ blockId: absolute.id })]),
+      blocks: [absolute],
+    })
+    const handle = resizeHandleNode('block-absolute')
+
+    grab(handle, 100, 60)
+    dragTo(handle, 140, 90)
+    release(handle, 140, 90)
+
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    const resize = onGesture.mock.calls[0]?.[0]
+    expect(resize.kind).toBe('resize')
+    expect(resize.blockId).toBe('block-absolute')
+    // The pointer lands at content (122, 72) past the box corner; nothing
+    // needs clamping here, so the drawn numbers come straight back.
+    expect(resize.width).toBeCloseTo(122)
+    expect(resize.height).toBeCloseTo(72)
+    // The corner goes back to the laid-out geometry while the commit runs:
+    // the drawn box is the content-width row the fixture layout produced.
+    const reset = konvaNodePositions[0]
+    expect(reset?.nodeId).toBe('resize-block-absolute')
+    expect(reset?.x).toBeCloseTo(130.82)
+    expect(reset?.y).toBeCloseTo(26.25)
+  })
+
+  it('offers no resize handle for a block whose height belongs to its content', () => {
+    renderCanvas()
+
+    expect(resizeHandleNodeOrNull('block-one')).toBeNull()
+  })
+
   it('refuses to start a drag while the document is read-only', () => {
-    const { onMoveBlock } = renderCanvas({ editable: false })
+    const { onGesture } = renderCanvas({ editable: false })
 
     expect(blockNode('block-one')).toHaveAttribute('data-draggable', 'false')
     grab(blockNode('block-one'), 24, 30)
     release(blockNode('block-one'), 24, 30)
 
-    expect(onMoveBlock).not.toHaveBeenCalled()
+    expect(onGesture).not.toHaveBeenCalled()
   })
 
   it('opens the editor over a double-clicked text block and hides its drawn lines', () => {
@@ -442,7 +510,7 @@ describe('ResumeCanvas', () => {
         editable
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
-        onMoveBlock={vi.fn()}
+        onGesture={vi.fn()}
         onEditText={vi.fn()}
       />,
     )
@@ -463,7 +531,7 @@ describe('ResumeCanvas', () => {
         editable
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
-        onMoveBlock={vi.fn()}
+        onGesture={vi.fn()}
         onEditText={vi.fn()}
       />,
     )

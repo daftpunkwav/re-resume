@@ -6,7 +6,8 @@
  * Responsibilities:
  * - Project a LayoutOutput plus a zoom factor into positioned rectangles
  * - Own page navigation, the zoom factor and fit-to-width
- * - Turn one pointer drag into exactly one drop intent, on release
+ * - Turn one pointer gesture into exactly one intent, on release: a move
+ *   (reorder or absolute placement) or an absolute block's resize
  * - Open the text editor over a double-clicked text block and hand its
  *   committed text back as an intent
  * - Report layout overflows instead of clipping them away
@@ -54,6 +55,7 @@ const SHADOW_OFFSET_Y = 6
 const SHADOW_OPACITY = 0.16
 const SELECTION_FILL_OPACITY = 0.08
 const SELECTION_STROKE_WIDTH = 1
+const RESIZE_HANDLE_SIZE = 8
 
 export interface CanvasPoint {
   readonly x: number
@@ -91,20 +93,26 @@ export interface CanvasSheet {
   readonly blocks: readonly CanvasBlockBox[]
 }
 
-/** A completed drag, expressed the way the editor has to act on it. */
-export type BlockMove =
+/** A completed pointer gesture, expressed the way the editor has to act on it. */
+export type BlockGesture =
   | { readonly kind: 'reorder'; readonly blockId: BlockId; readonly toIndex: number }
   | { readonly kind: 'place'; readonly blockId: BlockId; readonly x: number; readonly y: number }
+  | {
+      readonly kind: 'resize'
+      readonly blockId: BlockId
+      readonly width: number
+      readonly height: number
+    }
 
 export interface ResumeCanvasProps {
   readonly layout: LayoutOutput
   readonly page: PageSetup
-  /** Live blocks: the layout mode of a drag, the shape of a divider, the text a double click edits. */
+  /** Live blocks: the layout mode of a gesture, the shape of a divider, the text a double click edits. */
   readonly blocks: readonly Block[]
   readonly editable: boolean
   readonly selectedBlockId: BlockId | null
   readonly onSelectBlock: (blockId: BlockId | null) => void
-  readonly onMoveBlock: (move: BlockMove) => void
+  readonly onGesture: (gesture: BlockGesture) => void
   /** The committed text of an editing session, as an intent for the editor. */
   readonly onEditText: (blockId: BlockId, text: string) => void
 }
@@ -217,6 +225,33 @@ export function clampAbsolutePoint(
   }
 }
 
+/** Smallest box a resize can produce, in points: a block one can still grab. */
+export const MIN_ABSOLUTE_SIZE = 24
+
+/**
+ * The corner cannot stretch a block past the content box or collapse it to
+ * nothing. Measured in content points, where the block's own box lives.
+ */
+export function clampResizeSize(
+  page: PageSetup,
+  box: AbsoluteLayout,
+  width: number,
+  height: number,
+): { readonly width: number; readonly height: number } {
+  const maxWidth = Math.max(
+    MIN_ABSOLUTE_SIZE,
+    page.pageWidth - page.marginLeft - page.marginRight - box.x,
+  )
+  const maxHeight = Math.max(
+    MIN_ABSOLUTE_SIZE,
+    page.pageHeight - page.marginTop - page.marginBottom - box.y,
+  )
+  return {
+    width: Math.min(Math.max(width, MIN_ABSOLUTE_SIZE), maxWidth),
+    height: Math.min(Math.max(height, MIN_ABSOLUTE_SIZE), maxHeight),
+  }
+}
+
 export function fitWidthZoom(pageWidth: number, viewportWidth: number): number {
   const available = viewportWidth - FIT_PADDING * 2
   if (!(available > 0)) return MIN_ZOOM
@@ -251,7 +286,7 @@ export function ResumeCanvas({
   editable,
   selectedBlockId,
   onSelectBlock,
-  onMoveBlock,
+  onGesture,
   onEditText,
 }: ResumeCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -373,10 +408,10 @@ export function ResumeCanvas({
       const content = contentPointFromSheet(landing, page, zoom)
       if (isAbsoluteLayout(live.layout)) {
         const placed = clampAbsolutePoint(page, live.layout, content)
-        onMoveBlock({ kind: 'place', blockId, x: placed.x, y: placed.y })
+        onGesture({ kind: 'place', blockId, x: placed.x, y: placed.y })
         return
       }
-      onMoveBlock({
+      onGesture({
         kind: 'reorder',
         blockId,
         // reorderIndexForDrop compares the drop point against the middle of
@@ -387,11 +422,63 @@ export function ResumeCanvas({
         toIndex: reorderIndexForDrop(layout.blocks, blockId, content.y + laidOut.height / 2),
       })
     },
-    [blocks, layout, onMoveBlock, page, zoom],
+    [blocks, layout, onGesture, page, zoom],
+  )
+
+  /**
+   * The corner whose drag is stretching an absolute block. Same ref pattern as
+   * the move drag: the moves belong to the gesture, the release belongs to the
+   * document.
+   */
+  const resizingCorner = useRef<BlockId | null>(null)
+
+  const beginResize = useCallback((blockId: BlockId): void => {
+    resizingCorner.current = blockId
+  }, [])
+
+  const endResize = useCallback(
+    (box: CanvasBlockBox, event: KonvaEventObject<DragEvent>): void => {
+      const blockId = resizingCorner.current
+      resizingCorner.current = null
+      const node = event.target
+      const corner: CanvasPoint = { x: node.x(), y: node.y() }
+      node.position({ x: box.x + box.width, y: box.y + box.height })
+      if (blockId === null || blockId !== box.blockId) return
+      const live = blocks.find((entry) => entry.id === blockId)
+      if (live === undefined || !isAbsoluteLayout(live.layout)) return
+      const size = clampResizeSize(page, live.layout, corner.x - box.x, corner.y - box.y)
+      onGesture({ kind: 'resize', blockId, width: size.width, height: size.height })
+    },
+    [blocks, onGesture, page],
   )
 
   const changeZoom = (delta: number): void => {
     setZoomOverride(Math.min(Math.max(zoom + delta, MIN_ZOOM), MAX_ZOOM))
+  }
+
+  /**
+   * The corner that stretches an absolute block, or nothing for a flow block:
+   * its height belongs to its content, not to the pointer. The handle is a
+   * screen-space square, so it stays grabbable at every zoom.
+   */
+  const renderResizeHandle = (box: CanvasBlockBox): ReactNode => {
+    if (!editable || editingBlockId === box.blockId) return null
+    const live = blocks.find((entry) => entry.id === box.blockId)
+    if (live === undefined || !isAbsoluteLayout(live.layout)) return null
+    return (
+      <Rect
+        name={`resize-${box.blockId}`}
+        x={box.x + box.width}
+        y={box.y + box.height}
+        width={RESIZE_HANDLE_SIZE}
+        height={RESIZE_HANDLE_SIZE}
+        draggable
+        onDragStart={() => beginResize(box.blockId)}
+        onDragEnd={(event) => endResize(box, event)}
+        onClick={() => onSelectBlock(box.blockId)}
+        fill={accentColour ?? undefined}
+      />
+    )
   }
 
   /**
@@ -547,28 +634,29 @@ export function ResumeCanvas({
                       stroke={box.blockId === selectedBlockId ? (accentColour ?? undefined) : undefined}
                       strokeWidth={SELECTION_STROKE_WIDTH}
                     />
-                    {box.blockId === editingBlockId
-                      ? null
-                      : box.lines.map((line, index) => (
-                          <Text
-                            key={`${box.blockId}-${index}`}
-                            text={line.text}
-                            x={line.x}
-                            y={line.y}
-                            width={line.width}
-                            height={line.height}
-                            fontSize={line.fontSize}
-                            fontFamily={line.fontFamily}
-                            // The canvas font shorthand carries two weights, so a
-                            // resolved weight above the default collapses to bold.
-                            fontStyle={line.fontWeight > 500 ? 'bold' : 'normal'}
-                            fill={inkColour ?? undefined}
-                            // wrap: none keeps the text node from re-wrapping a line
-                            // layout() has already broken.
-                            wrap="none"
-                            listening={false}
-                          />
-                        ))}
+                    {box.lines.map((line, index) =>
+                      box.blockId === editingBlockId ? null : (
+                        <Text
+                          key={`${box.blockId}-${index}`}
+                          text={line.text}
+                          x={line.x}
+                          y={line.y}
+                          width={line.width}
+                          height={line.height}
+                          fontSize={line.fontSize}
+                          fontFamily={line.fontFamily}
+                          // The canvas font shorthand carries two weights, so a
+                          // resolved weight above the default collapses to bold.
+                          fontStyle={line.fontWeight > 500 ? 'bold' : 'normal'}
+                          fill={inkColour ?? undefined}
+                          // wrap: none keeps the text node from re-wrapping a line
+                          // layout() has already broken.
+                          wrap="none"
+                          listening={false}
+                        />
+                      ),
+                    )}
+                    {renderResizeHandle(box)}
                   </Group>
                 ))}
               </Layer>
