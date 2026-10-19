@@ -524,6 +524,10 @@ export function ResumeCanvas({
     const step = fontSize * style.lineHeight
     return (
       <TextEditorOverlay
+        // One session instance per block: the key guarantees a fresh editor
+        // with the block's own text even if a switch ever arrives without the
+        // blur that normally unmounts the previous session first.
+        key={editingBlockId}
         initialText={live.content.text}
         transform={{
           x: box.x,

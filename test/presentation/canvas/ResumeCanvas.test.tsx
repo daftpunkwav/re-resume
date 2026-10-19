@@ -545,6 +545,21 @@ describe('ResumeCanvas', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
+  it('opens a fresh session when the edited block changes without a blur', () => {
+    const nextBlock = laidOut({ blockId: asBlockId('block-three'), y: 33 })
+    renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, nextBlock]),
+      blocks: [textBlock('block-one', '甲乙'), textBlock('block-three', '丙丁')],
+    })
+
+    fireEvent.dblClick(blockNode('block-one'))
+    // No blur fired between the two sessions; the second editor must still
+    // carry its own block's text, not the previous session's.
+    fireEvent.dblClick(blockNode('block-three'))
+
+    expect(screen.getByRole('textbox', { name: '编辑区块文字' })).toHaveValue('丙丁')
+  })
+
   it('re-fits when the frame itself changes size and the window does not', () => {
     renderCanvas()
     // jsdom never lays out, so fit-to-width starts pinned at the floor.
