@@ -346,11 +346,14 @@ export function ResumeEditorPanel({
   const selectedBlock =
     selected === null ? undefined : resume.blocks.find((block) => block.id === selected)
   // The drawn box a conversion pins: without a layout there is nowhere honest
-  // to put the block, so the affordance waits until the preview exists.
+  // to put the block, so the affordance waits until the preview exists. A
+  // later-page block is not offered the pin at all: absolute placement draws on
+  // page one in v1, so pinning would silently move the block back a page.
   const selectedLaidOut =
     selected === null
       ? undefined
       : preview.data?.layout.blocks.find((entry) => entry.blockId === selected)
+  const canPinSelected = selectedLaidOut !== undefined && selectedLaidOut.pageIndex === 0
   // The z neighbours of the selected block: who it would swap places with.
   // Array#sort is stable, so equal z positions keep document order — and a
   // swap between equal positions would write a revision that changes nothing,
@@ -479,7 +482,7 @@ export function ResumeEditorPanel({
             <SelectedBlockPanel
               block={selectedBlock}
               disabled={!editable}
-              canMakeAbsolute={selectedLaidOut !== undefined}
+              canMakeAbsolute={canPinSelected}
               canRaise={zAbove !== null}
               canLower={zBelow !== null}
               onDelete={removeSelected}

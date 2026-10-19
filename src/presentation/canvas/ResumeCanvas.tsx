@@ -237,8 +237,11 @@ export function clampAbsolutePoint(
 export const MIN_ABSOLUTE_SIZE = 24
 
 /**
- * The corner cannot stretch a block past the content box or collapse it to
- * nothing. Measured in content points, where the block's own box lives.
+ * The corner cannot stretch a block past the content box. Measured in content
+ * points, where the block's own box lives. Near the paper's edge the available
+ * extent itself shrinks below the minimum, and staying inside the content box
+ * wins: the block takes exactly what is left rather than spilling out of
+ * bounds the way a forced minimum would.
  */
 export function clampResizeSize(
   page: PageSetup,
@@ -246,17 +249,13 @@ export function clampResizeSize(
   width: number,
   height: number,
 ): { readonly width: number; readonly height: number } {
-  const maxWidth = Math.max(
-    MIN_ABSOLUTE_SIZE,
-    page.pageWidth - page.marginLeft - page.marginRight - box.x,
-  )
-  const maxHeight = Math.max(
-    MIN_ABSOLUTE_SIZE,
-    page.pageHeight - page.marginTop - page.marginBottom - box.y,
-  )
+  const availableWidth = Math.max(0, page.pageWidth - page.marginLeft - page.marginRight - box.x)
+  const availableHeight = Math.max(0, page.pageHeight - page.marginTop - page.marginBottom - box.y)
+  const minWidth = Math.min(MIN_ABSOLUTE_SIZE, availableWidth)
+  const minHeight = Math.min(MIN_ABSOLUTE_SIZE, availableHeight)
   return {
-    width: Math.min(Math.max(width, MIN_ABSOLUTE_SIZE), maxWidth),
-    height: Math.min(Math.max(height, MIN_ABSOLUTE_SIZE), maxHeight),
+    width: Math.min(Math.max(width, minWidth), availableWidth),
+    height: Math.min(Math.max(height, minHeight), availableHeight),
   }
 }
 
@@ -414,16 +413,19 @@ export function ResumeCanvas({
         onGesture({ kind: 'place', blockId, x: placed.x, y: placed.y })
         return
       }
-      // The flow blocks of the drop's own page, in document order, each with
-      // the geometry layout() drew for it: the list a drop anchor is read
-      // from. A later page restarts at y 0, so blocks drawn on other pages
-      // cannot be judged against this pointer.
-      const flowLaidOut = blocks
+      // The flow blocks, in document order, each with the geometry layout()
+      // drew for it. A later page restarts at y 0, so the midpoint scan runs
+      // on the drop's own page only — but the below-the-page fallback needs
+      // the full list to find where the next page's sequence begins.
+      const allFlowLaidOut = blocks
         .filter((entry) => !isAbsoluteLayout(entry.layout))
         .flatMap((entry) => {
           const drawn = layout.blocks.find((laidOut) => laidOut.blockId === entry.id)
-          return drawn !== undefined && drawn.pageIndex === laidOut.pageIndex ? [drawn] : []
+          return drawn === undefined ? [] : [drawn]
         })
+      const flowLaidOutOnPage = allFlowLaidOut.filter(
+        (entry) => entry.pageIndex === laidOut.pageIndex,
+      )
       onGesture({
         kind: 'reorder',
         blockId,
@@ -431,12 +433,13 @@ export function ResumeCanvas({
         // remaining flow block, so the dragged block has to be measured the
         // same way. Its top edge says the block lands later than it does: a
         // tall block dropped just above its neighbour looked like it belonged
-        // below it.
-        beforeBlockId: reorderAnchorForDrop(
-          flowLaidOut,
-          blockId,
-          content.y + laidOut.height / 2,
-        ),
+        // below it. Below the page's last block the anchor moves to the first
+        // flow block of a later page — null means the document's end, and a
+        // drop under page one's content must not jump past page two's.
+        beforeBlockId:
+          reorderAnchorForDrop(flowLaidOutOnPage, blockId, content.y + laidOut.height / 2) ??
+          allFlowLaidOut.find((entry) => entry.pageIndex > laidOut.pageIndex)?.blockId ??
+          null,
       })
     },
     [blocks, layout, onGesture, page, zoom],

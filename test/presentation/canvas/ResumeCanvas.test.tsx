@@ -170,6 +170,13 @@ describe('clampResizeSize', () => {
     expect(size.width).toBeCloseTo(595.28 - 72 - 72 - 400)
     expect(size.height).toBeCloseTo(841.89 - 72 - 72 - 600)
   })
+
+  it('takes exactly the room left near the paper edge instead of forcing the minimum', () => {
+    const pinned = { ...box, x: 440, y: 0 } as const
+    const size = clampResizeSize(A4_PAGE_SETUP, pinned, 100, 40)
+    expect(size.width).toBeCloseTo(595.28 - 72 - 72 - 440)
+    expect(size.height).toBe(40)
+  })
 })
 
 describe('fitWidthZoom', () => {
@@ -382,6 +389,26 @@ describe('ResumeCanvas', () => {
       kind: 'reorder',
       blockId: 'block-two',
       beforeBlockId: 'block-three',
+    })
+  })
+
+  it('anchors below page one content to the first flow block of the next page', () => {
+    const nextPage = laidOut({ blockId: asBlockId('block-two'), pageIndex: 1 })
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, nextPage]),
+      blocks: [textBlock('block-one', '甲\n乙'), textBlock('block-two', '下一页')],
+    })
+
+    // Below the last block of page 1 the null anchor means "document end";
+    // the first flow block of page 2 is the position the user actually sees —
+    // appending past it would fling the block onto the last page.
+    grab(blockNode('block-one'), 20, 400)
+    release(blockNode('block-one'), 20, 400)
+
+    expect(onGesture).toHaveBeenCalledWith({
+      kind: 'reorder',
+      blockId: 'block-one',
+      beforeBlockId: 'block-two',
     })
   })
 

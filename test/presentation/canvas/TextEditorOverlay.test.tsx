@@ -67,6 +67,19 @@ describe('TextEditorOverlay', () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
+  it('ignores Escape while an IME composition owns the key', () => {
+    const { onCommit, onCancel } = renderOverlay()
+
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    // Dismissing a candidate window must not discard the whole session; the
+    // blur still commits what the user typed before that candidate.
+    fireEvent.keyDown(area, { key: 'Escape', isComposing: true })
+    fireEvent.blur(area)
+
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps line breaks the way a resume body needs them', () => {
     const { onCommit } = renderOverlay()
 

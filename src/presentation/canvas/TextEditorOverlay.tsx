@@ -69,7 +69,11 @@ export function TextEditorOverlay({
         fontFamily,
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Escape') return
+        // While an IME is composing, Escape dismisses the candidate window and
+        // the composition owns the key: cancelling the session here would also
+        // discard everything typed before that candidate. The flag lives on
+        // the native event; React's synthetic type does not carry it.
+        if (event.key !== 'Escape' || event.nativeEvent.isComposing) return
         cancelled.current = true
         onCancel()
       }}

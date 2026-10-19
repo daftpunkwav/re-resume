@@ -25,7 +25,10 @@ const BLOCK_KIND_LABELS: Record<Block['content']['type'], string> = {
 export interface SelectedBlockPanelProps {
   readonly block: Block
   readonly disabled: boolean
-  /** A flow block needs laid-out geometry to be pinned where it is drawn. */
+  /**
+   * A flow block can only be pinned where it is drawn, and only page one
+   * draws absolute placement in v1 — a later-page block is offered no pin.
+   */
   readonly canMakeAbsolute: boolean
   /**
    * An absolute block raises or lowers by swapping z positions with its
@@ -58,6 +61,9 @@ export function SelectedBlockPanel({
       <p className="resume-selected-kind">{BLOCK_KIND_LABELS[block.content.type]}</p>
       {block.content.type === 'text' ? (
         <p className="resume-selected-hint">双击画布中的这个区块可以直接编辑文字。</p>
+      ) : null}
+      {isFlowLayout(block.layout) && !disabled && !canMakeAbsolute ? (
+        <p className="resume-selected-hint">绝对定位目前只支持第一页的区块。</p>
       ) : null}
       <div className="resume-selected-actions">
         {isFlowLayout(block.layout) ? (

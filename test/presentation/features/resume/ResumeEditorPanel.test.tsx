@@ -412,6 +412,31 @@ describe('ResumeEditorPanel', () => {
     expect(harness.stored().blocks[1]?.layout).toEqual(DEFAULT_FLOW_LAYOUT)
   })
 
+  it('offers no pin to a flow block drawn on a later page', async () => {
+    const harness = stubWorkbench(makeResume())
+    // A two-page preview: block-two draws on page 2, where v1 has no absolute
+    // placement — pinning it would silently move it back to page 1.
+    harness.services.resumes.layOut.mockImplementation((blocks, page) => {
+      const laid = layOutFixture(blocks, page)
+      const second = { ...laid.blocks[1], pageIndex: 1 }
+      return {
+        ...laid,
+        blocks: [laid.blocks[0], second],
+        pages: [
+          { pageIndex: 0, blockIds: [laid.blocks[0]?.blockId] },
+          { pageIndex: 1, blockIds: [second.blockId] },
+        ],
+      }
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    fireEvent.click(blockNode('block-two'))
+
+    expect(screen.getByRole('button', { name: '转为绝对定位' })).toBeDisabled()
+    expect(screen.getByText('绝对定位目前只支持第一页的区块。')).toBeInTheDocument()
+  })
+
   it('hands a converted block the next z position above the ones already there', () => {
     const pinned = (id: string, zIndex: number): Block => ({
       ...absoluteBlock(id, 0, 0),
