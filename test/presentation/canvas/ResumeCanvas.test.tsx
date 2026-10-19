@@ -10,6 +10,7 @@
  */
 
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
@@ -27,6 +28,7 @@ import {
   reorderIndexForDrop,
 } from '../../../src/presentation/canvas/ResumeCanvas'
 import type { LaidOutBlock } from '../../../src/domain/resume/PageLayout'
+import type { Block } from '../../../src/domain/resume/Block'
 import { konvaNodePositions, resetKonvaNodePositions } from '../konvaDouble'
 import { absoluteBlock, dividerBlock, layoutWithPages, textBlock } from '../resumeFixtures'
 import { TestResizeObserver } from '../../setup'
@@ -163,11 +165,13 @@ describe('describeOverflow', () => {
 interface CanvasHarness {
   readonly onMoveBlock: ReturnType<typeof vi.fn>
   readonly onSelectBlock: ReturnType<typeof vi.fn>
+  readonly onEditText: ReturnType<typeof vi.fn>
 }
 
 function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
   const onMoveBlock = vi.fn()
   const onSelectBlock = vi.fn()
+  const onEditText = vi.fn()
   render(
     <ResumeCanvas
       layout={layoutWithPages([TWO_LINE_BLOCK, RULE_BLOCK])}
@@ -177,10 +181,31 @@ function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
       selectedBlockId={null}
       onSelectBlock={onSelectBlock}
       onMoveBlock={onMoveBlock}
+      onEditText={onEditText}
       {...overrides}
     />,
   )
-  return { onMoveBlock, onSelectBlock }
+  return { onMoveBlock, onSelectBlock, onEditText }
+}
+
+/** A canvas that can lose a block the way an undo would, mid editing session. */
+function renderEditorWithBlocks(blocks: readonly Block[]): {
+  readonly rerenderFn: (blocks: readonly Block[]) => void
+} {
+  const draw = (current: readonly Block[]): ReactElement => (
+    <ResumeCanvas
+      layout={layoutWithPages([TWO_LINE_BLOCK])}
+      page={A4_PAGE_SETUP}
+      blocks={current}
+      editable
+      selectedBlockId={null}
+      onSelectBlock={vi.fn()}
+      onMoveBlock={vi.fn()}
+      onEditText={vi.fn()}
+    />
+  )
+  const utils = render(draw(blocks))
+  return { rerenderFn: (next: readonly Block[]): void => utils.rerender(draw(next)) }
 }
 
 function dragPointer(node: HTMLElement, type: 'dragstart' | 'dragmove' | 'dragend', clientX: number, clientY: number): void {
@@ -332,6 +357,67 @@ describe('ResumeCanvas', () => {
     expect(onMoveBlock).not.toHaveBeenCalled()
   })
 
+  it('opens the editor over a double-clicked text block and hides its drawn lines', () => {
+    renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    expect(area).toHaveValue('甲\n乙')
+    // The drawn lines step aside for the editor: the same characters must not
+    // be on the sheet and in the textarea at once.
+    expect(screen.queryByText('甲')).not.toBeInTheDocument()
+    expect(screen.queryByText('乙')).not.toBeInTheDocument()
+  })
+
+  it('does not open an editor over a block that draws no text of its own', () => {
+    renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-rule'))
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('hands a committed session back as one edit intent', () => {
+    const { onEditText } = renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    fireEvent.change(area, { target: { value: '新的正文' } })
+    fireEvent.blur(area)
+
+    expect(onEditText).toHaveBeenCalledTimes(1)
+    expect(onEditText).toHaveBeenCalledWith('block-one', '新的正文')
+  })
+
+  it('writes no edit intent when a session closes without changing the text', () => {
+    const { onEditText } = renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+    fireEvent.blur(screen.getByRole('textbox', { name: '编辑区块文字' }))
+
+    expect(onEditText).not.toHaveBeenCalled()
+  })
+
+  it('closes the editor when its block disappears from the document', () => {
+    const { rerenderFn } = renderEditorWithBlocks([textBlock('block-one', '甲\n乙')])
+
+    fireEvent.dblClick(blockNode('block-one'))
+    expect(screen.getByRole('textbox', { name: '编辑区块文字' })).toBeInTheDocument()
+
+    rerenderFn([dividerBlock('block-rule')])
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('refuses to open an editor while the document is read-only', () => {
+    renderCanvas({ editable: false })
+
+    fireEvent.dblClick(blockNode('block-one'))
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
   it('re-fits when the frame itself changes size and the window does not', () => {
     renderCanvas()
     // jsdom never lays out, so fit-to-width starts pinned at the floor.
@@ -357,6 +443,7 @@ describe('ResumeCanvas', () => {
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
         onMoveBlock={vi.fn()}
+        onEditText={vi.fn()}
       />,
     )
     expect(TestResizeObserver.watching()).not.toHaveLength(0)
@@ -377,6 +464,7 @@ describe('ResumeCanvas', () => {
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
         onMoveBlock={vi.fn()}
+        onEditText={vi.fn()}
       />,
     )
 

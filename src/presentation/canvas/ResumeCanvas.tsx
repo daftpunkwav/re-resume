@@ -7,6 +7,8 @@
  * - Project a LayoutOutput plus a zoom factor into positioned rectangles
  * - Own page navigation, the zoom factor and fit-to-width
  * - Turn one pointer drag into exactly one drop intent, on release
+ * - Open the text editor over a double-clicked text block and hand its
+ *   committed text back as an intent
  * - Report layout overflows instead of clipping them away
  *
  * Constraints:
@@ -14,9 +16,9 @@
  *   canvas engine disagree with the pagination and move a page break on one
  *   platform and not on the other, so every line is drawn at the position and
  *   width layout() produced and wrap is switched off on the text nodes.
- * - It must not change the document. A drop is reported as an intent; the
- *   editor turns it into a DocumentChange and commits it through the
- *   composition root.
+ * - It must not change the document. A drop and a text commit are reported as
+ *   intents; the editor turns them into DocumentChanges and commits them
+ *   through the composition root.
  * - One stage unit is one CSS pixel. Konva multiplies the stage's backing store
  *   by window.devicePixelRatio itself, which is what keeps the sheet sharp on a
  *   fractional display; the geometry below therefore carries the zoom and the
@@ -24,11 +26,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Group, Layer, Rect, Stage, Text } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 
 import { Button } from '../app/components/Button'
 import { Notice } from '../app/components/Notice'
+import { TextEditorOverlay } from './TextEditorOverlay'
 import type { Block } from '../../domain/resume/Block'
 import { isAbsoluteLayout } from '../../domain/resume/Layout'
 import type { AbsoluteLayout } from '../../domain/resume/Layout'
@@ -95,12 +99,14 @@ export type BlockMove =
 export interface ResumeCanvasProps {
   readonly layout: LayoutOutput
   readonly page: PageSetup
-  /** Live blocks: the layout mode of a drag and the shape of a divider. */
+  /** Live blocks: the layout mode of a drag, the shape of a divider, the text a double click edits. */
   readonly blocks: readonly Block[]
   readonly editable: boolean
   readonly selectedBlockId: BlockId | null
   readonly onSelectBlock: (blockId: BlockId | null) => void
   readonly onMoveBlock: (move: BlockMove) => void
+  /** The committed text of an editing session, as an intent for the editor. */
+  readonly onEditText: (blockId: BlockId, text: string) => void
 }
 
 /**
@@ -246,6 +252,7 @@ export function ResumeCanvas({
   selectedBlockId,
   onSelectBlock,
   onMoveBlock,
+  onEditText,
 }: ResumeCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   // A null override means "follow the viewport", which is what fit-to-width
@@ -303,6 +310,47 @@ export function ResumeCanvas({
   }, [])
 
   /**
+   * The block whose text is being edited. The overlay replaces the drawn lines
+   * for exactly this block until the session commits or is cancelled.
+   */
+  const [editingBlockId, setEditingBlockId] = useState<BlockId | null>(null)
+
+  // An undo or a commit can remove the block under an open editor; an editor
+  // with no block underneath would commit text into nothing.
+  useEffect(() => {
+    if (editingBlockId === null) return
+    if (!blocks.some((block) => block.id === editingBlockId)) setEditingBlockId(null)
+  }, [blocks, editingBlockId])
+
+  const beginEdit = useCallback(
+    (box: CanvasBlockBox): void => {
+      const live = blocks.find((block) => block.id === box.blockId)
+      if (!editable || live === undefined || live.content.type !== 'text') return
+      onSelectBlock(box.blockId)
+      setEditingBlockId(box.blockId)
+    },
+    [blocks, editable, onSelectBlock],
+  )
+
+  const commitEdit = useCallback(
+    (text: string): void => {
+      const blockId = editingBlockId
+      setEditingBlockId(null)
+      if (blockId === null) return
+      const live = blocks.find((block) => block.id === blockId)
+      // An unchanged session writes no revision: closing the editor is not an
+      // edit, and the revision chain should not record one.
+      if (live === undefined || live.content.type !== 'text' || live.content.text === text) return
+      onEditText(blockId, text)
+    },
+    [blocks, editingBlockId, onEditText],
+  )
+
+  const cancelEdit = useCallback((): void => {
+    setEditingBlockId(null)
+  }, [])
+
+  /**
    * A gesture becomes a drop intent exactly once, here. The move handler is
    * deliberately absent: Konva already moves the node while the pointer moves,
    * and turning every intermediate position into a change would write one
@@ -344,6 +392,39 @@ export function ResumeCanvas({
 
   const changeZoom = (delta: number): void => {
     setZoomOverride(Math.min(Math.max(zoom + delta, MIN_ZOOM), MAX_ZOOM))
+  }
+
+  /**
+   * The overlay for the open editing session, or nothing. The geometry comes
+   * from the same projection the drawn box uses, so the textarea lands exactly
+   * where the lines it replaces were.
+   */
+  const textEditor = (): ReactNode => {
+    if (editingBlockId === null || sheet === undefined) return null
+    const box = sheet.blocks.find((entry) => entry.blockId === editingBlockId)
+    const live = blocks.find((entry) => entry.id === editingBlockId)
+    if (box === undefined || live === undefined || live.content.type !== 'text') return null
+    const style = layout.blocks.find((entry) => entry.blockId === editingBlockId)?.textStyle
+    if (style === undefined) return null
+    const fontSize = style.fontSize * zoom
+    const step = fontSize * style.lineHeight
+    return (
+      <TextEditorOverlay
+        initialText={live.content.text}
+        transform={{
+          x: box.x,
+          y: box.y,
+          scale: zoom,
+          width: box.width,
+          height: Math.max(box.height, step),
+        }}
+        fontSize={fontSize}
+        lineHeight={step}
+        fontFamily={style.fontFamily}
+        onCommit={commitEdit}
+        onCancel={cancelEdit}
+      />
+    )
   }
 
   return (
@@ -399,92 +480,102 @@ export function ResumeCanvas({
         {sheet === undefined ? (
           <p className="canvas-empty">文档还没有内容，从右侧添加一个区块。</p>
         ) : (
-          <Stage
-            className="canvas-stage"
-            width={Math.max(viewport.width, MIN_STAGE_SIZE)}
-            height={Math.max(viewport.height, MIN_STAGE_SIZE)}
-          >
-            <Layer listening={false}>
-              <Rect
-                x={0}
-                y={0}
-                width={sheet.width}
-                height={sheet.height}
-                cornerRadius={2}
-                fill={paperFill ?? undefined}
-                shadowColor={inkColour ?? undefined}
-                shadowBlur={SHADOW_BLUR}
-                shadowOffsetY={SHADOW_OFFSET_Y}
-                shadowOpacity={SHADOW_OPACITY}
-              />
-              {sheet.blocks.map((box) =>
-                box.rule ? (
-                  <Rect
-                    key={box.blockId}
-                    x={box.x}
-                    y={box.y}
-                    width={box.width}
-                    height={box.height}
-                    fill={ruleColour ?? undefined}
-                  />
-                ) : null,
-              )}
-            </Layer>
-
-            <Layer>
-              {/* Drawn first so it sits behind the blocks: Konva hit-tests from
-                  the top down, and a full-sheet rect on top would swallow every
-                  click on a block. */}
-              <Rect
-                x={0}
-                y={0}
-                width={sheet.width}
-                height={sheet.height}
-                onClick={() => onSelectBlock(null)}
-                onTap={() => onSelectBlock(null)}
-              />
-              {sheet.blocks.map((box) => (
-                <Group key={box.blockId}>
-                  <Rect
-                    name={box.blockId}
-                    x={box.x}
-                    y={box.y}
-                    width={box.width}
-                    height={box.height}
-                    draggable={editable}
-                    onDragStart={() => beginDrag(box.blockId)}
-                    onDragEnd={(event) => endDrag(box, event)}
-                    onClick={() => onSelectBlock(box.blockId)}
-                    onTap={() => onSelectBlock(box.blockId)}
-                    fill={accentColour ?? undefined}
-                    opacity={box.blockId === selectedBlockId ? SELECTION_FILL_OPACITY : 0}
-                    stroke={box.blockId === selectedBlockId ? (accentColour ?? undefined) : undefined}
-                    strokeWidth={SELECTION_STROKE_WIDTH}
-                  />
-                  {box.lines.map((line, index) => (
-                    <Text
-                      key={`${box.blockId}-${index}`}
-                      text={line.text}
-                      x={line.x}
-                      y={line.y}
-                      width={line.width}
-                      height={line.height}
-                      fontSize={line.fontSize}
-                      fontFamily={line.fontFamily}
-                      // The canvas font shorthand carries two weights, so a
-                      // resolved weight above the default collapses to bold.
-                      fontStyle={line.fontWeight > 500 ? 'bold' : 'normal'}
-                      fill={inkColour ?? undefined}
-                      // wrap: none keeps the text node from re-wrapping a line
-                      // layout() has already broken.
-                      wrap="none"
-                      listening={false}
+          <div className="canvas-stage-host">
+            <Stage
+              className="canvas-stage"
+              width={Math.max(viewport.width, MIN_STAGE_SIZE)}
+              height={Math.max(viewport.height, MIN_STAGE_SIZE)}
+            >
+              <Layer listening={false}>
+                <Rect
+                  x={0}
+                  y={0}
+                  width={sheet.width}
+                  height={sheet.height}
+                  cornerRadius={2}
+                  fill={paperFill ?? undefined}
+                  shadowColor={inkColour ?? undefined}
+                  shadowBlur={SHADOW_BLUR}
+                  shadowOffsetY={SHADOW_OFFSET_Y}
+                  shadowOpacity={SHADOW_OPACITY}
+                />
+                {sheet.blocks.map((box) =>
+                  box.rule ? (
+                    <Rect
+                      key={box.blockId}
+                      x={box.x}
+                      y={box.y}
+                      width={box.width}
+                      height={box.height}
+                      fill={ruleColour ?? undefined}
                     />
-                  ))}
-                </Group>
-              ))}
-            </Layer>
-          </Stage>
+                  ) : null,
+                )}
+              </Layer>
+
+              <Layer>
+                {/* Drawn first so it sits behind the blocks: Konva hit-tests from
+                    the top down, and a full-sheet rect on top would swallow every
+                    click on a block. */}
+                <Rect
+                  x={0}
+                  y={0}
+                  width={sheet.width}
+                  height={sheet.height}
+                  onClick={() => onSelectBlock(null)}
+                  onTap={() => onSelectBlock(null)}
+                />
+                {sheet.blocks.map((box) => (
+                  <Group key={box.blockId}>
+                    <Rect
+                      name={box.blockId}
+                      x={box.x}
+                      y={box.y}
+                      width={box.width}
+                      height={box.height}
+                      // An open editor sits on top of the node; dragging under a
+                      // live textarea would move the box out from the text.
+                      draggable={editable && box.blockId !== editingBlockId}
+                      onDragStart={() => beginDrag(box.blockId)}
+                      onDragEnd={(event) => endDrag(box, event)}
+                      onClick={() => onSelectBlock(box.blockId)}
+                      onTap={() => onSelectBlock(box.blockId)}
+                      onDblClick={() => beginEdit(box)}
+                      onDblTap={() => beginEdit(box)}
+                      fill={accentColour ?? undefined}
+                      opacity={box.blockId === selectedBlockId ? SELECTION_FILL_OPACITY : 0}
+                      stroke={box.blockId === selectedBlockId ? (accentColour ?? undefined) : undefined}
+                      strokeWidth={SELECTION_STROKE_WIDTH}
+                    />
+                    {box.blockId === editingBlockId
+                      ? null
+                      : box.lines.map((line, index) => (
+                          <Text
+                            key={`${box.blockId}-${index}`}
+                            text={line.text}
+                            x={line.x}
+                            y={line.y}
+                            width={line.width}
+                            height={line.height}
+                            fontSize={line.fontSize}
+                            fontFamily={line.fontFamily}
+                            // The canvas font shorthand carries two weights, so a
+                            // resolved weight above the default collapses to bold.
+                            fontStyle={line.fontWeight > 500 ? 'bold' : 'normal'}
+                            fill={inkColour ?? undefined}
+                            // wrap: none keeps the text node from re-wrapping a line
+                            // layout() has already broken.
+                            wrap="none"
+                            listening={false}
+                          />
+                        ))}
+                  </Group>
+                ))}
+              </Layer>
+            </Stage>
+
+            {textEditor()}
+          </div>
         )}
       </div>
     </div>

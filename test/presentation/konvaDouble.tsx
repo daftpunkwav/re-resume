@@ -32,7 +32,17 @@ const MEASURED_FIELDS = [
   'opacity',
 ] as const
 
-const FORWARDED_EVENTS = ['onClick', 'onTap', 'onDragStart', 'onDragMove', 'onDragEnd'] as const
+// dbltap is Konva's touch counterpart of dblclick; a DOM dblclick never fires
+// it, so tests exercise the mouse path and the tap path stays wiring-identical.
+const FORWARDED_EVENTS = [
+  'onClick',
+  'onTap',
+  'onDblClick',
+  'onDblTap',
+  'onDragStart',
+  'onDragMove',
+  'onDragEnd',
+] as const
 
 interface Pointer {
   readonly x: number

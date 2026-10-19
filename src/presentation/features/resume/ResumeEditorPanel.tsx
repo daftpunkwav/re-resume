@@ -112,6 +112,24 @@ export function placeAbsoluteBlock(
   }))
 }
 
+/**
+ * The committed text of a canvas editing session. A block that an undo removed
+ * while the editor was open, or one that never was a text block, leaves the
+ * document untouched rather than writing a revision about nothing.
+ */
+export function updateBlockText(label: string, blockId: BlockId, text: string): DocumentChange {
+  return userChange(label, (state) => {
+    const target = state.blocks.find((block) => block.id === blockId)
+    if (target === undefined || target.content.type !== 'text') return state
+    return {
+      ...state,
+      blocks: state.blocks.map((block) =>
+        block.id === blockId ? { ...block, content: { type: 'text', text } } : block,
+      ),
+    }
+  })
+}
+
 export function changePageSetup(label: string, pageSetup: PageSetup): DocumentChange {
   return userChange(label, (state) => ({ ...state, pageSetup }))
 }
@@ -215,6 +233,10 @@ export function ResumeEditorPanel({
     )
   }
 
+  const editBlockText = (blockId: BlockId, text: string): void => {
+    dispatch(() => commit(updateBlockText('编辑文字', blockId, text)))
+  }
+
   const copyResume = (): void => {
     dispatch(
       async () => {
@@ -264,6 +286,7 @@ export function ResumeEditorPanel({
             selectedBlockId={selected}
             onSelectBlock={setSelectedBlockId}
             onMoveBlock={moveBlock}
+            onEditText={editBlockText}
           />
         </div>
       </div>
@@ -363,6 +386,7 @@ function ResumeCanvasArea({
   selectedBlockId,
   onSelectBlock,
   onMoveBlock,
+  onEditText,
 }: {
   readonly preview: ResumePreview | null
   readonly error: ReadableError | null
@@ -371,6 +395,7 @@ function ResumeCanvasArea({
   readonly selectedBlockId: BlockId | null
   readonly onSelectBlock: (blockId: BlockId | null) => void
   readonly onMoveBlock: (move: BlockMove) => void
+  readonly onEditText: (blockId: BlockId, text: string) => void
 }) {
   if (preview === null) {
     return error === null ? (
@@ -390,6 +415,7 @@ function ResumeCanvasArea({
       selectedBlockId={selectedBlockId}
       onSelectBlock={onSelectBlock}
       onMoveBlock={onMoveBlock}
+      onEditText={onEditText}
     />
   )
 }

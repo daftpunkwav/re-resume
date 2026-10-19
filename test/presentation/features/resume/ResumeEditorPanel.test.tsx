@@ -13,7 +13,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
-import { ResumeEditorPanel } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
+import { ResumeEditorPanel, updateBlockText } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { OperationOutcome } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { FakeResumeServices } from '../../fakeResumeServices'
 import { createFakeResumeServices } from '../../fakeResumeServices'
@@ -31,6 +31,7 @@ import type { DocumentState } from '../../../../src/domain/resume/DocumentChange
 import type { Resume } from '../../../../src/domain/resume/Resume'
 import type { LayoutOutput } from '../../../../src/domain/resume/PageLayout'
 import type { OverflowReport } from '../../../../src/domain/resume/PageLayout'
+import { asBlockId } from '../../../../src/domain/shared/branded-id'
 
 vi.mock('react-konva', async () => {
   const double = await import('../../konvaDouble')
@@ -236,6 +237,29 @@ describe('ResumeEditorPanel', () => {
     const stored = harness.stored()
     expect(stored.blocks).toHaveLength(3)
     expect(stored.blocks[2]?.content).toEqual({ type: 'text', text: '自我评价' })
+  })
+
+  it('commits a canvas editing session as one revision', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.dblClick(blockNode('block-one'))
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    fireEvent.change(area, { target: { value: '改写后的第一段' } })
+    fireEvent.blur(area)
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('编辑文字')
+    expect(harness.stored().blocks[0]?.content).toEqual({ type: 'text', text: '改写后的第一段' })
+    // The committed text is drawn from the document, not from the editor.
+    await screen.findByText('改写后的第一段')
+  })
+
+  it('leaves a block an undo removed mid session untouched', () => {
+    const change = updateBlockText('编辑文字', asBlockId('block-gone'), '无处落笔')
+    const state = { blocks: [], pageSetup: makeResume().pageSetup }
+
+    expect(change.next(state)).toBe(state)
   })
 
   it('reports an overflow instead of letting the block disappear', async () => {
