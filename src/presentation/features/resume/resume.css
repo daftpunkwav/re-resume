@@ -119,6 +119,15 @@
   margin-top: var(--space-3);
 }
 
+.resume-selected-layer {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.resume-selected-layer .button {
+  flex: 1;
+}
+
 /* Operations feedback ----------------------------------------------------- */
 
 .resume-blockers {

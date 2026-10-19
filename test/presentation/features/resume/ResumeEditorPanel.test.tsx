@@ -255,6 +255,55 @@ describe('ResumeEditorPanel', () => {
     expect(harness.stored().blocks[1]?.layout).toMatchObject({ width: 182, height: 77 })
   })
 
+  it('anchors a reorder against the flow sequence, even with a pinned block between', async () => {
+    const resume = makeResume({
+      blocks: [
+        textBlock('block-one', '第一段正文'),
+        absoluteBlock('block-pinned', 0, 0),
+        textBlock('block-two', '第二段正文'),
+      ],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    // Dropping block-two above block-one names block-one as the anchor; a
+    // numeric index counted on the drawn order would have landed on the
+    // pinned block sitting between them.
+    drag(blockNode('block-two'), [20, 0], [[20, 0]])
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.stored().blocks.map((block) => block.id)).toEqual([
+      'block-two',
+      'block-one',
+      'block-pinned',
+    ])
+  })
+
+  it('trades z positions with the neighbouring absolute block', async () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const resume = makeResume({
+      blocks: [
+        textBlock('block-one', '第一段正文'),
+        pinned('block-low', 1),
+        pinned('block-high', 2),
+      ],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-low'))
+    expect(screen.getByRole('button', { name: '下移一层' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '上移一层' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整层级')
+    expect(harness.stored().blocks[1]?.layout).toMatchObject({ zIndex: 2 })
+    expect(harness.stored().blocks[2]?.layout).toMatchObject({ zIndex: 1 })
+  })
+
   it('adds a block through the same commit path', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)

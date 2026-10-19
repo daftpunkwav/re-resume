@@ -10,6 +10,8 @@
  * - Stack flow blocks in order and open a new page when the remaining height is
  *   insufficient
  * - Place absolute blocks at their coordinates and report what does not fit
+ * - Emit the draw order: flow blocks in sequence, absolute blocks above them,
+ *   ordered among themselves by zIndex
  *
  * Constraints:
  * - Input blocks are materialized (domain/resume/PageLayout.ts): every reference
@@ -56,7 +58,8 @@ const FLOW_GRAPHIC_PLACEHOLDER_HEIGHT = 72
 export function layout(input: LayoutInput): LayoutOutput {
   const availableWidth = contentWidth(input.page)
   const availableHeight = contentHeight(input.page)
-  const blocks: LaidOutBlock[] = []
+  const flowBlocks: LaidOutBlock[] = []
+  const pinnedBlocks: { readonly zIndex: number; readonly block: LaidOutBlock }[] = []
   const overflows: OverflowReport[] = []
   let flowPage = 0
   let flowTop = 0
@@ -64,17 +67,16 @@ export function layout(input: LayoutInput): LayoutOutput {
     const textStyle = resolveTextStyle(block.textStyle)
     if (isAbsoluteLayout(block.layout)) {
       const box = block.layout
-      blocks.push(
-        placeAbsolute(
-          block.id,
-          box,
-          wrapIfText(block.content, textStyle, box.width, input.measurer),
-          textStyle,
-          availableWidth,
-          availableHeight,
-          overflows,
-        ),
+      const laidOut = placeAbsolute(
+        block.id,
+        box,
+        wrapIfText(block.content, textStyle, box.width, input.measurer),
+        textStyle,
+        availableWidth,
+        availableHeight,
+        overflows,
       )
+      pinnedBlocks.push({ zIndex: box.zIndex, block: laidOut })
       continue
     }
     const lines = wrapIfText(block.content, textStyle, availableWidth, input.measurer)
@@ -88,7 +90,7 @@ export function layout(input: LayoutInput): LayoutOutput {
       flowPage += 1
       flowTop = 0
     }
-    blocks.push({
+    flowBlocks.push({
       blockId: block.id,
       pageIndex: flowPage,
       x: 0,
@@ -100,6 +102,13 @@ export function layout(input: LayoutInput): LayoutOutput {
     })
     flowTop += height
   }
+  // Draw order: the flow sequence first, then the pinned blocks above it. The
+  // sort is stable, so blocks of equal z-order keep their document order —
+  // the zIndex column only separates blocks the user actually reordered.
+  const orderedPinned = pinnedBlocks
+    .sort((left, right) => left.zIndex - right.zIndex)
+    .map((entry) => entry.block)
+  const blocks = [...flowBlocks, ...orderedPinned]
   return { pages: pagesOf(blocks), blocks, overflows }
 }
 

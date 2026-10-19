@@ -27,18 +27,27 @@ export interface SelectedBlockPanelProps {
   readonly disabled: boolean
   /** A flow block needs laid-out geometry to be pinned where it is drawn. */
   readonly canMakeAbsolute: boolean
+  /** An absolute block raises or lowers by swapping z positions with its neighbour. */
+  readonly canRaise: boolean
+  readonly canLower: boolean
   readonly onDelete: () => void
   readonly onMakeAbsolute: () => void
   readonly onMakeFlow: () => void
+  readonly onRaise: () => void
+  readonly onLower: () => void
 }
 
 export function SelectedBlockPanel({
   block,
   disabled,
   canMakeAbsolute,
+  canRaise,
+  canLower,
   onDelete,
   onMakeAbsolute,
   onMakeFlow,
+  onRaise,
+  onLower,
 }: SelectedBlockPanelProps) {
   return (
     <Panel title="选中区块">
@@ -52,9 +61,19 @@ export function SelectedBlockPanel({
             转为绝对定位
           </Button>
         ) : (
-          <Button onClick={onMakeFlow} disabled={disabled}>
-            转为常规流
-          </Button>
+          <>
+            <Button onClick={onMakeFlow} disabled={disabled}>
+              转为常规流
+            </Button>
+            <div className="resume-selected-layer">
+              <Button size="small" onClick={onLower} disabled={disabled || !canLower}>
+                下移一层
+              </Button>
+              <Button size="small" onClick={onRaise} disabled={disabled || !canRaise}>
+                上移一层
+              </Button>
+            </div>
+          </>
         )}
         <Button variant="danger" onClick={onDelete} disabled={disabled}>
           删除区块

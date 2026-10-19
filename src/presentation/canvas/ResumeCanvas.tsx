@@ -95,7 +95,12 @@ export interface CanvasSheet {
 
 /** A completed pointer gesture, expressed the way the editor has to act on it. */
 export type BlockGesture =
-  | { readonly kind: 'reorder'; readonly blockId: BlockId; readonly toIndex: number }
+  | {
+      readonly kind: 'reorder'
+      readonly blockId: BlockId
+      /** The flow block the drop landed before; null lands at the end. */
+      readonly beforeBlockId: BlockId | null
+    }
   | { readonly kind: 'place'; readonly blockId: BlockId; readonly x: number; readonly y: number }
   | {
       readonly kind: 'resize'
@@ -190,21 +195,22 @@ export function contentPointFromSheet(
 
 /**
  * Where a flow block lands. The block leaves the sequence and is reinserted
- * before the first block whose vertical midpoint is below the pointer, so the
- * answer is an index in the same order layout() received the blocks in.
+ * before the first remaining block whose vertical midpoint is below the
+ * pointer. The list handed in holds the flow blocks in document order —
+ * absolute blocks are not part of the sequence and say nothing about where it
+ * continues — so the answer is an anchor the editor can splice against, not an
+ * index that depends on where absolute blocks happen to sit.
  */
-export function reorderIndexForDrop(
-  blocks: readonly LaidOutBlock[],
+export function reorderAnchorForDrop(
+  laidOutFlowBlocks: readonly LaidOutBlock[],
   draggedBlockId: BlockId,
   contentPointerY: number,
-): number {
-  const remaining = blocks.filter((block) => block.blockId !== draggedBlockId)
-  for (let index = 0; index < remaining.length; index += 1) {
-    const block = remaining[index]
-    if (block === undefined) continue
-    if (contentPointerY < block.y + block.height / 2) return index
+): BlockId | null {
+  const remaining = laidOutFlowBlocks.filter((block) => block.blockId !== draggedBlockId)
+  for (const block of remaining) {
+    if (contentPointerY < block.y + block.height / 2) return block.blockId
   }
-  return remaining.length
+  return null
 }
 
 /**
@@ -346,16 +352,11 @@ export function ResumeCanvas({
 
   /**
    * The block whose text is being edited. The overlay replaces the drawn lines
-   * for exactly this block until the session commits or is cancelled.
+   * for exactly this block until the session commits or is cancelled. A stale
+   * id is harmless: every reader below requires the block to still exist, so
+   * an undo that removes it just closes the editor.
    */
   const [editingBlockId, setEditingBlockId] = useState<BlockId | null>(null)
-
-  // An undo or a commit can remove the block under an open editor; an editor
-  // with no block underneath would commit text into nothing.
-  useEffect(() => {
-    if (editingBlockId === null) return
-    if (!blocks.some((block) => block.id === editingBlockId)) setEditingBlockId(null)
-  }, [blocks, editingBlockId])
 
   const beginEdit = useCallback(
     (box: CanvasBlockBox): void => {
@@ -411,15 +412,27 @@ export function ResumeCanvas({
         onGesture({ kind: 'place', blockId, x: placed.x, y: placed.y })
         return
       }
+      // The flow blocks, in document order, each with the geometry layout()
+      // drew for it: the list a drop anchor is read from.
+      const flowLaidOut = blocks
+        .filter((entry) => !isAbsoluteLayout(entry.layout))
+        .flatMap((entry) => {
+          const drawn = layout.blocks.find((laidOut) => laidOut.blockId === entry.id)
+          return drawn === undefined ? [] : [drawn]
+        })
       onGesture({
         kind: 'reorder',
         blockId,
-        // reorderIndexForDrop compares the drop point against the middle of
-        // every remaining block, so the dragged block has to be measured the
+        // The anchor compares the drop point against the middle of every
+        // remaining flow block, so the dragged block has to be measured the
         // same way. Its top edge says the block lands later than it does: a
         // tall block dropped just above its neighbour looked like it belonged
         // below it.
-        toIndex: reorderIndexForDrop(layout.blocks, blockId, content.y + laidOut.height / 2),
+        beforeBlockId: reorderAnchorForDrop(
+          flowLaidOut,
+          blockId,
+          content.y + laidOut.height / 2,
+        ),
       })
     },
     [blocks, layout, onGesture, page, zoom],

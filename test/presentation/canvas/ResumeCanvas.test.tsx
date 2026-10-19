@@ -27,7 +27,7 @@ import {
   describeOverflow,
   fitWidthZoom,
   projectLayoutToSheets,
-  reorderIndexForDrop,
+  reorderAnchorForDrop,
 } from '../../../src/presentation/canvas/ResumeCanvas'
 import type { LaidOutBlock } from '../../../src/domain/resume/PageLayout'
 import type { Block } from '../../../src/domain/resume/Block'
@@ -118,17 +118,21 @@ describe('contentPointFromSheet', () => {
   })
 })
 
-describe('reorderIndexForDrop', () => {
+describe('reorderAnchorForDrop', () => {
   it('drops above the first remaining block', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 10)).toBe(0)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 10)).toBe(
+      RULE_BLOCK.blockId,
+    )
   })
 
   it('drops below every remaining block', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 400)).toBe(1)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 400)).toBeNull()
   })
 
   it('leaves a block that was dropped on its own place alone', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 20)).toBe(0)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 20)).toBe(
+      RULE_BLOCK.blockId,
+    )
   })
 })
 
@@ -332,7 +336,7 @@ describe('ResumeCanvas', () => {
     expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
-      toIndex: 1,
+      beforeBlockId: null,
     })
   })
 
@@ -349,7 +353,7 @@ describe('ResumeCanvas', () => {
     expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
-      toIndex: 1,
+      beforeBlockId: null,
     })
   })
 

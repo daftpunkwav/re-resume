@@ -81,18 +81,31 @@ export function appendBlock(label: string, block: Block): DocumentChange {
   return userChange(label, (state) => ({ ...state, blocks: [...state.blocks, block] }))
 }
 
-export function reorderBlocks(label: string, blockId: BlockId, toIndex: number): DocumentChange {
+/**
+ * Moves a block to before `beforeBlockId` in the sequence, or to the end when
+ * the anchor is null. An anchor carries the drop's meaning across the gap
+ * between the drawn document and the stored one — an index counted on the
+ * canvas would land somewhere else the moment absolute blocks sit in between.
+ * A block that is no longer in the document leaves it untouched; the canvas
+ * can be one interaction behind an undo, and a change that invented a
+ * position for a missing block would write history that never happened.
+ */
+export function reorderBlocks(
+  label: string,
+  blockId: BlockId,
+  beforeBlockId: BlockId | null,
+): DocumentChange {
   return userChange(label, (state) => {
     const from = state.blocks.findIndex((block) => block.id === blockId)
-    // A block that is no longer in the document leaves it untouched; the canvas
-    // can be one interaction behind an undo, and a change that invented a
-    // position for a missing block would write history that never happened.
     if (from < 0) return state
     const blocks = [...state.blocks]
     const [moved] = blocks.splice(from, 1)
     if (moved === undefined) return state
-    const bounded = Math.min(Math.max(toIndex, 0), blocks.length)
-    blocks.splice(bounded, 0, moved)
+    const anchorIndex =
+      beforeBlockId === null
+        ? blocks.length
+        : blocks.findIndex((block) => block.id === beforeBlockId)
+    blocks.splice(anchorIndex < 0 ? blocks.length : anchorIndex, 0, moved)
     return { ...state, blocks }
   })
 }
@@ -213,6 +226,37 @@ export function resizeAbsoluteBlock(
   })
 }
 
+/**
+ * Trades the z positions of two absolute blocks. Swapping — rather than
+ * assigning neighbours — keeps the total order intact no matter what the
+ * document looked like when the click landed.
+ */
+export function swapBlockZOrder(label: string, firstId: BlockId, secondId: BlockId): DocumentChange {
+  return userChange(label, (state) => {
+    const first = state.blocks.find((block) => block.id === firstId)
+    const second = state.blocks.find((block) => block.id === secondId)
+    if (
+      first === undefined ||
+      second === undefined ||
+      !isAbsoluteLayout(first.layout) ||
+      !isAbsoluteLayout(second.layout)
+    ) {
+      return state
+    }
+    const firstZ = first.layout.zIndex
+    const secondZ = second.layout.zIndex
+    return {
+      ...state,
+      blocks: state.blocks.map((block) => {
+        if (!isAbsoluteLayout(block.layout)) return block
+        if (block.id === firstId) return { ...block, layout: { ...block.layout, zIndex: secondZ } }
+        if (block.id === secondId) return { ...block, layout: { ...block.layout, zIndex: firstZ } }
+        return block
+      }),
+    }
+  })
+}
+
 export function changePageSetup(label: string, pageSetup: PageSetup): DocumentChange {
   return userChange(label, (state) => ({ ...state, pageSetup }))
 }
@@ -307,6 +351,19 @@ export function ResumeEditorPanel({
     selected === null
       ? undefined
       : preview.data?.layout.blocks.find((entry) => entry.blockId === selected)
+  // The z neighbours of the selected block: who it would swap places with.
+  // Array#sort is stable, so equal z positions keep document order.
+  const zOrder: { readonly id: BlockId; readonly zIndex: number }[] = []
+  for (const block of resume.blocks) {
+    if (isAbsoluteLayout(block.layout)) {
+      zOrder.push({ id: block.id, zIndex: block.layout.zIndex })
+    }
+  }
+  zOrder.sort((left, right) => left.zIndex - right.zIndex)
+  const selectedZPosition =
+    selected === null ? -1 : zOrder.findIndex((entry) => entry.id === selected)
+  const zAbove = selectedZPosition < 0 ? null : (zOrder[selectedZPosition + 1]?.id ?? null)
+  const zBelow = selectedZPosition < 1 ? null : (zOrder[selectedZPosition - 1]?.id ?? null)
 
   const commit = (change: DocumentChange): Promise<unknown> => resumes.commit(resumeId, change)
 
@@ -318,7 +375,7 @@ export function ResumeEditorPanel({
     dispatch(() =>
       commit(
         gesture.kind === 'reorder'
-          ? reorderBlocks('移动区块', gesture.blockId, gesture.toIndex)
+          ? reorderBlocks('移动区块', gesture.blockId, gesture.beforeBlockId)
           : gesture.kind === 'place'
             ? placeAbsoluteBlock('移动区块', gesture.blockId, gesture.x, gesture.y)
             : resizeAbsoluteBlock('调整区块大小', gesture.blockId, gesture.width, gesture.height),
@@ -353,6 +410,22 @@ export function ResumeEditorPanel({
     if (selectedBlock === undefined) return
     const blockId = selectedBlock.id
     dispatch(() => commit(convertBlockToFlow('转为常规流', blockId)))
+  }
+
+  const swapSelectedZOrder = (otherId: BlockId): void => {
+    if (selected === null) return
+    const current = selected
+    dispatch(() => commit(swapBlockZOrder('调整层级', current, otherId)))
+  }
+
+  const raiseSelected = (): void => {
+    if (selected === null || zAbove === null) return
+    swapSelectedZOrder(zAbove)
+  }
+
+  const lowerSelected = (): void => {
+    if (selected === null || zBelow === null) return
+    swapSelectedZOrder(zBelow)
   }
 
   const copyResume = (): void => {
@@ -398,9 +471,13 @@ export function ResumeEditorPanel({
               block={selectedBlock}
               disabled={!editable}
               canMakeAbsolute={selectedLaidOut !== undefined}
+              canRaise={zAbove !== null}
+              canLower={zBelow !== null}
               onDelete={removeSelected}
               onMakeAbsolute={pinSelectedAbsolute}
               onMakeFlow={releaseSelectedToFlow}
+              onRaise={raiseSelected}
+              onLower={lowerSelected}
             />
           )}
         </div>
