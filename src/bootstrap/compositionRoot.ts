@@ -272,6 +272,11 @@ export async function createCompositionRoot(
 ): Promise<CompositionRoot> {
   const clock: Clock = new SystemClock()
   const ids: IdGenerator = new RandomIdGenerator()
+  // Fonts come before the database: they depend on nothing below, and a font
+  // failure must not leave an opened connection behind — the caller only
+  // receives a root, and with it shutdown(), once every startup step passed.
+  const fontRegistry = await loadBundledFontRegistry()
+  await registerCanvasFonts(fontRegistry)
   const database = requireManagedDatabase(
     await openSqliteDatabase(options.databaseConnectionString),
   )
@@ -280,13 +285,6 @@ export async function createCompositionRoot(
   await database.enableForeignKeys()
 
   const secretStore = new StrongholdSecretStore(options.stronghold)
-  // The canonical measurer is built from the bundled faces, and the document's
-  // FontFaceSet is given the same bytes so the canvas draws what layout
-  // measured. Registration must finish before the canvas mounts, and the
-  // canvas mounts only after this root resolves — awaiting here is the one
-  // timing guarantee that needs to exist.
-  const fontRegistry = await loadBundledFontRegistry()
-  await registerCanvasFonts(fontRegistry)
   const wiring: Wiring = {
     clock,
     ids,
