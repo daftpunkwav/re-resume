@@ -56,7 +56,9 @@ import { SqliteAgentRunRepository } from '../infrastructure/persistence/SqliteAg
 import { SqliteJobPostingRepository } from '../infrastructure/persistence/SqliteJobPostingRepository'
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
-import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
+import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
+import { registerCanvasFonts } from '../infrastructure/measurement/CanvasFontRegistration'
+import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
 import { createTauriHttpClient } from '../infrastructure/http/TauriHttpClient'
 import { AnthropicProvider } from '../infrastructure/http/ProviderAdapters/AnthropicProvider'
 import { OpenAiCompatibleProvider } from '../infrastructure/http/ProviderAdapters/OpenAiCompatibleProvider'
@@ -278,21 +280,18 @@ export async function createCompositionRoot(
   await database.enableForeignKeys()
 
   const secretStore = new StrongholdSecretStore(options.stronghold)
+  // The canonical measurer is built from the bundled faces, and the document's
+  // FontFaceSet is given the same bytes so the canvas draws what layout
+  // measured. Registration must finish before the canvas mounts, and the
+  // canvas mounts only after this root resolves — awaiting here is the one
+  // timing guarantee that needs to exist.
+  const fontRegistry = await loadBundledFontRegistry()
+  await registerCanvasFonts(fontRegistry)
   const wiring: Wiring = {
     clock,
     ids,
     database,
-    /**
-     * The canonical measurer. CanvasTextMeasurer cannot take this place: it
-     * needs a rendering context, which does not exist until the canvas mounts,
-     * and its own contract forbids feeding layout(), so a caret offset could
-     * never move a page break. FixtureTextMeasurer is the only implementation
-     * available synchronously at startup, and it is deterministic. When the font
-     * pipeline lands, this line is the replacement — a measurer built from the
-     * bundled font files — which also reaches checkResumeLayout, because
-     * buildToolRegistry receives this same instance.
-     */
-    measurer: new FixtureTextMeasurer(),
+    measurer: createFontkitTextMeasurer(fontRegistry),
     experienceRepo: new SqliteExperienceRepository(database),
     profileRepo: new SqliteProfileRepository(database),
     resumeRepo: new SqliteResumeRepository(database, clock, ids),

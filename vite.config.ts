@@ -30,8 +30,10 @@ export default defineConfig({
     // The bundle is served from disk inside the application window, not over a
     // network, so the default 500 kB warning threshold measures the wrong thing
     // here. Splitting the canvas out would add a suspense boundary and a
-    // loading flash to save a few milliseconds of local parsing.
-    chunkSizeWarningLimit: 1024,
+    // loading flash to save a few milliseconds of local parsing. The limit
+    // tracks the bundle as it exists, so the warning stays meaningful: the
+    // growth past 1024 kB is the fontkit measurer, which every page needs.
+    chunkSizeWarningLimit: 1536,
   },
   server: {
     port: 1420,

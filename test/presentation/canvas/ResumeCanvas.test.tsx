@@ -14,7 +14,7 @@ import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
-import { DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
+import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import { asBlockId } from '../../../src/domain/shared/branded-id'
 import {
   MAX_ZOOM,
@@ -98,8 +98,8 @@ describe('projectLayoutToSheets', () => {
     const sheet = projectLayoutToSheets(layoutWithPages([TWO_LINE_BLOCK]), blocks, A4_PAGE_SETUP, 2)[0]
 
     expect(sheet?.blocks[0]?.lines).toEqual([
-      { text: '甲', x: 144, y: 144, width: 22, height: 33, fontSize: 22, fontFamily: 'sans-serif', fontWeight: 400 },
-      { text: '乙', x: 152, y: 177, width: 44, height: 33, fontSize: 22, fontFamily: 'sans-serif', fontWeight: 400 },
+      { text: '甲', x: 144, y: 144, width: 22, height: 33, fontSize: 22, fontFamily: DEFAULT_FONT_FAMILY, fontWeight: 400 },
+      { text: '乙', x: 152, y: 177, width: 44, height: 33, fontSize: 22, fontFamily: DEFAULT_FONT_FAMILY, fontWeight: 400 },
     ])
   })
 
