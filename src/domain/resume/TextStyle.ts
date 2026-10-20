@@ -18,7 +18,7 @@ export interface TextStyle {
 
 /**
  * The family the application bundles (Noto Sans SC, see
- * src/assets/fonts/README.md) and registers under this exact name — both in
+ * public/fonts/README.md) and registers under this exact name — both in
  * the canonical measurer's FontRegistry and in the document's FontFaceSet for
  * canvas drawing. Layout fails loudly when a referenced family is missing
  * from the registry, which is what keeps this name honest.
