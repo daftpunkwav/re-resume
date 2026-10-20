@@ -88,12 +88,14 @@ describe('FontkitTextMeasurer', () => {
     expect(bold).toBeGreaterThan(regular)
   })
 
-  it('resolves weights at the six-hundred boundary', () => {
+  it('resolves weights at the five-hundred boundary the way CSS font matching does', () => {
     const latin = 'W'.repeat(10)
     const regular = measurer.measureLine(latin, style)
     const bold = measurer.measureLine(latin, { ...style, fontWeight: 700 })
 
     expect(measurer.measureLine(latin, { ...style, fontWeight: 500 })).toBe(regular)
+    expect(measurer.measureLine(latin, { ...style, fontWeight: 501 })).toBe(bold)
+    expect(measurer.measureLine(latin, { ...style, fontWeight: 550 })).toBe(bold)
     expect(measurer.measureLine(latin, { ...style, fontWeight: 600 })).toBe(bold)
   })
 

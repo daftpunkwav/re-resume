@@ -49,8 +49,13 @@ export interface FontFaces {
  */
 export type FontRegistry = ReadonlyMap<string, FontFaces>
 
-/** Weights from here up resolve to the bold face when one is registered. */
-const BOLD_WEIGHT_THRESHOLD = 600
+/**
+ * A weight above this resolves to the bold face. The boundary follows CSS
+ * font matching for a 400/700 pair — weights up to 500 fall back to the
+ * regular face, anything above reaches the 700 face — so the canvas picking
+ * a face by CSS rules and the measurer picking one here never disagree.
+ */
+const BOLD_WEIGHT_THRESHOLD = 500
 
 /**
  * Thrown when a document references a family the registry does not carry.
@@ -91,7 +96,7 @@ export function createFontkitTextMeasurer(fonts: FontRegistry): TextMeasurer {
       }
       facesByFamily.set(style.fontFamily, resolved)
     }
-    return style.fontWeight >= BOLD_WEIGHT_THRESHOLD && resolved.bold !== null
+    return style.fontWeight > BOLD_WEIGHT_THRESHOLD && resolved.bold !== null
       ? resolved.bold
       : resolved.regular
   }
