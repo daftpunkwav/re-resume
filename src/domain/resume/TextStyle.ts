@@ -17,12 +17,13 @@ export interface TextStyle {
 }
 
 /**
- * "sans-serif" is a resolution key rather than a literal family name: each
- * measurer maps it to whatever default face it has. Naming a concrete family
- * here would force a bundled font decision that the resource pipeline has not
- * made yet.
+ * The family the application bundles (Noto Sans SC, see
+ * public/fonts/README.md) and registers under this exact name — both in
+ * the canonical measurer's FontRegistry and in the document's FontFaceSet for
+ * canvas drawing. Layout fails loudly when a referenced family is missing
+ * from the registry, which is what keeps this name honest.
  */
-export const DEFAULT_FONT_FAMILY = 'sans-serif'
+export const DEFAULT_FONT_FAMILY = 'Noto Sans SC'
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: DEFAULT_FONT_FAMILY,
