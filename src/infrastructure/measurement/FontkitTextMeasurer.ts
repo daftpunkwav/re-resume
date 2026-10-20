@@ -17,6 +17,11 @@
  *   (a ligature's advance lands on its first cluster, combining marks land on
  *   their base), so prefix sums stay correct for caret alignment even where
  *   glyph and cluster boundaries disagree.
+ * - A character outside the selected face's coverage measures as that face's
+ *   .notdef advance, while canvas drawing substitutes a system face for the
+ *   same character, so computed and drawn widths can differ for exactly those
+ *   characters. The bundled faces cover Han, Kana, Hangul and Latin; the gap
+ *   is bounded to whatever falls outside them.
  */
 
 import { create as createFontkitFont } from 'fontkit'
