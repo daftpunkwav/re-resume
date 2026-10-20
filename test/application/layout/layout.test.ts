@@ -199,6 +199,42 @@ describe('layout', () => {
     ])
   })
 
+  it('draws absolute blocks above the flow, ordered among themselves by zIndex', () => {
+    const result = layout({
+      blocks: [
+        materialized('block-1', { type: 'text', text: '首段。' }, absoluteLayout({ zIndex: 5 })),
+        textBlock('block-2', '正文。'),
+        materialized('block-3', { type: 'text', text: '底层。' }, absoluteLayout({ zIndex: 1 })),
+        textBlock('block-4', '次段。'),
+      ],
+      page: A4_PAGE_SETUP,
+      measurer,
+    })
+
+    expect(result.blocks.map((block) => block.blockId)).toEqual([
+      asBlockId('block-2'),
+      asBlockId('block-4'),
+      asBlockId('block-3'),
+      asBlockId('block-1'),
+    ])
+  })
+
+  it('keeps absolute blocks of equal zIndex in document order', () => {
+    const result = layout({
+      blocks: [
+        materialized('block-1', { type: 'text', text: '前者。' }, absoluteLayout({ zIndex: 2 })),
+        materialized('block-2', { type: 'text', text: '后者。' }, absoluteLayout({ zIndex: 2 })),
+      ],
+      page: A4_PAGE_SETUP,
+      measurer,
+    })
+
+    expect(result.blocks.map((block) => block.blockId)).toEqual([
+      asBlockId('block-1'),
+      asBlockId('block-2'),
+    ])
+  })
+
   it('breaks CJK text without opening a line with closing punctuation', () => {
     const text = `${'甲'.repeat(CJK_PER_LINE + 1)}。${'乙'.repeat(40)}`
 

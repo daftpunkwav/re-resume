@@ -10,6 +10,7 @@
  */
 
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
@@ -17,16 +18,19 @@ import { DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import { asBlockId } from '../../../src/domain/shared/branded-id'
 import {
   MAX_ZOOM,
+  MIN_ABSOLUTE_SIZE,
   MIN_ZOOM,
   ResumeCanvas,
   clampAbsolutePoint,
+  clampResizeSize,
   contentPointFromSheet,
   describeOverflow,
   fitWidthZoom,
   projectLayoutToSheets,
-  reorderIndexForDrop,
+  reorderAnchorForDrop,
 } from '../../../src/presentation/canvas/ResumeCanvas'
 import type { LaidOutBlock } from '../../../src/domain/resume/PageLayout'
+import type { Block } from '../../../src/domain/resume/Block'
 import { konvaNodePositions, resetKonvaNodePositions } from '../konvaDouble'
 import { absoluteBlock, dividerBlock, layoutWithPages, textBlock } from '../resumeFixtures'
 import { TestResizeObserver } from '../../setup'
@@ -114,17 +118,21 @@ describe('contentPointFromSheet', () => {
   })
 })
 
-describe('reorderIndexForDrop', () => {
+describe('reorderAnchorForDrop', () => {
   it('drops above the first remaining block', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 10)).toBe(0)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 10)).toBe(
+      RULE_BLOCK.blockId,
+    )
   })
 
   it('drops below every remaining block', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 400)).toBe(1)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 400)).toBeNull()
   })
 
   it('leaves a block that was dropped on its own place alone', () => {
-    expect(reorderIndexForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 20)).toBe(0)
+    expect(reorderAnchorForDrop([TWO_LINE_BLOCK, RULE_BLOCK], TWO_LINE_BLOCK.blockId, 20)).toBe(
+      RULE_BLOCK.blockId,
+    )
   })
 })
 
@@ -139,6 +147,35 @@ describe('clampAbsolutePoint', () => {
 
   it('leaves a position inside the content box untouched', () => {
     expect(clampAbsolutePoint(A4_PAGE_SETUP, box, { x: 40, y: 60 })).toEqual({ x: 40, y: 60 })
+  })
+})
+
+describe('clampResizeSize', () => {
+  const box = { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex: 0, rotation: 0 } as const
+
+  it('keeps a box that fits the content box as it was drawn', () => {
+    expect(clampResizeSize(A4_PAGE_SETUP, box, 200, 60)).toEqual({ width: 200, height: 60 })
+  })
+
+  it('never produces a block smaller than one that can be grabbed', () => {
+    expect(clampResizeSize(A4_PAGE_SETUP, box, 2, -10)).toEqual({
+      width: MIN_ABSOLUTE_SIZE,
+      height: MIN_ABSOLUTE_SIZE,
+    })
+  })
+
+  it('stops the corner at the paper rather than spilling past it', () => {
+    const pinned = { ...box, x: 400, y: 600 } as const
+    const size = clampResizeSize(A4_PAGE_SETUP, pinned, 500, 500)
+    expect(size.width).toBeCloseTo(595.28 - 72 - 72 - 400)
+    expect(size.height).toBeCloseTo(841.89 - 72 - 72 - 600)
+  })
+
+  it('takes exactly the room left near the paper edge instead of forcing the minimum', () => {
+    const pinned = { ...box, x: 440, y: 0 } as const
+    const size = clampResizeSize(A4_PAGE_SETUP, pinned, 100, 40)
+    expect(size.width).toBeCloseTo(595.28 - 72 - 72 - 440)
+    expect(size.height).toBe(40)
   })
 })
 
@@ -161,13 +198,15 @@ describe('describeOverflow', () => {
 })
 
 interface CanvasHarness {
-  readonly onMoveBlock: ReturnType<typeof vi.fn>
+  readonly onGesture: ReturnType<typeof vi.fn>
   readonly onSelectBlock: ReturnType<typeof vi.fn>
+  readonly onEditText: ReturnType<typeof vi.fn>
 }
 
 function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
-  const onMoveBlock = vi.fn()
+  const onGesture = vi.fn()
   const onSelectBlock = vi.fn()
+  const onEditText = vi.fn()
   render(
     <ResumeCanvas
       layout={layoutWithPages([TWO_LINE_BLOCK, RULE_BLOCK])}
@@ -176,11 +215,32 @@ function renderCanvas(overrides: Record<string, unknown> = {}): CanvasHarness {
       editable
       selectedBlockId={null}
       onSelectBlock={onSelectBlock}
-      onMoveBlock={onMoveBlock}
+      onGesture={onGesture}
+      onEditText={onEditText}
       {...overrides}
     />,
   )
-  return { onMoveBlock, onSelectBlock }
+  return { onGesture, onSelectBlock, onEditText }
+}
+
+/** A canvas that can lose a block the way an undo would, mid editing session. */
+function renderEditorWithBlocks(blocks: readonly Block[]): {
+  readonly rerenderFn: (blocks: readonly Block[]) => void
+} {
+  const draw = (current: readonly Block[]): ReactElement => (
+    <ResumeCanvas
+      layout={layoutWithPages([TWO_LINE_BLOCK])}
+      page={A4_PAGE_SETUP}
+      blocks={current}
+      editable
+      selectedBlockId={null}
+      onSelectBlock={vi.fn()}
+      onGesture={vi.fn()}
+      onEditText={vi.fn()}
+    />
+  )
+  const utils = render(draw(blocks))
+  return { rerenderFn: (next: readonly Block[]): void => utils.rerender(draw(next)) }
 }
 
 function dragPointer(node: HTMLElement, type: 'dragstart' | 'dragmove' | 'dragend', clientX: number, clientY: number): void {
@@ -203,6 +263,16 @@ function blockNode(name: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(`[data-konva="rect"][data-node-id="${name}"]`)
   if (found === null) throw new Error(`The canvas drew no interactive node for "${name}".`)
   return found
+}
+
+function resizeHandleNode(name: string): HTMLElement {
+  const found = resizeHandleNodeOrNull(name)
+  if (found === null) throw new Error(`The canvas drew no resize handle for "${name}".`)
+  return found
+}
+
+function resizeHandleNodeOrNull(name: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-konva="rect"][data-node-id="resize-${name}"]`)
 }
 
 describe('ResumeCanvas', () => {
@@ -260,7 +330,7 @@ describe('ResumeCanvas', () => {
   })
 
   it('turns one continuous drag into one revision-sized intent', () => {
-    const { onMoveBlock } = renderCanvas()
+    const { onGesture } = renderCanvas()
     const node = blockNode('block-one')
 
     grab(node, 20, 10)
@@ -269,16 +339,16 @@ describe('ResumeCanvas', () => {
     dragTo(node, 24, 30)
     release(node, 24, 30)
 
-    expect(onMoveBlock).toHaveBeenCalledTimes(1)
-    expect(onMoveBlock).toHaveBeenCalledWith({
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
-      toIndex: 1,
+      beforeBlockId: null,
     })
   })
 
   it('drops a flow block by its own centre rather than its top edge', () => {
-    const { onMoveBlock } = renderCanvas()
+    const { onGesture } = renderCanvas()
     const node = blockNode('block-one')
 
     // The block's top edge lands above the divider's middle, but the block's
@@ -287,10 +357,58 @@ describe('ResumeCanvas', () => {
     grab(node, 20, 24.25)
     release(node, 20, 24.25)
 
-    expect(onMoveBlock).toHaveBeenCalledWith({
+    expect(onGesture).toHaveBeenCalledWith({
       kind: 'reorder',
       blockId: 'block-one',
-      toIndex: 1,
+      beforeBlockId: null,
+    })
+  })
+
+  it('anchors a drop on a later page against that page, not the document head', () => {
+    const secondPage = laidOut({ blockId: asBlockId('block-two'), pageIndex: 1 })
+    const lastOnSecondPage = laidOut({ blockId: asBlockId('block-three'), pageIndex: 1, y: 33 })
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, secondPage, lastOnSecondPage]),
+      blocks: [
+        textBlock('block-one', '甲\n乙'),
+        textBlock('block-two', '乙'),
+        textBlock('block-three', '丙'),
+      ],
+    })
+
+    // The drop lands in the top margin of page 2, above every block's
+    // midpoint — including page 1's, whose lines restart at y 0. The anchor
+    // must come from the drop's own page, or the block would be yanked to the
+    // head of the document.
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    grab(blockNode('block-two'), 20, 10)
+    release(blockNode('block-two'), 20, 10)
+
+    expect(onGesture).toHaveBeenCalledWith({
+      kind: 'reorder',
+      blockId: 'block-two',
+      beforeBlockId: 'block-three',
+    })
+  })
+
+  it('anchors below page one content to the first flow block of the next page', () => {
+    const nextPage = laidOut({ blockId: asBlockId('block-two'), pageIndex: 1 })
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, nextPage]),
+      blocks: [textBlock('block-one', '甲\n乙'), textBlock('block-two', '下一页')],
+    })
+
+    // Below the last block of page 1 the null anchor means "document end";
+    // the first flow block of page 2 is the position the user actually sees —
+    // appending past it would fling the block onto the last page.
+    grab(blockNode('block-one'), 20, 400)
+    release(blockNode('block-one'), 20, 400)
+
+    expect(onGesture).toHaveBeenCalledWith({
+      kind: 'reorder',
+      blockId: 'block-one',
+      beforeBlockId: 'block-two',
     })
   })
 
@@ -306,7 +424,7 @@ describe('ResumeCanvas', () => {
 
   it('places an absolute block where it was dropped, inside the paper', () => {
     const absolute = absoluteBlock('block-absolute', 0, 0)
-    const { onMoveBlock } = renderCanvas({
+    const { onGesture } = renderCanvas({
       layout: layoutWithPages([laidOut({ blockId: absolute.id })]),
       blocks: [absolute],
     })
@@ -314,22 +432,132 @@ describe('ResumeCanvas', () => {
     grab(blockNode('block-absolute'), 300, 400)
     release(blockNode('block-absolute'), 300, 400)
 
-    expect(onMoveBlock).toHaveBeenCalledTimes(1)
-    const move = onMoveBlock.mock.calls[0]?.[0]
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    const move = onGesture.mock.calls[0]?.[0]
     expect(move.kind).toBe('place')
     expect(move.blockId).toBe('block-absolute')
     expect(move.x).toBeCloseTo(251.28)
     expect(move.y).toBeCloseTo(657.89)
   })
 
+  it('turns a corner drag on an absolute block into one resize intent in content points', () => {
+    const absolute = absoluteBlock('block-absolute', 0, 0)
+    const { onGesture } = renderCanvas({
+      layout: layoutWithPages([laidOut({ blockId: absolute.id })]),
+      blocks: [absolute],
+    })
+    const handle = resizeHandleNode('block-absolute')
+
+    grab(handle, 100, 60)
+    release(handle, 90, 100)
+
+    expect(onGesture).toHaveBeenCalledTimes(1)
+    const resize = onGesture.mock.calls[0]?.[0]
+    expect(resize.kind).toBe('resize')
+    expect(resize.blockId).toBe('block-absolute')
+    // The corner travelled (72, 82) screen pixels; at this canvas's 25%
+    // fit-width zoom that is (288, 328) content points — the units the stored
+    // box is written in — and neither size meets the paper edge.
+    expect(resize.width).toBeCloseTo(288)
+    expect(resize.height).toBeCloseTo(328)
+    // The corner goes back to the laid-out geometry while the commit runs:
+    // the drawn box is the content-width row the fixture layout produced.
+    const reset = konvaNodePositions[0]
+    expect(reset?.nodeId).toBe('resize-block-absolute')
+    expect(reset?.x).toBeCloseTo(130.82)
+    expect(reset?.y).toBeCloseTo(26.25)
+  })
+
+  it('offers no resize handle for a block whose height belongs to its content', () => {
+    renderCanvas()
+
+    expect(resizeHandleNodeOrNull('block-one')).toBeNull()
+  })
+
   it('refuses to start a drag while the document is read-only', () => {
-    const { onMoveBlock } = renderCanvas({ editable: false })
+    const { onGesture } = renderCanvas({ editable: false })
 
     expect(blockNode('block-one')).toHaveAttribute('data-draggable', 'false')
     grab(blockNode('block-one'), 24, 30)
     release(blockNode('block-one'), 24, 30)
 
-    expect(onMoveBlock).not.toHaveBeenCalled()
+    expect(onGesture).not.toHaveBeenCalled()
+  })
+
+  it('opens the editor over a double-clicked text block and hides its drawn lines', () => {
+    renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    expect(area).toHaveValue('甲\n乙')
+    // The drawn lines step aside for the editor: the same characters must not
+    // be on the sheet and in the textarea at once.
+    expect(screen.queryByText('甲')).not.toBeInTheDocument()
+    expect(screen.queryByText('乙')).not.toBeInTheDocument()
+  })
+
+  it('does not open an editor over a block that draws no text of its own', () => {
+    renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-rule'))
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('hands a committed session back as one edit intent', () => {
+    const { onEditText } = renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    fireEvent.change(area, { target: { value: '新的正文' } })
+    fireEvent.blur(area)
+
+    expect(onEditText).toHaveBeenCalledTimes(1)
+    expect(onEditText).toHaveBeenCalledWith('block-one', '新的正文')
+  })
+
+  it('writes no edit intent when a session closes without changing the text', () => {
+    const { onEditText } = renderCanvas()
+
+    fireEvent.dblClick(blockNode('block-one'))
+    fireEvent.blur(screen.getByRole('textbox', { name: '编辑区块文字' }))
+
+    expect(onEditText).not.toHaveBeenCalled()
+  })
+
+  it('closes the editor when its block disappears from the document', () => {
+    const { rerenderFn } = renderEditorWithBlocks([textBlock('block-one', '甲\n乙')])
+
+    fireEvent.dblClick(blockNode('block-one'))
+    expect(screen.getByRole('textbox', { name: '编辑区块文字' })).toBeInTheDocument()
+
+    rerenderFn([dividerBlock('block-rule')])
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('refuses to open an editor while the document is read-only', () => {
+    renderCanvas({ editable: false })
+
+    fireEvent.dblClick(blockNode('block-one'))
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('opens a fresh session when the edited block changes without a blur', () => {
+    const nextBlock = laidOut({ blockId: asBlockId('block-three'), y: 33 })
+    renderCanvas({
+      layout: layoutWithPages([TWO_LINE_BLOCK, nextBlock]),
+      blocks: [textBlock('block-one', '甲乙'), textBlock('block-three', '丙丁')],
+    })
+
+    fireEvent.dblClick(blockNode('block-one'))
+    // No blur fired between the two sessions; the second editor must still
+    // carry its own block's text, not the previous session's.
+    fireEvent.dblClick(blockNode('block-three'))
+
+    expect(screen.getByRole('textbox', { name: '编辑区块文字' })).toHaveValue('丙丁')
   })
 
   it('re-fits when the frame itself changes size and the window does not', () => {
@@ -356,7 +584,8 @@ describe('ResumeCanvas', () => {
         editable
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
-        onMoveBlock={vi.fn()}
+        onGesture={vi.fn()}
+        onEditText={vi.fn()}
       />,
     )
     expect(TestResizeObserver.watching()).not.toHaveLength(0)
@@ -376,7 +605,8 @@ describe('ResumeCanvas', () => {
         editable
         selectedBlockId={null}
         onSelectBlock={vi.fn()}
-        onMoveBlock={vi.fn()}
+        onGesture={vi.fn()}
+        onEditText={vi.fn()}
       />,
     )
 

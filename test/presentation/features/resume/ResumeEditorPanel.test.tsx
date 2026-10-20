@@ -13,24 +13,36 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
-import { ResumeEditorPanel } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
+import {
+  convertBlockToAbsolute,
+  convertBlockToFlow,
+  nextAbsoluteZIndex,
+  removeBlock,
+  ResumeEditorPanel,
+  updateBlockText,
+} from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { OperationOutcome } from '../../../../src/presentation/features/resume/ResumeEditorPanel'
 import type { FakeResumeServices } from '../../fakeResumeServices'
 import { createFakeResumeServices } from '../../fakeResumeServices'
 import {
   DRAFT_ID,
   FROZEN_ID,
+  absoluteBlock,
   dividerBlock,
   layOutFixture,
   makeResume,
   materializedOf,
   textBlock,
 } from '../../resumeFixtures'
+import { DEFAULT_FLOW_LAYOUT } from '../../../../src/domain/resume/Layout'
+import { A4_PAGE_SETUP } from '../../../../src/domain/resume/PageSetup'
+import type { Block } from '../../../../src/domain/resume/Block'
 import { resetKonvaNodePositions } from '../../konvaDouble'
 import type { DocumentState } from '../../../../src/domain/resume/DocumentChange'
 import type { Resume } from '../../../../src/domain/resume/Resume'
 import type { LayoutOutput } from '../../../../src/domain/resume/PageLayout'
 import type { OverflowReport } from '../../../../src/domain/resume/PageLayout'
+import { asBlockId } from '../../../../src/domain/shared/branded-id'
 
 vi.mock('react-konva', async () => {
   const double = await import('../../konvaDouble')
@@ -225,6 +237,96 @@ describe('ResumeEditorPanel', () => {
     expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('移动区块')
   })
 
+  it('commits a corner drag as one resize revision', async () => {
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), absoluteBlock('block-pinned', 0, 0)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    const handle = document.querySelector<HTMLElement>(
+      '[data-konva="rect"][data-node-id="resize-block-pinned"]',
+    )
+    if (handle === null) throw new Error('The canvas drew no resize handle for "block-pinned".')
+    drag(handle, [130.82, 28], [[100, 80]])
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整区块大小')
+    // The corner travelled (82, 57) screen pixels; at the canvas's 25%
+    // fit-width zoom that is (328, 228) content points — the units the stored
+    // box is written in, and neither size meets the paper edge.
+    expect(harness.stored().blocks[1]?.layout).toMatchObject({ width: 328, height: 228 })
+  })
+
+  it('anchors a reorder against the flow sequence, even with a pinned block between', async () => {
+    const resume = makeResume({
+      blocks: [
+        textBlock('block-one', '第一段正文'),
+        absoluteBlock('block-pinned', 0, 0),
+        textBlock('block-two', '第二段正文'),
+      ],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    // Dropping block-two above block-one names block-one as the anchor; a
+    // numeric index counted on the drawn order would have landed on the
+    // pinned block sitting between them.
+    drag(blockNode('block-two'), [20, 0], [[20, 0]])
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.stored().blocks.map((block) => block.id)).toEqual([
+      'block-two',
+      'block-one',
+      'block-pinned',
+    ])
+  })
+
+  it('trades z positions with the neighbouring absolute block', async () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const resume = makeResume({
+      blocks: [
+        textBlock('block-one', '第一段正文'),
+        pinned('block-low', 1),
+        pinned('block-high', 2),
+      ],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-low'))
+    expect(screen.getByRole('button', { name: '下移一层' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '上移一层' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('调整层级')
+    expect(harness.stored().blocks[1]?.layout).toMatchObject({ zIndex: 2 })
+    expect(harness.stored().blocks[2]?.layout).toMatchObject({ zIndex: 1 })
+  })
+
+  it('offers no z swap between blocks the draw order cannot separate', async () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), pinned('block-a', 1), pinned('block-b', 1)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-a'))
+
+    // Equal z draws in document order, so a swap would write a revision that
+    // changes nothing; both affordances stay off rather than recording one.
+    expect(screen.getByRole('button', { name: '上移一层' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下移一层' })).toBeDisabled()
+    expect(harness.services.resumes.commit).not.toHaveBeenCalled()
+  })
+
   it('adds a block through the same commit path', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)
@@ -236,6 +338,122 @@ describe('ResumeEditorPanel', () => {
     const stored = harness.stored()
     expect(stored.blocks).toHaveLength(3)
     expect(stored.blocks[2]?.content).toEqual({ type: 'text', text: '自我评价' })
+  })
+
+  it('commits a canvas editing session as one revision', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.dblClick(blockNode('block-one'))
+    const area = screen.getByRole('textbox', { name: '编辑区块文字' })
+    fireEvent.change(area, { target: { value: '改写后的第一段' } })
+    fireEvent.blur(area)
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('编辑文字')
+    expect(harness.stored().blocks[0]?.content).toEqual({ type: 'text', text: '改写后的第一段' })
+    // The committed text is drawn from the document, not from the editor.
+    await screen.findByText('改写后的第一段')
+  })
+
+  it('leaves a block an undo removed mid session untouched', () => {
+    const change = updateBlockText('编辑文字', asBlockId('block-gone'), '无处落笔')
+    const state = { blocks: [], pageSetup: makeResume().pageSetup }
+
+    expect(change.next(state)).toBe(state)
+  })
+
+  it('removes the selected block through the same commit path', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-one'))
+    expect(screen.getByText('选中区块')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '删除区块' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.services.resumes.commit.mock.calls[0]?.[1].label).toBe('删除区块')
+    expect(harness.stored().blocks.map((block) => block.id)).toEqual(['block-two'])
+    // The panel follows the document: no block, no actions row.
+    await waitFor(() => expect(screen.queryByText('选中区块')).not.toBeInTheDocument())
+  })
+
+  it('pins a flow block where the layout drew it', async () => {
+    const harness = stubWorkbench(makeResume())
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-one'))
+    fireEvent.click(screen.getByRole('button', { name: '转为绝对定位' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    const layout = harness.stored().blocks[0]?.layout
+    expect(layout).toEqual({
+      mode: 'absolute',
+      x: 0,
+      y: 0,
+      width: A4_PAGE_SETUP.pageWidth - A4_PAGE_SETUP.marginLeft - A4_PAGE_SETUP.marginRight,
+      height: 20,
+      zIndex: 1,
+      rotation: 0,
+    })
+  })
+
+  it('returns an absolute block to the flow sequence', async () => {
+    const resume = makeResume({
+      blocks: [textBlock('block-one', '第一段正文'), absoluteBlock('block-pinned', 30, 40)],
+    })
+    const harness = stubWorkbench(resume)
+    await renderEditor(harness)
+
+    fireEvent.click(blockNode('block-pinned'))
+    fireEvent.click(screen.getByRole('button', { name: '转为常规流' }))
+
+    await waitFor(() => expect(harness.services.resumes.commit).toHaveBeenCalledTimes(1))
+    expect(harness.stored().blocks[1]?.layout).toEqual(DEFAULT_FLOW_LAYOUT)
+  })
+
+  it('offers no pin to a flow block drawn on a later page', async () => {
+    const harness = stubWorkbench(makeResume())
+    // A two-page preview: block-two draws on page 2, where v1 has no absolute
+    // placement — pinning it would silently move it back to page 1.
+    harness.services.resumes.layOut.mockImplementation((blocks, page) => {
+      const laid = layOutFixture(blocks, page)
+      const second = { ...laid.blocks[1], pageIndex: 1 }
+      return {
+        ...laid,
+        blocks: [laid.blocks[0], second],
+        pages: [
+          { pageIndex: 0, blockIds: [laid.blocks[0]?.blockId] },
+          { pageIndex: 1, blockIds: [second.blockId] },
+        ],
+      }
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    fireEvent.click(blockNode('block-two'))
+
+    expect(screen.getByRole('button', { name: '转为绝对定位' })).toBeDisabled()
+    expect(screen.getByText('绝对定位目前只支持第一页的区块。')).toBeInTheDocument()
+  })
+
+  it('hands a converted block the next z position above the ones already there', () => {
+    const pinned = (id: string, zIndex: number): Block => ({
+      ...absoluteBlock(id, 0, 0),
+      layout: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40, zIndex, rotation: 0 },
+    })
+    const blocks = [pinned('block-low', 2), textBlock('block-mid', '正文'), pinned('block-high', 5)]
+
+    expect(nextAbsoluteZIndex(blocks)).toBe(6)
+  })
+
+  it('refuses conversions and removals for blocks the document does not hold', () => {
+    const state = { blocks: [], pageSetup: makeResume().pageSetup }
+    const box = { x: 0, y: 0, width: 100, height: 20 }
+
+    expect(removeBlock('删除区块', asBlockId('block-gone')).next(state)).toBe(state)
+    expect(convertBlockToAbsolute('转为绝对定位', asBlockId('block-gone'), box, 1).next(state)).toBe(state)
+    expect(convertBlockToFlow('转为常规流', asBlockId('block-gone')).next(state)).toBe(state)
   })
 
   it('reports an overflow instead of letting the block disappear', async () => {

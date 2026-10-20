@@ -69,6 +69,26 @@
   display: block;
 }
 
+/* The host anchors the text editor to the stage's own coordinate system, so
+   the overlay does not have to add the viewport padding to every position. */
+.canvas-stage-host {
+  position: relative;
+}
+
+/* In-place editor for one block. Zero padding keeps the typed line boxes as
+   close as the browser's own metrics allow to the lines drawn underneath. */
+.canvas-text-editor {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  resize: none;
+}
+
 /* Overflow ---------------------------------------------------------------- */
 
 .canvas-overflow-list {
