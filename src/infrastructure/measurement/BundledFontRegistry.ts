@@ -13,19 +13,34 @@
  */
 
 import { DEFAULT_FONT_FAMILY } from '../../domain/resume/TextStyle'
-import type { FontFaces, FontRegistry } from './FontkitTextMeasurer'
+import type { FontFamily, FontRegistry } from './FontRegistry'
 import regularFontUrl from '../../assets/fonts/NotoSansSC-Regular.otf?url'
 import boldFontUrl from '../../assets/fonts/NotoSansSC-Bold.otf?url'
+import symbolsFontUrl from '../../assets/fonts/NotoSansSymbols2-Regular.otf?url'
+
+/**
+ * The family the characters the default family lacks are covered by. It is a
+ * family of its own rather than a second face of the default one, so a
+ * renderer can register it and draw a run with it under its own name.
+ */
+export const SYMBOL_FONT_FAMILY = 'Noto Sans Symbols 2'
 
 export async function loadBundledFontRegistry(): Promise<FontRegistry> {
-  // The two reads are independent, and they sit on the boot path in front of
+  // The three reads are independent, and they sit on the boot path in front of
   // the first paint, so they run in parallel.
-  const [regular, bold] = await Promise.all([
+  const [regular, bold, symbols] = await Promise.all([
     fetchFontBytes(regularFontUrl),
     fetchFontBytes(boldFontUrl),
+    fetchFontBytes(symbolsFontUrl),
   ])
-  const faces: FontFaces = { regular, bold }
-  return new Map([[DEFAULT_FONT_FAMILY, faces]])
+  const families = new Map<string, FontFamily>([
+    [
+      DEFAULT_FONT_FAMILY,
+      { faces: { regular, bold }, fallbackFamily: SYMBOL_FONT_FAMILY },
+    ],
+    [SYMBOL_FONT_FAMILY, { faces: { regular: symbols, bold: null }, fallbackFamily: null }],
+  ])
+  return families
 }
 
 async function fetchFontBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {

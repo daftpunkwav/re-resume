@@ -15,7 +15,7 @@
  *   a line of Latin text of the same character count.
  */
 
-import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
+import type { TextMeasurer, TextRun } from '../../domain/resume/ports/TextMeasurer'
 import type { TextStyle } from '../../domain/resume/TextStyle'
 
 /** Advance widths in em units. */
@@ -52,6 +52,22 @@ export class FixtureTextMeasurer implements TextMeasurer {
       widths.push((this.#widths[widthClassOf(cluster.segment)] ?? this.#widths.latin ?? 0) * style.fontSize)
     }
     return widths
+  }
+
+  /**
+   * One run for the whole text: this measurer has one width table and no
+   * character maps, so it cannot tell which characters a face covers.
+   */
+  resolveRuns(text: string, style: TextStyle): readonly TextRun[] {
+    return [
+      {
+        text,
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        width: this.measureLine(text, style),
+        baselineShift: 0,
+      },
+    ]
   }
 }
 

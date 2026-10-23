@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { A4_PAGE_SETUP } from '../../../src/domain/resume/PageSetup'
 import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
+import { SYMBOL_FONT_FAMILY } from '../../../src/infrastructure/measurement/BundledFontRegistry'
 import { asBlockId } from '../../../src/domain/shared/branded-id'
 import {
   MAX_ZOOM,
@@ -32,7 +33,7 @@ import {
 import type { LaidOutBlock } from '../../../src/domain/resume/PageLayout'
 import type { Block } from '../../../src/domain/resume/Block'
 import { konvaNodePositions, resetKonvaNodePositions } from '../konvaDouble'
-import { absoluteBlock, dividerBlock, layoutWithPages, textBlock } from '../resumeFixtures'
+import { absoluteBlock, dividerBlock, layoutWithPages, lineFixture, textBlock } from '../resumeFixtures'
 import { TestResizeObserver } from '../../setup'
 
 vi.mock('react-konva', async () => {
@@ -56,17 +57,14 @@ function laidOut(overrides: Partial<LaidOutBlock> & Pick<LaidOutBlock, 'blockId'
     width: CONTENT_WIDTH,
     height: 33,
     textStyle: DEFAULT_TEXT_STYLE,
-    lines: [{ text: '甲', x: 0, width: 11 }],
+    lines: [lineFixture('甲', 0, 11)],
     ...overrides,
   }
 }
 
 const TWO_LINE_BLOCK = laidOut({
   blockId: asBlockId('block-one'),
-  lines: [
-    { text: '甲', x: 0, width: 11 },
-    { text: '乙', x: 4, width: 22 },
-  ],
+  lines: [lineFixture('甲', 0, 11), lineFixture('乙', 4, 22)],
 })
 
 const RULE_BLOCK = laidOut({
@@ -74,6 +72,38 @@ const RULE_BLOCK = laidOut({
   y: 33,
   height: 1,
   lines: [],
+})
+
+/**
+ * A line the measurer split into two runs: the text of the document's family
+ * and a character only the fallback family covers. The canvas draws one text
+ * node per run, each with the family the measurer resolved it to.
+ */
+const FALLBACK_BLOCK = laidOut({
+  blockId: asBlockId('block-fallback'),
+  lines: [
+    {
+      text: '甲✔',
+      x: 0,
+      width: 30,
+      runs: [
+        {
+          text: '甲',
+          width: 10,
+          fontFamily: DEFAULT_FONT_FAMILY,
+          fontWeight: 400,
+          baselineShift: 0,
+        },
+        {
+          text: '✔',
+          width: 20,
+          fontFamily: SYMBOL_FONT_FAMILY,
+          fontWeight: 400,
+          baselineShift: 3,
+        },
+      ],
+    },
+  ],
 })
 
 describe('projectLayoutToSheets', () => {
@@ -98,8 +128,42 @@ describe('projectLayoutToSheets', () => {
     const sheet = projectLayoutToSheets(layoutWithPages([TWO_LINE_BLOCK]), blocks, A4_PAGE_SETUP, 2)[0]
 
     expect(sheet?.blocks[0]?.lines).toEqual([
-      { text: '甲', x: 144, y: 144, width: 22, height: 33, fontSize: 22, fontFamily: DEFAULT_FONT_FAMILY, fontWeight: 400 },
-      { text: '乙', x: 152, y: 177, width: 44, height: 33, fontSize: 22, fontFamily: DEFAULT_FONT_FAMILY, fontWeight: 400 },
+      {
+        text: '甲',
+        x: 144,
+        y: 144,
+        width: 22,
+        height: 33,
+        fontSize: 22,
+        runs: [
+          {
+            text: '甲',
+            x: 144,
+            width: 22,
+            fontFamily: DEFAULT_FONT_FAMILY,
+            fontWeight: 400,
+            baselineShift: 0,
+          },
+        ],
+      },
+      {
+        text: '乙',
+        x: 152,
+        y: 177,
+        width: 44,
+        height: 33,
+        fontSize: 22,
+        runs: [
+          {
+            text: '乙',
+            x: 152,
+            width: 44,
+            fontFamily: DEFAULT_FONT_FAMILY,
+            fontWeight: 400,
+            baselineShift: 0,
+          },
+        ],
+      },
     ])
   })
 
@@ -109,6 +173,34 @@ describe('projectLayoutToSheets', () => {
     expect(sheets).toHaveLength(1)
     expect(sheets[0]?.blocks[0]?.rule).toBe(true)
     expect(sheets[0]?.blocks[0]?.lines).toEqual([])
+  })
+
+  it('places the runs of a line one after the other', () => {
+    const sheet = projectLayoutToSheets(
+      layoutWithPages([FALLBACK_BLOCK]),
+      blocks,
+      A4_PAGE_SETUP,
+      1,
+    )[0]
+
+    expect(sheet?.blocks[0]?.lines[0]?.runs).toEqual([
+      {
+        text: '甲',
+        x: 72,
+        width: 10,
+        fontFamily: DEFAULT_FONT_FAMILY,
+        fontWeight: 400,
+        baselineShift: 0,
+      },
+      {
+        text: '✔',
+        x: 82,
+        width: 20,
+        fontFamily: SYMBOL_FONT_FAMILY,
+        fontWeight: 400,
+        baselineShift: 3,
+      },
+    ])
   })
 })
 
@@ -289,6 +381,26 @@ describe('ResumeCanvas', () => {
     expect(line).toHaveAttribute('data-y', '22.125')
     expect(line).toHaveAttribute('data-width', '5.5')
     expect(line).toHaveAttribute('data-font-size', '2.75')
+  })
+
+  it('draws one text node per run, each with the family the measurer resolved', () => {
+    renderCanvas({
+      layout: layoutWithPages([FALLBACK_BLOCK]),
+      blocks: [textBlock('block-fallback', '甲✔')],
+    })
+
+    const primary = screen.getByText('甲')
+    const fallback = screen.getByText('✔')
+
+    // The family is quoted: a name whose last token starts with a digit is
+    // not a valid unquoted CSS family name.
+    expect(primary).toHaveAttribute('data-font-family', `"${DEFAULT_FONT_FAMILY}"`)
+    expect(fallback).toHaveAttribute('data-font-family', `"${SYMBOL_FONT_FAMILY}"`)
+    // The fallback run is drawn with the family the measurer resolved it to,
+    // and its baseline is moved by the shift the measurer reported.
+    expect(Number(fallback.getAttribute('data-y'))).not.toBe(
+      Number(primary.getAttribute('data-y')),
+    )
   })
 
   it('keeps the decorative layer from listening', () => {

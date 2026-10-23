@@ -18,7 +18,7 @@
  *   draw silently use this measurer's face.
  */
 
-import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
+import type { TextMeasurer, TextRun } from '../../domain/resume/ports/TextMeasurer'
 import type { TextStyle } from '../../domain/resume/TextStyle'
 
 const graphemeSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' })
@@ -43,6 +43,20 @@ export function createCanvasTextMeasurer(ctx: CanvasRenderingContext2D): TextMea
       })
       return cumulative
     },
+
+    // One run for the whole text: the canvas resolves a family by name and
+    // picks the face itself, so it has no character maps to decide coverage
+    // with. The run is therefore the whole line, drawn with the family the
+    // style names.
+    resolveRuns: (text: string, style: TextStyle): readonly TextRun[] => [
+      {
+        text,
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        width: withStyle(ctx, style, () => ctx.measureText(text).width),
+        baselineShift: 0,
+      },
+    ],
   }
 }
 
