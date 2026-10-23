@@ -1,15 +1,33 @@
 /**
  * @file Dialog.test
  * @description The keyboard contract of a modal: focus enters it once, Tab
- * cannot walk out into the page behind it, and closing hands focus back.
+ * cannot walk out into the page behind it, closing hands focus back, and the
+ * element that holds focus says so.
  */
 
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 
 import { Dialog } from '../../../../src/presentation/app/components/Dialog'
+
+const REPOSITORY_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', '..')
+
+/**
+ * The stylesheet is loaded into the document so the focus indicator is read
+ * the way a browser reads it: jsdom applies the cascade to the properties it
+ * models, and the outline longhands are among them.
+ */
+const stylesheet = document.createElement('style')
+stylesheet.textContent = readFileSync(
+  join(REPOSITORY_ROOT, 'src/presentation/app/components/components.css'),
+  'utf8',
+)
+document.head.append(stylesheet)
 
 /**
  * `rerender` changes no prop but state, so a child that keys its focus effect
@@ -44,6 +62,16 @@ function openDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   return user.click(screen.getByRole('button', { name: '打开' }))
 }
 
+/** The rule the loaded stylesheet declares for one selector. */
+function ruleFor(selector: string): CSSStyleRule | null {
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (rule instanceof CSSStyleRule && rule.selectorText === selector) return rule
+    }
+  }
+  return null
+}
+
 /**
  * `busy` arrives on the second render rather than at mount, so a dialog that
  * is only ever busy after a click still exercises the guard.
@@ -71,6 +99,27 @@ function BusyHarness() {
 }
 
 describe('dialog focus', () => {
+  it('shows a focus indicator on the panel that holds focus', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await openDialog(user)
+
+    const panel = screen.getByRole('dialog')
+    // The panel is the focus target until the first Tab, so it is the element
+    // that has to carry the indicator.
+    expect(document.activeElement).toBe(panel)
+
+    // The rule the stylesheet declares for the focused panel. jsdom keeps the
+    // outline declaration but does not apply the shorthand to the computed
+    // style, so the indicator is read from the rule itself.
+    const indicator = ruleFor('.dialog:focus')?.style.getPropertyValue('outline')
+    expect(indicator).not.toBe('')
+    expect(indicator).not.toBe('none')
+    // The offset reaches the focused element, which is what proves the rule
+    // applies to this panel and not to some other selector.
+    expect(window.getComputedStyle(panel).outlineOffset).toBe('2px')
+  })
+
   it('leaves focus where it is when the parent re-renders', async () => {
     const user = userEvent.setup()
     render(<Harness />)
