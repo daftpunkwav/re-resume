@@ -8,7 +8,7 @@
  * - Open the database connection and run the startup check that guards it
  * - Construct the port implementations and inject them into the use cases
  * - Bind the canonical TextMeasurer to layout() and to the agent's layout check
- * - Close the connection on shutdown
+ * - Release the claim on the shared database on shutdown
  *
  * Constraints:
  * - This module must not import from `presentation/`: the dependency points
@@ -48,7 +48,7 @@ import type { ToolContext } from '../domain/generation/ports/ToolRegistry'
 import { SystemClock } from '../infrastructure/platform/systemClock'
 import { RandomIdGenerator } from '../infrastructure/platform/randomIdGenerator'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
-import type { SqlDatabase } from '../infrastructure/persistence/sqlite'
+import type { ManagedSqlDatabase, SqlDatabase } from '../infrastructure/persistence/sqlite'
 import { SqliteExperienceRepository } from '../infrastructure/persistence/SqliteExperienceRepository'
 import { SqliteProfileRepository } from '../infrastructure/persistence/SqliteProfileRepository'
 import { SqliteResumeRepository } from '../infrastructure/persistence/SqliteResumeRepository'
@@ -199,7 +199,7 @@ export interface CompositionRoot {
   readonly profile: ProfileSettings
   readonly resumes: ResumeWorkbench
   readonly agent: AgentConsole
-  /** Closes the one database connection this root opened. */
+  /** Releases this root's claim on the shared database. */
   shutdown(): Promise<void>
 }
 
@@ -257,16 +257,37 @@ interface Wiring {
 }
 
 /**
- * openSqliteDatabase declares execute, select and transaction only. close and
- * the foreign key check belong to the plugin-backed implementation and are what
- * shutdown and cascade integrity depend on, so the guard refuses a connection
- * that cannot do them instead of leaving shutdown a silent no-op.
+ * Runs a startup step that can fail after the database was opened. The
+ * database is shared with the other roots of this process, and a root that
+ * never reaches the caller cannot hand its claim back through shutdown(): the
+ * claim goes back here, where the failure is.
  */
-interface ManagedSqlDatabase extends SqlDatabase {
-  close(): Promise<boolean>
-  enableForeignKeys(): Promise<void>
+async function duringStartup<T>(
+  database: ManagedSqlDatabase,
+  step: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await step()
+  } catch (failure) {
+    // The claim goes back, and the failure that ended the boot is the one worth
+    // reporting: a cleanup that fails as well is attached to it.
+    try {
+      await database.close()
+    } catch (cleanupFailure) {
+      if (failure instanceof Error && failure.cause === undefined) {
+        failure.cause = cleanupFailure
+      }
+    }
+    throw failure
+  }
 }
 
+/**
+ * Builds the one application container: the infrastructure the use cases need,
+ * wired to the ports they declare. Every startup step that can fail after the
+ * database was opened releases its claim on the way out, so a boot that ends in
+ * failure leaves no claim behind.
+ */
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
@@ -282,9 +303,12 @@ export async function createCompositionRoot(
   )
   // Startup check: every ON DELETE CASCADE and ON DELETE RESTRICT clause in
   // the schema is inert until this reports 1, so the repositories refuse to run.
-  await database.enableForeignKeys()
+  await duringStartup(database, () => database.enableForeignKeys())
 
   const secretStore = new StrongholdSecretStore(options.stronghold)
+  const provider = await duringStartup(database, () =>
+    buildProvider(options.provider, secretStore),
+  )
   const wiring: Wiring = {
     clock,
     ids,
@@ -295,7 +319,7 @@ export async function createCompositionRoot(
     resumeRepo: new SqliteResumeRepository(database, clock, ids),
     runRepo: new SqliteAgentRunRepository(database),
     secretStore,
-    provider: await buildProvider(options.provider, secretStore),
+    provider,
     providerSecretRefs:
       options.provider === null ? [] : [options.provider.apiKeyRef],
     jobPostings: new SqliteJobPostingRepository(database),
@@ -550,6 +574,12 @@ async function loadProviderSecrets(
   return secrets
 }
 
+/**
+ * The seam's own type says which operations the connection has, and the guard
+ * checks that the implementation agrees: close and the foreign key check are
+ * what shutdown and cascade integrity depend on, so a connection that cannot
+ * do them is refused instead of leaving shutdown a silent no-op.
+ */
 function requireManagedDatabase(database: SqlDatabase): ManagedSqlDatabase {
   const candidate = database as Partial<ManagedSqlDatabase>
   if (typeof candidate.close !== 'function' || typeof candidate.enableForeignKeys !== 'function') {
