@@ -457,8 +457,9 @@
    left to the global :focus rule, because an engine that can match
    :focus-visible only matches it on a focus moved by script when the last
    interaction was a keystroke — a dialog opened with the pointer would show
-   nothing at all. The panel is never focused by a pointer (tabindex -1 keeps
-   it out of the click path), so a :focus ring on it cannot misfire. */
+   nothing at all. A click on the panel's own content focuses it as well, and
+   the ring then says that the panel holds the focus: the same signal the
+   keyboard user gets, on a container that holds no control of its own. */
 .dialog:focus {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

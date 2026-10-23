@@ -99,6 +99,10 @@ function BusyHarness() {
 }
 
 describe('dialog focus', () => {
+  /**
+   * The panel is the element that holds the focus, so it is the element that
+   * has to show the indicator.
+   */
   it('shows a focus indicator on the panel that holds focus', async () => {
     const user = userEvent.setup()
     render(<Harness />)
