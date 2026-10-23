@@ -78,6 +78,13 @@ interface SharedDatabase {
   readonly connection: Promise<PluginSqlDatabase>
   /** How many holders still hold a claim on this database. */
   claims: number
+  /**
+   * Set while the pool behind it is being closed. A holder that arrives then
+   * waits for the close to finish: the plugin's close command closes every
+   * pool it holds, so a pool registered while this one is still closing would
+   * be closed with it.
+   */
+  closing: Promise<void> | null
 }
 
 /** The databases this process has open, one per connection string. */
@@ -92,19 +99,30 @@ const sharedDatabases = new Map<string, SharedDatabase>()
 export async function openSqliteDatabase(
   connectionString: string,
 ): Promise<ManagedSqlDatabase> {
-  const shared = sharedDatabaseFor(connectionString)
-  shared.claims += 1
+  const shared = await claimDatabase(connectionString)
   const connection = await shared.connection
   return new ClaimedSqlDatabase(shared, connection)
 }
 
-function sharedDatabaseFor(connectionString: string): SharedDatabase {
+/**
+ * The claim on the database behind a connection string: the open one, or a
+ * fresh one once the pool of a closed database is gone.
+ */
+async function claimDatabase(connectionString: string): Promise<SharedDatabase> {
   const existing = sharedDatabases.get(connectionString)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    if (existing.closing !== null) {
+      await existing.closing
+      return claimDatabase(connectionString)
+    }
+    existing.claims += 1
+    return existing
+  }
   const shared: SharedDatabase = {
     connectionString,
     connection: openPluginDatabase(connectionString),
-    claims: 0,
+    claims: 1,
+    closing: null,
   }
   sharedDatabases.set(connectionString, shared)
   // A database that failed to open must not stay in the registry: the next
@@ -115,6 +133,11 @@ function sharedDatabaseFor(connectionString: string): SharedDatabase {
   return shared
 }
 
+/**
+ * Opens the connection the plugin pools and asks the native shell to pin it to
+ * a single one, so that the statements of a transaction reach the same
+ * connection.
+ */
 async function openPluginDatabase(connectionString: string): Promise<PluginSqlDatabase> {
   const [{ default: Database }, { invoke }] = await Promise.all([
     import('@tauri-apps/plugin-sql'),
@@ -162,16 +185,29 @@ class ClaimedSqlDatabase implements ManagedSqlDatabase {
    * and not before: the plugin closes whichever pool is registered under the
    * connection string, so closing it here would take the pool away from the
    * holders that are still using it.
+   *
+   * The entry keeps naming the pool while the close runs, and a holder that
+   * arrives in that window waits for it. The plugin's close command closes
+   * every pool it holds, so a pool that opened while this one was still
+   * closing would go with it.
    */
   async close(): Promise<boolean> {
     if (this.#released) return true
     this.#released = true
     this.#shared.claims -= 1
     if (this.#shared.claims > 0) return true
-    if (sharedDatabases.get(this.#shared.connectionString) === this.#shared) {
-      sharedDatabases.delete(this.#shared.connectionString)
+    const closed = this.#connection.close()
+    this.#shared.closing = closed.then(
+      () => undefined,
+      () => undefined,
+    )
+    try {
+      return await closed
+    } finally {
+      if (sharedDatabases.get(this.#shared.connectionString) === this.#shared) {
+        sharedDatabases.delete(this.#shared.connectionString)
+      }
     }
-    return this.#connection.close()
   }
 }
 

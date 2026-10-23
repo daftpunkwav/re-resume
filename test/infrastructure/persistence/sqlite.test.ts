@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const plugin = vi.hoisted(() => {
   const pools = new Map<string, { closed: boolean; statements: string[] }>()
+  let closeGate: Promise<void> = Promise.resolve()
   return {
     pools,
     loads: 0,
@@ -23,6 +24,18 @@ const plugin = vi.hoisted(() => {
       pools.clear()
       this.loads = 0
       this.pins = 0
+      closeGate = Promise.resolve()
+    },
+    /**
+     * Holds the plugin's close command until the returned function releases
+     * it, so a test can have a pool open while the previous one is closing.
+     */
+    holdClose(): () => void {
+      let release: () => void = () => {}
+      closeGate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return release
     },
     /** The plugin's load command: one pool per connection string. */
     load(path: string) {
@@ -53,6 +66,7 @@ const plugin = vi.hoisted(() => {
         // The plugin's close command without a database name closes every pool
         // it holds, whichever handle asked for it.
         close: async () => {
+          await closeGate
           for (const pool of pools.values()) pool.closed = true
           return true
         },
@@ -83,11 +97,18 @@ const { openSqliteDatabase } = await import('../../../src/infrastructure/persist
  */
 let connectionCounter = 0
 
+/** The connection string of the next test. */
 function nextConnectionString(): string {
   connectionCounter += 1
   return `sqlite:test-${connectionCounter}.db`
 }
 
+/** Lets the pending microtasks run, so an open that is not waiting gets as far as it can. */
+async function flushPendingWork(): Promise<void> {
+  for (let tick = 0; tick < 20; tick += 1) await Promise.resolve()
+}
+
+/** A database of its own, with the statements the fake recorded for it. */
 async function openTestDatabase() {
   plugin.reset()
   const connectionString = nextConnectionString()
@@ -215,5 +236,27 @@ describe('the sqlite seam over a shared database', () => {
 
     expect(plugin.loads).toBe(2)
     await second.close()
+  })
+
+  it('does not close a connection that opened while the previous one was closing', async () => {
+    plugin.reset()
+    const connectionString = nextConnectionString()
+    const releaseClose = plugin.holdClose()
+
+    const first = await openSqliteDatabase(connectionString)
+    const closing = first.close()
+
+    // The pool is still being closed. A holder that arrives now has to wait for
+    // it, because the plugin closes every pool it holds: a pool that opened in
+    // the meantime would be closed with the one that is going away.
+    const second = openSqliteDatabase(connectionString)
+    await flushPendingWork()
+    releaseClose()
+    await closing
+    const database = await second
+
+    await expect(database.select('SELECT * FROM experience')).resolves.toEqual([])
+
+    await database.close()
   })
 })

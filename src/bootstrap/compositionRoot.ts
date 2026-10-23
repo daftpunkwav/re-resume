@@ -269,11 +269,27 @@ async function duringStartup<T>(
   try {
     return await step()
   } catch (failure) {
-    await database.close()
+    // The claim goes back, and the failure that ended the boot is the one worth
+    // reporting: a cleanup that fails as well is named beside it.
+    try {
+      await database.close()
+    } catch (cleanupFailure) {
+      throw new Error(
+        'The startup step failed and releasing the database claim failed with it: ' +
+          (cleanupFailure instanceof Error ? cleanupFailure.message : String(cleanupFailure)),
+        { cause: failure },
+      )
+    }
     throw failure
   }
 }
 
+/**
+ * Builds the one application container: the infrastructure the use cases need,
+ * wired to the ports they declare. Every startup step that can fail after the
+ * database was opened releases its claim on the way out, so a boot that ends in
+ * failure leaves no claim behind.
+ */
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
