@@ -270,15 +270,13 @@ async function duringStartup<T>(
     return await step()
   } catch (failure) {
     // The claim goes back, and the failure that ended the boot is the one worth
-    // reporting: a cleanup that fails as well is named beside it.
+    // reporting: a cleanup that fails as well is attached to it.
     try {
       await database.close()
     } catch (cleanupFailure) {
-      throw new Error(
-        'The startup step failed and releasing the database claim failed with it: ' +
-          (cleanupFailure instanceof Error ? cleanupFailure.message : String(cleanupFailure)),
-        { cause: failure },
-      )
+      if (failure instanceof Error && failure.cause === undefined) {
+        failure.cause = cleanupFailure
+      }
     }
     throw failure
   }

@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 const plugin = vi.hoisted(() => {
   const pools = new Map<string, { closed: boolean; statements: string[] }>()
   let closeGate: Promise<void> = Promise.resolve()
+  let failNextLoad = false
   return {
     pools,
     loads: 0,
@@ -25,6 +26,11 @@ const plugin = vi.hoisted(() => {
       this.loads = 0
       this.pins = 0
       closeGate = Promise.resolve()
+      failNextLoad = false
+    },
+    /** Makes the next load fail, the way an unreadable database file does. */
+    failNextLoad(): void {
+      failNextLoad = true
     },
     /**
      * Holds the plugin's close command until the returned function releases
@@ -39,6 +45,10 @@ const plugin = vi.hoisted(() => {
     },
     /** The plugin's load command: one pool per connection string. */
     load(path: string) {
+      if (failNextLoad) {
+        failNextLoad = false
+        throw new Error('the database file could not be opened')
+      }
       plugin.loads += 1
       const pool = { closed: false, statements: [] as string[] }
       pools.set(path, pool)
@@ -194,6 +204,50 @@ describe('the sqlite seam over a shared database', () => {
     expect(plugin.pools.size).toBe(1)
 
     await first.close()
+    await second.close()
+  })
+
+  it('opens one connection for roots that ask for the database at the same time', async () => {
+    plugin.reset()
+    const connectionString = nextConnectionString()
+
+    const [first, second] = await Promise.all([
+      openSqliteDatabase(connectionString),
+      openSqliteDatabase(connectionString),
+    ])
+
+    expect(plugin.loads).toBe(1)
+    expect(plugin.pins).toBe(1)
+
+    await first.close()
+    await second.close()
+  })
+
+  it('lets a caller try again after the database failed to open', async () => {
+    plugin.reset()
+    const connectionString = nextConnectionString()
+    plugin.failNextLoad()
+
+    await expect(openSqliteDatabase(connectionString)).rejects.toThrow(/could not be opened/)
+
+    const database = await openSqliteDatabase(connectionString)
+    await expect(database.select('SELECT * FROM experience')).resolves.toEqual([])
+
+    await database.close()
+  })
+
+  it('ignores a second release of the same claim', async () => {
+    plugin.reset()
+    const connectionString = nextConnectionString()
+
+    const first = await openSqliteDatabase(connectionString)
+    const second = await openSqliteDatabase(connectionString)
+    await first.close()
+    await first.close()
+
+    // The second release must not have closed the pool the other root holds.
+    await expect(second.select('SELECT * FROM experience')).resolves.toEqual([])
+
     await second.close()
   })
 
