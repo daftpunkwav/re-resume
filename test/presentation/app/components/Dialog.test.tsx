@@ -58,6 +58,7 @@ function Harness() {
   )
 }
 
+/** Opens the dialog of the harness the way a user would. */
 function openDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   return user.click(screen.getByRole('button', { name: '打开' }))
 }
