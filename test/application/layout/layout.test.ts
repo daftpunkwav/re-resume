@@ -7,7 +7,7 @@ import type { AbsoluteLayout } from '../../../src/domain/resume/Layout'
 import { DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import type { TextStyle } from '../../../src/domain/resume/TextStyle'
 import type { MaterializedBlock, MaterializedContent } from '../../../src/domain/resume/ResumeSnapshot'
-import type { TextMeasurer } from '../../../src/domain/resume/ports/TextMeasurer'
+import type { TextMeasurer, TextRun } from '../../../src/domain/resume/ports/TextMeasurer'
 import { parseIsoDate } from '../../../src/domain/shared/DateTime'
 import type { IsoDate } from '../../../src/domain/shared/DateTime'
 import { asAssetId, asBlockId } from '../../../src/domain/shared/branded-id'
@@ -33,6 +33,18 @@ class FixedWidthTextMeasurer implements TextMeasurer {
 
   measureClusters(text: string, _style: TextStyle): readonly number[] {
     return [...text].map((char) => (isCjk(char) ? CJK_WIDTH : LATIN_WIDTH))
+  }
+
+  resolveRuns(text: string, style: TextStyle): readonly TextRun[] {
+    return [
+      {
+        text,
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        width: this.measureLine(text, style),
+        baselineShift: 0,
+      },
+    ]
   }
 }
 

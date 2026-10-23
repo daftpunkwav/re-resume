@@ -9,7 +9,7 @@ import type { BlockId } from '../shared/branded-id'
 import type { MaterializedBlock } from './ResumeSnapshot'
 import type { PageSetup } from './PageSetup'
 import type { TextStyle } from './TextStyle'
-import type { TextMeasurer } from './ports/TextMeasurer'
+import type { TextMeasurer, TextRun } from './ports/TextMeasurer'
 
 /**
  * Input blocks are materialized, not live. A live Block that references an
@@ -34,6 +34,12 @@ export interface TextLine {
   readonly text: string
   readonly x: number
   readonly width: number
+  /**
+   * The stretches of the line one family covers. A renderer draws one text
+   * node per run, with the family the run names, so the drawn glyph and the
+   * measured advance come from the same face.
+   */
+  readonly runs: readonly TextRun[]
 }
 
 export interface OverflowReport {

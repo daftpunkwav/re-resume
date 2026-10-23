@@ -288,5 +288,12 @@ function lineOf(
   textStyle: TextStyle,
   measurer: TextMeasurer,
 ): TextLine {
-  return { text, x: 0, width: measurer.measureLine(text, textStyle) }
+  // The runs carry the face every stretch of the line is drawn with; the line
+  // width is the measurement the wrapping decided on.
+  return {
+    text,
+    x: 0,
+    width: measurer.measureLine(text, textStyle),
+    runs: measurer.resolveRuns(text, textStyle),
+  }
 }

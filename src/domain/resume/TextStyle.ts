@@ -25,6 +25,18 @@ export interface TextStyle {
  */
 export const DEFAULT_FONT_FAMILY = 'Noto Sans SC'
 
+/**
+ * The family name as a CSS font declaration spells it.
+ *
+ * A family name whose last token starts with a digit — "Noto Sans Symbols 2" —
+ * is not a valid unquoted CSS family name, and the FontFace constructor
+ * rejects it. Quoting the name is always valid, and it names the very family
+ * the FontFaceSet holds: the quotes are syntax, not part of the name.
+ */
+export function cssFamilyName(family: string): string {
+  return `"${family}"`
+}
+
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: 11,
