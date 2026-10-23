@@ -14,7 +14,8 @@ import type { PageSetup } from '../../src/domain/resume/PageSetup'
 import { DEFAULT_FLOW_LAYOUT } from '../../src/domain/resume/Layout'
 import type { Block } from '../../src/domain/resume/Block'
 import { DEFAULT_TEXT_STYLE } from '../../src/domain/resume/TextStyle'
-import type { LaidOutBlock, LaidOutPage, LayoutOutput } from '../../src/domain/resume/PageLayout'
+import { DEFAULT_FONT_FAMILY } from '../../src/domain/resume/TextStyle'
+import type { LaidOutBlock, LaidOutPage, LayoutOutput, TextLine } from '../../src/domain/resume/PageLayout'
 import type { Resume } from '../../src/domain/resume/Resume'
 import type { MaterializedBlock, MaterializedContent } from '../../src/domain/resume/ResumeSnapshot'
 import { parseDateTime } from '../../src/domain/shared/DateTime'
@@ -86,6 +87,27 @@ export function materializedOf(block: Block): MaterializedBlock {
   return { id: block.id, content, layout: block.layout, textStyle: block.textStyle, claims: [] }
 }
 
+/**
+ * A laid-out line: one run covering the whole line, which is what a family
+ * without a fallback resolves to.
+ */
+export function lineFixture(text: string, x: number, width: number): TextLine {
+  return {
+    text,
+    x,
+    width,
+    runs: [
+      {
+        text,
+        fontFamily: DEFAULT_FONT_FAMILY,
+        fontWeight: DEFAULT_TEXT_STYLE.fontWeight,
+        width,
+        baselineShift: 0,
+      },
+    ],
+  }
+}
+
 /** Stacks blocks one fixed height apart; pagination comes from the caller. */
 export function layOutFixture(
   blocks: readonly MaterializedBlock[],
@@ -99,7 +121,7 @@ export function layOutFixture(
     width: page.pageWidth - page.marginLeft - page.marginRight,
     height: FIXTURE_BLOCK_HEIGHT,
     textStyle: block.textStyle ?? DEFAULT_TEXT_STYLE,
-    lines: [{ text: contentText(block.content), x: 0, width: 200 }],
+    lines: [lineFixture(contentText(block.content), 0, 200)],
   }))
   return { pages: pagesOf(laidOut), blocks: laidOut, overflows: [] }
 }

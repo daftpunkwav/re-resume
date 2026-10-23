@@ -17,11 +17,10 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { layout } from '../../../src/application/layout/layout'
-import {
-  MissingFontFamilyError,
-  createFontkitTextMeasurer,
-} from '../../../src/infrastructure/measurement/FontkitTextMeasurer'
-import type { FontFaces, FontRegistry } from '../../../src/infrastructure/measurement/FontkitTextMeasurer'
+import { createFontkitTextMeasurer } from '../../../src/infrastructure/measurement/FontkitTextMeasurer'
+import { MissingFontFamilyError } from '../../../src/infrastructure/measurement/FontRegistry'
+import type { FontFaces, FontRegistry } from '../../../src/infrastructure/measurement/FontRegistry'
+import { SYMBOL_FONT_FAMILY } from '../../../src/infrastructure/measurement/BundledFontRegistry'
 import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import type { TextStyle } from '../../../src/domain/resume/TextStyle'
 import type { MaterializedBlock } from '../../../src/domain/resume/ResumeSnapshot'
@@ -35,14 +34,24 @@ function faceBytes(file: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(readFileSync(`${fontDirectory}${file}`))
 }
 
-function registryWith(faces: Partial<FontFaces> = {}): FontRegistry {
+function registryWith(faces: Partial<FontFaces> = {}, fallback: string | null = SYMBOL_FONT_FAMILY): FontRegistry {
   return new Map([
     [
       DEFAULT_FONT_FAMILY,
       {
-        regular: faceBytes('NotoSansSC-Regular.otf'),
-        bold: faceBytes('NotoSansSC-Bold.otf'),
-        ...faces,
+        faces: {
+          regular: faceBytes('NotoSansSC-Regular.otf'),
+          bold: faceBytes('NotoSansSC-Bold.otf'),
+          ...faces,
+        },
+        fallbackFamily: fallback,
+      },
+    ],
+    [
+      SYMBOL_FONT_FAMILY,
+      {
+        faces: { regular: faceBytes('NotoSansSymbols2-Regular.otf'), bold: null },
+        fallbackFamily: null,
       },
     ],
   ])
@@ -108,6 +117,47 @@ describe('FontkitTextMeasurer', () => {
     expect(regularOnly.measureLine(latin, { ...style, fontWeight: 700 })).toBe(
       regularOnly.measureLine(latin, style),
     )
+  })
+
+  it('measures a character the primary face lacks with the fallback face', () => {
+    const withFallback = createFontkitTextMeasurer(registryWith())
+    const withoutFallback = createFontkitTextMeasurer(registryWith({}, null))
+
+    // The check mark is in the symbol face and not in the primary one, so the
+    // two measurers charge it differently: the .notdef advance of the primary
+    // face, and the advance of the face that can draw it.
+    expect(withFallback.measureLine('✔', style)).not.toBe(
+      withoutFallback.measureLine('✔', style),
+    )
+  })
+
+  it('splits a text into the runs the families cover', () => {
+    const runs = measurer.resolveRuns('简✔', style)
+
+    expect(runs).toHaveLength(2)
+    expect(runs[0]?.text).toBe('简')
+    expect(runs[0]?.fontFamily).toBe(DEFAULT_FONT_FAMILY)
+    expect(runs[1]?.text).toBe('✔')
+    expect(runs[1]?.fontFamily).toBe(SYMBOL_FONT_FAMILY)
+  })
+
+  it('adds the run widths up to the line width', () => {
+    const text = '简历 ✔ 项目'
+    const width = measurer.measureLine(text, style)
+    const total = measurer.resolveRuns(text, style).reduce((sum, run) => sum + run.width, 0)
+
+    expect(total).toBeCloseTo(width, 6)
+  })
+
+  it('keeps a character no bundled face covers with the family the document named', () => {
+    // The rocket is in neither bundled face, so the measurer and the renderer
+    // agree on the .notdef of the family the document named — the run it
+    // belongs to is the one of the text around it.
+    const runs = measurer.resolveRuns('简🚀', style)
+
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.text).toBe('简🚀')
+    expect(runs[0]?.fontFamily).toBe(DEFAULT_FONT_FAMILY)
   })
 
   it('fails loudly on corrupt face bytes instead of measuring with them', () => {

@@ -38,6 +38,7 @@ import type { Block } from '../../domain/resume/Block'
 import { isAbsoluteLayout } from '../../domain/resume/Layout'
 import type { AbsoluteLayout } from '../../domain/resume/Layout'
 import type { LaidOutBlock, LayoutOutput, OverflowReport } from '../../domain/resume/PageLayout'
+import type { TextRun } from '../../domain/resume/ports/TextMeasurer'
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { BlockId } from '../../domain/shared/branded-id'
 
@@ -62,6 +63,19 @@ export interface CanvasPoint {
   readonly y: number
 }
 
+/** One stretch of a line that one family covers. */
+export interface CanvasTextRun {
+  readonly text: string
+  /** The offset from the line's left edge, in screen pixels. */
+  readonly x: number
+  readonly width: number
+  /** The family that covers this run; the run is drawn with it. */
+  readonly fontFamily: string
+  readonly fontWeight: number
+  /** How far the run's baseline sits below the line's, in screen pixels. */
+  readonly baselineShift: number
+}
+
 /** One precomputed line, in screen pixels, with the style layout() resolved. */
 export interface CanvasTextLine {
   readonly text: string
@@ -70,8 +84,7 @@ export interface CanvasTextLine {
   readonly width: number
   readonly height: number
   readonly fontSize: number
-  readonly fontFamily: string
-  readonly fontWeight: number
+  readonly runs: readonly CanvasTextRun[]
 }
 
 export interface CanvasBlockBox {
@@ -154,7 +167,7 @@ function projectBlock(
   page: PageSetup,
   zoom: number,
 ): CanvasBlockBox {
-  const { fontFamily, fontSize, fontWeight, lineHeight } = laidOut.textStyle
+  const { fontSize, lineHeight } = laidOut.textStyle
   const left = (page.marginLeft + laidOut.x) * zoom
   const top = (page.marginTop + laidOut.y) * zoom
   const step = fontSize * lineHeight * zoom
@@ -173,10 +186,34 @@ function projectBlock(
       width: line.width * zoom,
       height: step,
       fontSize: fontSize * zoom,
-      fontFamily,
-      fontWeight,
+      runs: projectRuns(line.runs, left + line.x * zoom, zoom),
     })),
   }
+}
+
+/**
+ * The runs of a line, placed one after the other. A run starts where the runs
+ * before it end, and the baseline shift lifts a run whose face has taller
+ * metrics back onto the line's baseline.
+ */
+function projectRuns(
+  runs: readonly TextRun[],
+  lineX: number,
+  zoom: number,
+): readonly CanvasTextRun[] {
+  let offset = 0
+  return runs.map((run) => {
+    const placed: CanvasTextRun = {
+      text: run.text,
+      x: lineX + offset * zoom,
+      width: run.width * zoom,
+      fontFamily: run.fontFamily,
+      fontWeight: run.fontWeight,
+      baselineShift: run.baselineShift * zoom,
+    }
+    offset += run.width
+    return placed
+  })
 }
 
 function drawsRule(laidOut: LaidOutBlock, blocks: readonly Block[]): boolean {
@@ -665,26 +702,34 @@ export function ResumeCanvas({
                       strokeWidth={SELECTION_STROKE_WIDTH}
                     />
                     {box.lines.map((line, index) =>
-                      box.blockId === editingBlockId ? null : (
-                        <Text
-                          key={`${box.blockId}-${index}`}
-                          text={line.text}
-                          x={line.x}
-                          y={line.y}
-                          width={line.width}
-                          height={line.height}
-                          fontSize={line.fontSize}
-                          fontFamily={line.fontFamily}
-                          // The canvas font shorthand carries two weights, so a
-                          // resolved weight above the default collapses to bold.
-                          fontStyle={line.fontWeight > 500 ? 'bold' : 'normal'}
-                          fill={inkColour ?? undefined}
-                          // wrap: none keeps the text node from re-wrapping a line
-                          // layout() has already broken.
-                          wrap="none"
-                          listening={false}
-                        />
-                      ),
+                      box.blockId === editingBlockId
+                        ? null
+                        : line.runs.map((run, runIndex) => (
+                            <Text
+                              key={`${box.blockId}-${index}-${runIndex}`}
+                              text={run.text}
+                              x={run.x}
+                              // A run whose face has taller metrics would draw
+                              // its text lower; the shift puts it back on the
+                              // line.
+                              y={line.y - run.baselineShift}
+                              width={run.width}
+                              height={line.height}
+                              fontSize={line.fontSize}
+                              // The family the measurer resolved this run to,
+                              // so the drawn glyph is the one it measured.
+                              fontFamily={run.fontFamily}
+                              // The canvas font shorthand carries two weights,
+                              // so a resolved weight above the default
+                              // collapses to bold.
+                              fontStyle={run.fontWeight > 500 ? 'bold' : 'normal'}
+                              fill={inkColour ?? undefined}
+                              // wrap: none keeps the text node from re-wrapping a line
+                              // layout() has already broken.
+                              wrap="none"
+                              listening={false}
+                            />
+                          )),
                     )}
                     {renderResizeHandle(box)}
                   </Group>
