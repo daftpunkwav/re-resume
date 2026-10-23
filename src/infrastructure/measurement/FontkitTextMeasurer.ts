@@ -95,9 +95,13 @@ function advanceOf(face: Font, text: string): number {
  * How far a face's baseline sits below the middle of its em box, in em. Two
  * faces with different metrics draw the same text at different heights, and
  * the difference is what puts a fallback run back onto the line's baseline.
+ *
+ * The descent counts as a negative number here, as fontkit reports it, while
+ * the drawing engine counts it as a positive distance below the baseline: the
+ * offset is therefore the sum of the two, not their difference.
  */
 function baselineOffset(face: Font): number {
-  return (face.ascent - face.descent) / 2 / face.unitsPerEm
+  return (face.ascent + face.descent) / 2 / face.unitsPerEm
 }
 
 const graphemeSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' })

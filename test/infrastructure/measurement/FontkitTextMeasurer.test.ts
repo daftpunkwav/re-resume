@@ -149,6 +149,17 @@ describe('FontkitTextMeasurer', () => {
     expect(total).toBeCloseTo(width, 6)
   })
 
+  it('moves a fallback run onto the baseline of the text around it', () => {
+    const runs = measurer.resolveRuns('简✔', style)
+
+    // The run of the document's own face sits on the line's baseline. The
+    // symbol face declares a smaller distance between its baseline and the
+    // middle of its em box, so its run has to be drawn lower to share that
+    // baseline.
+    expect(runs[0]?.baselineShift).toBe(0)
+    expect(runs[1]?.baselineShift).toBeLessThan(0)
+  })
+
   it('keeps a character no bundled face covers with the family the document named', () => {
     // The rocket is in neither bundled face, so the measurer and the renderer
     // agree on the .notdef of the family the document named — the run it

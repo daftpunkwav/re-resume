@@ -39,6 +39,7 @@ import { isAbsoluteLayout } from '../../domain/resume/Layout'
 import type { AbsoluteLayout } from '../../domain/resume/Layout'
 import type { LaidOutBlock, LayoutOutput, OverflowReport } from '../../domain/resume/PageLayout'
 import type { TextRun } from '../../domain/resume/ports/TextMeasurer'
+import { cssFamilyName } from '../../domain/resume/TextStyle'
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { BlockId } from '../../domain/shared/branded-id'
 
@@ -718,7 +719,7 @@ export function ResumeCanvas({
                               fontSize={line.fontSize}
                               // The family the measurer resolved this run to,
                               // so the drawn glyph is the one it measured.
-                              fontFamily={run.fontFamily}
+                              fontFamily={cssFamilyName(run.fontFamily)}
                               // The canvas font shorthand carries two weights,
                               // so a resolved weight above the default
                               // collapses to bold.

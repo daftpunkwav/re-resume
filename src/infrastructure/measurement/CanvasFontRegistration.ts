@@ -18,6 +18,7 @@
  *   family, and the browser can only draw a family it knows.
  */
 
+import { cssFamilyName } from '../../domain/resume/TextStyle'
 import type { FontRegistry } from './FontRegistry'
 
 const registeredFaceKeys = new Set<string>()
@@ -38,7 +39,9 @@ async function registerFace(
 ): Promise<void> {
   const key = `${family}/${weight}`
   if (registeredFaceKeys.has(key)) return
-  const face = new FontFace(family, bytes, { weight })
+  // The family is quoted: a name whose last token starts with a digit is not a
+  // valid unquoted CSS family name, and the FontFace constructor refuses it.
+  const face = new FontFace(cssFamilyName(family), bytes, { weight })
   await face.load()
   document.fonts.add(face)
   registeredFaceKeys.add(key)

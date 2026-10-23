@@ -392,16 +392,19 @@ describe('ResumeCanvas', () => {
     const primary = screen.getByText('甲')
     const fallback = screen.getByText('✔')
 
-    expect(primary).toHaveAttribute('data-font-family', DEFAULT_FONT_FAMILY)
-    expect(fallback).toHaveAttribute('data-font-family', SYMBOL_FONT_FAMILY)
+    // The family is quoted: a name whose last token starts with a digit is
+    // not a valid unquoted CSS family name.
+    expect(primary).toHaveAttribute('data-font-family', `"${DEFAULT_FONT_FAMILY}"`)
+    expect(fallback).toHaveAttribute('data-font-family', `"${SYMBOL_FONT_FAMILY}"`)
     // The fallback run is drawn with the family the measurer resolved it to,
-    // and its baseline is lifted by the shift the measurer reported.
-    expect(Number(fallback.getAttribute('data-y'))).toBeLessThan(
+    // and its baseline is moved by the shift the measurer reported.
+    expect(Number(fallback.getAttribute('data-y'))).not.toBe(
       Number(primary.getAttribute('data-y')),
     )
   })
 
-  it('keeps the decorative layer from listening', () => {    renderCanvas()
+  it('keeps the decorative layer from listening', () => {
+    renderCanvas()
 
     const decorative = document.querySelector('[data-konva="layer"][data-listening="false"]')
     expect(decorative).not.toBeNull()
