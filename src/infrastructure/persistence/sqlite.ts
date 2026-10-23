@@ -13,6 +13,14 @@
  *   therefore asks the native shell to pin the database to a single connection
  *   (src-tauri/src/connection.rs), which is also where foreign key enforcement
  *   is configured for that connection rather than issued once and forgotten.
+ * - The plugin keeps one pool per connection string and its close command
+ *   closes whichever pool is registered under that string at that moment. The
+ *   application builds more than one composition root over the same database —
+ *   one per settings change, and two in development, where the framework mounts
+ *   the services provider twice — so the database is opened once here and
+ *   shared: every holder takes a claim, and the pool is closed when the last
+ *   claim is released. Closing it while another root still holds it would
+ *   leave that root with a pool every statement fails on.
  * - Statements are serialised through a promise chain. SQLite tolerates one
  *   writer, and without the chain a second transaction would BEGIN while the
  *   first is still open — which SQLite answers with an error, and whose outcome
@@ -48,12 +56,66 @@ export interface SqlDatabase {
 }
 
 /**
+ * The database the seam opens, with the two operations the plugin-backed
+ * implementation adds on top of the statements: the foreign key check the
+ * startup depends on, and the release of this holder's claim.
+ */
+export interface ManagedSqlDatabase extends SqlDatabase {
+  close(): Promise<boolean>
+  enableForeignKeys(): Promise<void>
+}
+
+/**
+ * The one database behind a connection string, and the claims on it.
+ *
+ * The connection is a promise because two holders may ask for the same
+ * database at the same time: the second one has to wait for the first open
+ * rather than start a second one, or the plugin would hold two pools under one
+ * connection string and the second load would replace the first.
+ */
+interface SharedDatabase {
+  readonly connectionString: string
+  readonly connection: Promise<PluginSqlDatabase>
+  /** How many holders still hold a claim on this database. */
+  claims: number
+}
+
+/** The databases this process has open, one per connection string. */
+const sharedDatabases = new Map<string, SharedDatabase>()
+
+/**
  * Connects through the SQL plugin and returns the seam above. Migrations are
  * not run here: the plugin runs the ones registered on the Rust side when it
  * loads a connection, and its bookkeeping table is not this build's to write
  * (spec section 6.2).
  */
-export async function openSqliteDatabase(connectionString: string): Promise<SqlDatabase> {
+export async function openSqliteDatabase(
+  connectionString: string,
+): Promise<ManagedSqlDatabase> {
+  const shared = sharedDatabaseFor(connectionString)
+  shared.claims += 1
+  const connection = await shared.connection
+  return new ClaimedSqlDatabase(shared, connection)
+}
+
+function sharedDatabaseFor(connectionString: string): SharedDatabase {
+  const existing = sharedDatabases.get(connectionString)
+  if (existing !== undefined) return existing
+  const shared: SharedDatabase = {
+    connectionString,
+    connection: openPluginDatabase(connectionString),
+    claims: 0,
+  }
+  sharedDatabases.set(connectionString, shared)
+  // A database that failed to open must not stay in the registry: the next
+  // caller has to be able to try again rather than inherit the failure.
+  void shared.connection.catch(() => {
+    if (sharedDatabases.get(connectionString) === shared) sharedDatabases.delete(connectionString)
+  })
+  return shared
+}
+
+async function openPluginDatabase(connectionString: string): Promise<PluginSqlDatabase> {
   const [{ default: Database }, { invoke }] = await Promise.all([
     import('@tauri-apps/plugin-sql'),
     import('@tauri-apps/api/core'),
@@ -63,6 +125,54 @@ export async function openSqliteDatabase(connectionString: string): Promise<SqlD
   // the only point at which it can be replaced.
   await invoke('pin_sqlite_connection', { db: connectionString })
   return new PluginSqlDatabase(connection)
+}
+
+/**
+ * One holder's claim on a shared database. The statements go to the shared
+ * connection; the claim decides when the pool behind it is closed.
+ */
+class ClaimedSqlDatabase implements ManagedSqlDatabase {
+  readonly #shared: SharedDatabase
+  readonly #connection: PluginSqlDatabase
+  #released = false
+
+  constructor(shared: SharedDatabase, connection: PluginSqlDatabase) {
+    this.#shared = shared
+    this.#connection = connection
+  }
+
+  execute(query: string, bindValues?: readonly SqlValue[]): Promise<SqlQueryResult> {
+    return this.#connection.execute(query, bindValues)
+  }
+
+  select<T>(query: string, bindValues?: readonly SqlValue[]): Promise<readonly T[]> {
+    return this.#connection.select<T>(query, bindValues)
+  }
+
+  transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T> {
+    return this.#connection.transaction(work)
+  }
+
+  enableForeignKeys(): Promise<void> {
+    return this.#connection.enableForeignKeys()
+  }
+
+  /**
+   * Releases this holder's claim. The pool is closed when the last claim goes,
+   * and not before: the plugin closes whichever pool is registered under the
+   * connection string, so closing it here would take the pool away from the
+   * holders that are still using it.
+   */
+  async close(): Promise<boolean> {
+    if (this.#released) return true
+    this.#released = true
+    this.#shared.claims -= 1
+    if (this.#shared.claims > 0) return true
+    if (sharedDatabases.get(this.#shared.connectionString) === this.#shared) {
+      sharedDatabases.delete(this.#shared.connectionString)
+    }
+    return this.#connection.close()
+  }
 }
 
 /** The only place `@tauri-apps/plugin-sql` is referenced at runtime. */
