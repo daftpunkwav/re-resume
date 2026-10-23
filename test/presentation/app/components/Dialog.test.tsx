@@ -120,6 +120,9 @@ describe('dialog focus', () => {
     const indicator = ruleFor('.dialog:focus')?.style.getPropertyValue('outline')
     expect(indicator).not.toBe('')
     expect(indicator).not.toBe('none')
+    // The ring is drawn in the accent colour of the theme, so a rename of that
+    // token fails here instead of leaving the panel without a ring.
+    expect(indicator).toContain('var(--accent)')
     // The offset reaches the focused element, which is what proves the rule
     // applies to this panel and not to some other selector.
     expect(window.getComputedStyle(panel).outlineOffset).toBe('2px')
