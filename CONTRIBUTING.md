@@ -20,7 +20,7 @@ Run these before opening a pull request.
 
 ```bash
 pnpm install
-pnpm exec playwright install chromium
+pnpm exec playwright install --with-deps chromium
 pnpm run typecheck
 pnpm test
 pnpm run lint
@@ -37,8 +37,10 @@ for everything that does not depend on what a browser paints. The browser tests
 run in a headless Chromium, which is where the stylesheet resolves the way the
 application sees it — the outline shorthand and the custom properties resolve
 there and nowhere else. The Chromium build is fetched once with
-`pnpm exec playwright install chromium`; the dependency install does not fetch
-it, because package build scripts do not run in this repository.
+`pnpm exec playwright install --with-deps chromium`; the dependency install
+does not fetch it, because package build scripts do not run in this repository.
+On Linux the same command installs the system libraries Chromium needs, which
+takes root: run it through `sudo` when the shell is not privileged already.
 
 ### Build
 

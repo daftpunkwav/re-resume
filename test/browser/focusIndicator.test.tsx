@@ -77,9 +77,16 @@ describe('the focus indicator of the dialog panel', () => {
   })
 
   it('follows the palette of the theme that is loaded', () => {
+    // Each theme is checked against its own accent: a ring that took another
+    // colour would still differ from the ring of the other theme, so the
+    // comparison against the token is what says which colour the ring has.
     const light = ringOf('apple', 'light')
-    const dark = ringOf('trae', 'dark')
+    expect(light.colour).toBe(accentColour())
 
+    const dark = ringOf('trae', 'dark')
+    expect(dark.colour).toBe(accentColour())
+
+    // The two themes have different accents, so the ring is not one colour.
     expect(light.colour).not.toBe(dark.colour)
   })
 

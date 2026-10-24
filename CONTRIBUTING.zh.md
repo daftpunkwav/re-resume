@@ -17,7 +17,7 @@
 
 ```bash
 pnpm install
-pnpm exec playwright install chromium
+pnpm exec playwright install --with-deps chromium
 pnpm run typecheck
 pnpm test
 pnpm run lint
@@ -31,8 +31,9 @@ specifier。
 测试套件分两个项目跑。单元测试跑在 jsdom 里，凡是不依赖"浏览器实际画出来什么"
 的断言都够用。浏览器测试跑在无头 Chromium 里——样式表只有在浏览器里才会像应用看到
 的那样解析：outline 简写与自定义属性只在那里解析。Chromium 构建产物用
-`pnpm exec playwright install chromium` 拉取一次；依赖安装不会拉取它，因为本仓库
-不执行依赖包的构建脚本。
+`pnpm exec playwright install --with-deps chromium` 拉取一次；依赖安装不会拉取它，
+因为本仓库不执行依赖包的构建脚本。Linux 上同一条命令会一并安装 Chromium 所需的
+系统库，这一步需要 root 权限：shell 没有特权时请用 `sudo` 执行。
 
 ### 构建
 
