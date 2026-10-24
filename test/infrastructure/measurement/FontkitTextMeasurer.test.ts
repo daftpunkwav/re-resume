@@ -20,7 +20,10 @@ import { layout } from '../../../src/application/layout/layout'
 import { createFontkitTextMeasurer } from '../../../src/infrastructure/measurement/FontkitTextMeasurer'
 import { MissingFontFamilyError } from '../../../src/infrastructure/measurement/FontRegistry'
 import type { FontFaces, FontRegistry } from '../../../src/infrastructure/measurement/FontRegistry'
-import { SYMBOL_FONT_FAMILY } from '../../../src/infrastructure/measurement/BundledFontRegistry'
+import {
+  EMOJI_FONT_FAMILY,
+  SYMBOL_FONT_FAMILY,
+} from '../../../src/infrastructure/measurement/BundledFontRegistry'
 import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import type { TextStyle } from '../../../src/domain/resume/TextStyle'
 import type { MaterializedBlock } from '../../../src/domain/resume/ResumeSnapshot'
@@ -51,6 +54,13 @@ function registryWith(faces: Partial<FontFaces> = {}, fallback: string | null = 
       SYMBOL_FONT_FAMILY,
       {
         faces: { regular: faceBytes('NotoSansSymbols2-Regular.otf'), bold: null },
+        fallbackFamily: EMOJI_FONT_FAMILY,
+      },
+    ],
+    [
+      EMOJI_FONT_FAMILY,
+      {
+        faces: { regular: faceBytes('NotoEmoji-Variable.ttf'), bold: null },
         fallbackFamily: null,
       },
     ],
@@ -161,14 +171,46 @@ describe('FontkitTextMeasurer', () => {
   })
 
   it('keeps a character no bundled face covers with the family the document named', () => {
-    // The rocket is in neither bundled face, so the measurer and the renderer
-    // agree on the .notdef of the family the document named — the run it
-    // belongs to is the one of the text around it.
-    const runs = measurer.resolveRuns('简🚀', style)
+    // The shovel is in none of the three bundled faces, so the measurer and
+    // the renderer agree on the .notdef of the family the document named — the
+    // run it belongs to is the one of the text around it.
+    const runs = measurer.resolveRuns('简🫿', style)
 
     expect(runs).toHaveLength(1)
-    expect(runs[0]?.text).toBe('简🚀')
+    expect(runs[0]?.text).toBe('简🫿')
     expect(runs[0]?.fontFamily).toBe(DEFAULT_FONT_FAMILY)
+  })
+
+  it('measures an emoji with the emoji face instead of the notdef of the primary face', () => {
+    const withEmoji = createFontkitTextMeasurer(registryWith())
+    const withoutEmoji = createFontkitTextMeasurer(registryWith({}, null))
+
+    // The rocket is in the emoji face and in neither of the other two, so the
+    // two measurers charge it differently: the .notdef advance of the primary
+    // face, and the advance of the face that can draw it.
+    expect(withEmoji.measureLine('🚀', style)).not.toBe(
+      withoutEmoji.measureLine('🚀', style),
+    )
+  })
+
+  it('resolves an emoji to the emoji face', () => {
+    const runs = measurer.resolveRuns('简🚀', style)
+
+    expect(runs).toHaveLength(2)
+    expect(runs[0]?.fontFamily).toBe(DEFAULT_FONT_FAMILY)
+    expect(runs[1]?.fontFamily).toBe(EMOJI_FONT_FAMILY)
+  })
+
+  it('resolves every weight of the emoji face to its regular face', () => {
+    // The emoji face is a variable font, and only its default instance is
+    // measured. A bold face would make the drawing engine draw the bold
+    // instance of a bold run while the measurer still measured the default
+    // one, so every weight has to resolve to the regular face.
+    const runs = measurer.resolveRuns('🚀', { ...style, fontWeight: 700 })
+
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.fontFamily).toBe(EMOJI_FONT_FAMILY)
+    expect(runs[0]?.fontWeight).toBe(400)
   })
 
   it('fails loudly on corrupt face bytes instead of measuring with them', () => {
