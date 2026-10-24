@@ -20,6 +20,7 @@ Run these before opening a pull request.
 
 ```bash
 pnpm install
+pnpm exec playwright install --with-deps chromium
 pnpm run typecheck
 pnpm test
 pnpm run lint
@@ -30,6 +31,17 @@ The suite covers the domain invariants, the use cases against in-memory
 repositories, the row mappers, the layout engine and the interface regions. One
 test parses every import in the source tree and fails on a forbidden layer
 direction, naming the file and the specifier.
+
+The suite runs in two projects. The unit tests run in jsdom, which is enough
+for everything that does not depend on what a browser paints. The browser tests
+run in a headless Chromium, which is where the stylesheet resolves the way the
+application sees it — the outline shorthand and the custom properties resolve
+there and nowhere else. The Chromium build is fetched once with
+`pnpm exec playwright install --with-deps chromium`; the dependency install
+does not fetch it, because package build scripts do not run in this repository.
+On Linux the same command installs the system libraries Chromium needs as well.
+Only that part elevates privileges: the browser itself is installed for the
+user who runs the command, so the command is not run through `sudo`.
 
 ### Build
 

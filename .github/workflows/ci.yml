@@ -51,6 +51,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The browser tests run in a headless Chromium. The dependency install
+      # does not fetch it: package build scripts do not run in this pipeline,
+      # so the browser is fetched here, with the system libraries it needs.
+      - name: Install the browser for the browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Typecheck
         run: pnpm run typecheck
 

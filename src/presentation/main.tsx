@@ -6,10 +6,7 @@
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './app/theme/base.css'
-import './app/theme/themes.css'
-import './app/components/components.css'
-import './app/shell.css'
+import './styles'
 import { ApplicationServicesProvider } from './app/ApplicationServicesProvider'
 import { AppShell } from './app/AppShell'
 import { applyAppearance, useAppearance, useAppearanceEffect } from './app/theme/useAppearance'

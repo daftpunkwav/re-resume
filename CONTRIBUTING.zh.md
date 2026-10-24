@@ -17,6 +17,7 @@
 
 ```bash
 pnpm install
+pnpm exec playwright install --with-deps chromium
 pnpm run typecheck
 pnpm test
 pnpm run lint
@@ -26,6 +27,14 @@ pnpm run lint:css
 测试覆盖领域不变量、用例（仓储用内存实现）、行映射器、排版引擎与界面区域。其中
 一个用例会解析源码里的每一条 import，出现被禁止的层级依赖时会点名文件与
 specifier。
+
+测试套件分两个项目跑。单元测试跑在 jsdom 里，凡是不依赖"浏览器实际画出来什么"
+的断言都够用。浏览器测试跑在无头 Chromium 里——样式表只有在浏览器里才会像应用看到
+的那样解析：outline 简写与自定义属性只在那里解析。Chromium 构建产物用
+`pnpm exec playwright install --with-deps chromium` 拉取一次；依赖安装不会拉取它，
+因为本仓库不执行依赖包的构建脚本。Linux 上同一条命令会一并安装 Chromium 所需的
+系统库。只有这一步会提权：浏览器本体仍装在执行命令的用户下，所以整条命令不要用
+`sudo` 跑。
 
 ### 构建
 
