@@ -16,6 +16,9 @@
  * - Every family is registered under its own name, the fallback families
  *   included: a run the measurer resolved to a fallback is drawn with that
  *   family, and the browser can only draw a family it knows.
+ * - A face is registered under the weight the measurer resolves it to: a
+ *   family without a bold face is registered at weight 400, and every weight
+ *   of that family resolves to that face.
  */
 
 import { cssFamilyName } from '../../domain/resume/TextStyle'

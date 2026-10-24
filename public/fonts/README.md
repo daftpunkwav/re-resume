@@ -22,10 +22,11 @@ distributed by the Noto CJK project.
 
 ## Noto Sans Symbols 2
 
-The fallback face: the characters the faces above do not cover are measured and
-drawn with this family instead of with whatever the system substitutes for
-them. The two faces are picked per run by what their character maps cover, so a
-line that mixes Han text and a symbol is measured and drawn with one face each.
+The first fallback face: the characters the faces above do not cover are
+measured and drawn with this family instead of with whatever the system
+substitutes for them. The faces are picked per run by what their character maps
+cover, so a line that mixes Han text and a symbol is measured and drawn with
+one face each.
 
 - Source: <https://github.com/notofonts/notofonts.github.io>, path
   `fonts/NotoSansSymbols2/unhinted/otf/`
@@ -36,4 +37,33 @@ line that mixes Han text and a symbol is measured and drawn with one face each.
   and the license file travels with it in the build output.
 
 The fallback has no bold face: a bold run that falls back to it is drawn with
-this regular face, which is the face its advances were measured with.
+this regular face, which is the face its advances were measured with. It falls
+back further to the emoji face below for the characters it does not cover.
+
+## Noto Emoji
+
+The last fallback face: it covers the emoji presentation sequences, which are
+in neither the default face nor the symbol face. Without it an emoji is
+measured as the .notdef of the family the document named, while the drawing
+engine substitutes a system emoji face for it, and the two widths differ.
+
+This is the monochrome cut of the family, not the colour one: it carries the
+glyph outlines and no colour, so a renderer that cannot draw colour fonts —
+and an exporter that embeds the font — can draw the emoji with it.
+
+- Source: <https://github.com/google/fonts>, path `ofl/notoemoji/`
+- Pinned revision: `b979dba422e445492b0eb9951ac52ee0b4d648c3` (the last commit
+  touching the font file, 2024-06-05)
+- File: `src/assets/fonts/NotoEmoji-Variable.ttf` (the upstream
+  `NotoEmoji[wght].ttf`, renamed because a bracketed name is awkward in an
+  import path)
+- License: SIL Open Font License 1.1, see [LICENSE](./LICENSE), the same terms
+  as the faces above. The font ships with the application under that license
+  and the license file travels with it in the build output.
+
+The file is a variable font with a weight axis, and only its default instance
+is used: the measurer reads the outlines of that instance, so the drawing
+engine has to pick the same one. The face therefore declares no bold face, and
+every weight resolves to the regular face — a bold face would make the engine
+draw the bold instance of a bold run while the measurer still measured the
+default one, and the two would disagree on the width.
