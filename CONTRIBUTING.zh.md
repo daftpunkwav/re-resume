@@ -33,7 +33,8 @@ specifier。
 的那样解析：outline 简写与自定义属性只在那里解析。Chromium 构建产物用
 `pnpm exec playwright install --with-deps chromium` 拉取一次；依赖安装不会拉取它，
 因为本仓库不执行依赖包的构建脚本。Linux 上同一条命令会一并安装 Chromium 所需的
-系统库，这一步需要 root 权限：shell 没有特权时请用 `sudo` 执行。
+系统库。只有这一步会提权：浏览器本体仍装在执行命令的用户下，所以整条命令不要用
+`sudo` 跑。
 
 ### 构建
 

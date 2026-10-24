@@ -39,8 +39,9 @@ application sees it — the outline shorthand and the custom properties resolve
 there and nowhere else. The Chromium build is fetched once with
 `pnpm exec playwright install --with-deps chromium`; the dependency install
 does not fetch it, because package build scripts do not run in this repository.
-On Linux the same command installs the system libraries Chromium needs, which
-takes root: run it through `sudo` when the shell is not privileged already.
+On Linux the same command installs the system libraries Chromium needs as well.
+Only that part elevates privileges: the browser itself is installed for the
+user who runs the command, so the command is not run through `sudo`.
 
 ### Build
 
