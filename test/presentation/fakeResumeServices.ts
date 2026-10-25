@@ -32,6 +32,7 @@ export interface FakeResumeWorkbench {
   readonly compare: Mock
   readonly materialize: Mock
   readonly layOut: Mock
+  readonly exportPdfToFile: Mock
   readonly staleReferences: Mock
 }
 
@@ -75,6 +76,7 @@ export function createFakeResumeServices(
     compare: refusing(calls, 'resumes.compare'),
     materialize: refusing(calls, 'resumes.materialize'),
     layOut: refusing(calls, 'resumes.layOut'),
+    exportPdfToFile: refusing(calls, 'resumes.exportPdfToFile'),
     staleReferences: refusing(calls, 'resumes.staleReferences'),
     ...overrides.resumes,
   } as unknown as FakeResumeWorkbench

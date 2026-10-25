@@ -450,6 +450,21 @@ export function ResumeEditorPanel({
     )
   }
 
+  // The outcome depends on what the run produced (saved, saved with a claim
+  // notice, or a dismissed dialog), so it is reported from inside the run
+  // rather than declared as dispatch's static success notice.
+  const exportResumePdf = (): void => {
+    dispatch(async () => {
+      const saved = await resumes.exportPdfToFile(resumeId)
+      if (saved.outcome === 'cancelled') return
+      onOutcome(
+        saved.pendingClaimBlocks.length > 0
+          ? { tone: 'warning', title: `PDF 已导出到 ${saved.path}，其中引用了待确认的断言。` }
+          : { tone: 'success', title: `PDF 已导出到 ${saved.path}。` },
+      )
+    })
+  }
+
   return (
     <div className="resume-editor">
       <ResumeToolbar
@@ -459,6 +474,7 @@ export function ResumeEditorPanel({
         onUndo={() => dispatch(() => resumes.undo(resumeId))}
         onRedo={() => dispatch(() => resumes.redo(resumeId))}
         onCopy={copyResume}
+        onExportPdf={exportResumePdf}
         onFreeze={() => setConfirmingFreeze(true)}
       />
 
@@ -547,6 +563,7 @@ function ResumeToolbar({
   onUndo,
   onRedo,
   onCopy,
+  onExportPdf,
   onFreeze,
 }: {
   readonly resume: Resume
@@ -555,6 +572,7 @@ function ResumeToolbar({
   readonly onUndo: () => void
   readonly onRedo: () => void
   readonly onCopy: () => void
+  readonly onExportPdf: () => void
   readonly onFreeze: () => void
 }) {
   return (
@@ -575,6 +593,11 @@ function ResumeToolbar({
         </Button>
         <Button size="small" icon="copy" disabled={busy} onClick={onCopy}>
           复制
+        </Button>
+        {/* Both statuses export: a frozen resume renders its snapshot, a draft
+            its current blocks. */}
+        <Button size="small" icon="export" disabled={busy} onClick={onExportPdf}>
+          导出 PDF
         </Button>
         <Button
           size="small"

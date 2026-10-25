@@ -28,6 +28,7 @@ export const ICON_NAMES = [
   'sparkle',
   'layout',
   'edit',
+  'export',
 ] as const
 
 export type IconName = (typeof ICON_NAMES)[number]
@@ -56,6 +57,7 @@ const PATHS: Readonly<Record<IconName, string>> = {
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
   layout: 'M3 4h18v16H3zM3 10h18M9 10v10',
   edit: 'M4 20h4l10-10-4-4L4 16zM14 6l4 4',
+  export: 'M12 15V3M7 8l5-5 5 5M4 15v5h16v-5',
 }
 
 export interface IconProps {

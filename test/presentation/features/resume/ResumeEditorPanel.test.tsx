@@ -158,6 +158,58 @@ describe('ResumeEditorPanel', () => {
     await waitFor(() => expect(harness.services.resumes.redo).toHaveBeenCalledWith(DRAFT_ID))
   })
 
+  it('exports a PDF through the workbench and reports where the file landed', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.services.resumes.exportPdfToFile).toHaveBeenCalledWith(DRAFT_ID),
+    )
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tone: 'success',
+          title: expect.stringContaining('简历.pdf'),
+        }),
+      ),
+    )
+  })
+
+  it('warns when the exported PDF still cites pending claims', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [asBlockId('block-1')],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({ tone: 'warning' }),
+      ),
+    )
+  })
+
+  it('reports nothing when the save dialog is dismissed', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({ outcome: 'cancelled' })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() => expect(harness.services.resumes.exportPdfToFile).toHaveBeenCalled())
+    // dispatch clears the outcome before the run; a dismissal sets no new one.
+    const outcomeCalls = harness.onOutcome.mock.calls.filter(([outcome]) => outcome !== null)
+    expect(outcomeCalls).toHaveLength(0)
+  })
+
   it('commits a page setup change as one undoable revision', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)
