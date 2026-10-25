@@ -138,7 +138,14 @@ function runSegments(run: TextRun, urls: readonly string[], key: string): ReactE
   if (hit.before !== '') {
     segments.push(<Text key={`${key}-before`} style={style}>{hit.before}</Text>)
   }
-  segments.push(<Link key={`${key}-link`} src={hit.url}>{hit.url}</Link>)
+  // The linked stretch carries the run's style too: a URL with characters the
+  // line's own faces lack would otherwise draw them in the line's family
+  // instead of the fallback face the run was measured with.
+  segments.push(
+    <Link key={`${key}-link`} src={hit.url}>
+      <Text style={style}>{hit.url}</Text>
+    </Link>,
+  )
   if (hit.after !== '') {
     segments.push(...runSegments({ ...run, text: hit.after }, urls, `${key}-after`))
   }

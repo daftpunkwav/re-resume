@@ -37,7 +37,7 @@ import type { Resume } from '../domain/resume/Resume'
 import type { Revision } from '../domain/resume/Revision'
 import type { DocumentChange } from '../domain/resume/DocumentChange'
 import type { PageSetup } from '../domain/resume/PageSetup'
-import type { LayoutInput, LayoutOutput } from '../domain/resume/PageLayout'
+import type { LayoutInput, LayoutOutput, OverflowReport } from '../domain/resume/PageLayout'
 import type { MaterializedBlock, ResumeSnapshot } from '../domain/resume/ResumeSnapshot'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import type { ResumePdfExporter } from '../domain/resume/ports/ResumePdfExporter'
@@ -151,6 +151,8 @@ export type PdfFileSaveOutcome =
       readonly path: string
       /** Blocks citing pending claims; the caller must surface the notice. */
       readonly pendingClaimBlocks: readonly BlockId[]
+      /** Layout overflows; the PDF clips them, so the caller must say so. */
+      readonly overflows: readonly OverflowReport[]
     }
   | { readonly outcome: 'cancelled' }
 
@@ -473,7 +475,12 @@ function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
       const path = await wiring.pdfSaver.save(exported.bytes, suggestedName)
       return path === null
         ? { outcome: 'cancelled' }
-        : { outcome: 'saved', path, pendingClaimBlocks: exported.pendingClaimBlocks }
+        : {
+            outcome: 'saved',
+            path,
+            pendingClaimBlocks: exported.pendingClaimBlocks,
+            overflows: exported.overflows,
+          }
     },
     staleReferences: async (experienceId, knownFactVersion) => {
       const [resumes, experience] = await Promise.all([

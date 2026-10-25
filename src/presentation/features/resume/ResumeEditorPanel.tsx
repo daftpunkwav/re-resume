@@ -450,16 +450,23 @@ export function ResumeEditorPanel({
     )
   }
 
-  // The outcome depends on what the run produced (saved, saved with a claim
-  // notice, or a dismissed dialog), so it is reported from inside the run
-  // rather than declared as dispatch's static success notice.
+  // The outcome depends on what the run produced (saved, saved with claim or
+  // overflow notices, or a dismissed dialog), so it is reported from inside
+  // the run rather than declared as dispatch's static success notice.
   const exportResumePdf = (): void => {
     dispatch(async () => {
       const saved = await resumes.exportPdfToFile(resumeId)
       if (saved.outcome === 'cancelled') return
+      const notices: string[] = []
+      if (saved.pendingClaimBlocks.length > 0) {
+        notices.push('其中引用了待确认的断言。')
+      }
+      if (saved.overflows.length > 0) {
+        notices.push(`有 ${saved.overflows.length} 处内容超出页面，PDF 会将其裁掉。`)
+      }
       onOutcome(
-        saved.pendingClaimBlocks.length > 0
-          ? { tone: 'warning', title: `PDF 已导出到 ${saved.path}，其中引用了待确认的断言。` }
+        notices.length > 0
+          ? { tone: 'warning', title: `PDF 已导出到 ${saved.path}，${notices.join('')}` }
           : { tone: 'success', title: `PDF 已导出到 ${saved.path}。` },
       )
     })

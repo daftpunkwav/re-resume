@@ -21,7 +21,7 @@
  */
 
 import { DomainError } from '../../domain/shared/DomainError'
-import type { LayoutOutput } from '../../domain/resume/PageLayout'
+import type { LayoutOutput, OverflowReport } from '../../domain/resume/PageLayout'
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { MaterializedBlock } from '../../domain/resume/ResumeSnapshot'
 import type { Resume } from '../../domain/resume/Resume'
@@ -41,6 +41,12 @@ export interface ExportedPdf {
    * not forbidden); the caller must show the notice the export rules require.
    */
   readonly pendingClaimBlocks: readonly BlockId[]
+  /**
+   * Overflow reports from the layout pass. The PDF draws on fixed-size pages
+   * and clips what does not fit; the caller must surface that instead of
+   * letting a clipped file pass as complete.
+   */
+  readonly overflows: readonly OverflowReport[]
 }
 
 export async function exportPdf(
@@ -59,7 +65,11 @@ export async function exportPdf(
     page: representation.page,
     laidOut,
   })
-  return { bytes, pendingClaimBlocks: representation.pendingClaimBlocks }
+  return {
+    bytes,
+    pendingClaimBlocks: representation.pendingClaimBlocks,
+    overflows: laidOut.overflows,
+  }
 }
 
 interface ExportRepresentation {

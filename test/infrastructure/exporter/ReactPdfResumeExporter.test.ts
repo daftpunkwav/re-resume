@@ -102,7 +102,57 @@ describe('ReactPdfResumeExporter', () => {
     const input = exportInputOf(blocks)
 
     expect(input.laidOut.pages.length).toBeGreaterThanOrEqual(2)
-    expect(await pagesOf(await exporter.render(input))).toBe(input.laidOut.pages.length)
+    const bytes = await exporter.render(input)
+    expect(await pagesOf(bytes)).toBe(input.laidOut.pages.length)
+    // The count matching is not enough: every block must sit on the page the
+    // layout chose for it, or content would be misplaced behind a passing test.
+    const { text } = await extractText(new Uint8Array(bytes), { mergePages: false })
+    const pages = Array.isArray(text) ? text : [text]
+    expect(pages[0]).toContain('第1段')
+    expect(pages[pages.length - 1]).toContain('第60段')
+  })
+
+  it('does not re-break a line pushed against the right edge', async () => {
+    // An absolute block near the right margin leaves the renderer almost no
+    // space between the line's left edge and the page edge. Without the
+    // measured line width on the box, that remaining space is what the line
+    // would be broken against.
+    const blockWidth = 320
+    const block: MaterializedBlock = {
+      id: asBlockId('block-edge'),
+      content: {
+        type: 'text',
+        text: '一行贴着右缘的较长文字，排版已经在本块宽度之内折为了多行，' +
+          '这里再补足一段足够长的内容，确保度量器把它折成不止一行，' +
+          '从而可以核对渲染器没有在剩余空间里再次折行。',
+      },
+      layout: {
+        mode: 'absolute',
+        x: A4_PAGE_SETUP.pageWidth - A4_PAGE_SETUP.marginRight - blockWidth + 250,
+        y: 60,
+        width: blockWidth,
+        height: 200,
+        zIndex: 1,
+        rotation: 0,
+      },
+      textStyle: null,
+      claims: [],
+    }
+    const input = exportInputOf([block])
+    const laidOutLines = input.laidOut.blocks[0]?.lines.length ?? 0
+    expect(laidOutLines).toBeGreaterThan(1)
+
+    const document = await getDocumentProxy(new Uint8Array(await exporter.render(input)))
+    const page = await document.getPage(1)
+    const content = await page.getTextContent()
+    // One y per laid-out line: a renderer-side break would add a y the layout
+    // never produced.
+    const textItems = content.items.filter(
+      (item): item is Extract<(typeof content.items)[number], { str: string }> =>
+        'str' in item && item.str.trim() !== '',
+    )
+    const lineHeightDistinct = new Set(textItems.map((item) => Math.round(item.transform[5])))
+    expect(lineHeightDistinct.size).toBe(laidOutLines)
   })
 
   it('embeds a profile link as a PDF link annotation', async () => {
@@ -124,9 +174,15 @@ describe('ReactPdfResumeExporter', () => {
       ]),
     )
 
-    const raw = Buffer.from(bytes).toString('latin1')
-    expect(raw).toContain('/URI')
-    expect(raw).toContain('https://github.com/example')
+    // The annotation's target must be the URL itself, not merely some
+    // annotation next to a URL-shaped text.
+    const document = await getDocumentProxy(new Uint8Array(bytes))
+    const page = await document.getPage(1)
+    const annotations = await page.getAnnotations()
+    const linkUrls = annotations
+      .filter((annotation) => annotation.subtype === 'Link')
+      .map((annotation) => annotation.url)
+    expect(linkUrls).toContain('https://github.com/example')
     expect(await allText(bytes)).toContain('张三')
   })
 

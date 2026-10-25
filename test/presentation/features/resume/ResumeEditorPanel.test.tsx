@@ -164,6 +164,7 @@ describe('ResumeEditorPanel', () => {
       outcome: 'saved',
       path: 'C:/Users/demo/Documents/简历.pdf',
       pendingClaimBlocks: [],
+      overflows: [],
     })
     await renderEditor(harness)
 
@@ -187,6 +188,7 @@ describe('ResumeEditorPanel', () => {
       outcome: 'saved',
       path: 'C:/Users/demo/Documents/简历.pdf',
       pendingClaimBlocks: [asBlockId('block-1')],
+      overflows: [],
     })
     await renderEditor(harness)
 
@@ -214,6 +216,27 @@ describe('ResumeEditorPanel', () => {
     // dispatch clears the outcome before the run; a dismissal sets no new one.
     const outcomeCalls = harness.onOutcome.mock.calls.filter(([outcome]) => outcome !== null)
     expect(outcomeCalls).toHaveLength(0)
+  })
+
+  it('warns when the layout reported content the PDF will clip', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [],
+      overflows: [{ blockId: asBlockId('block-1'), reason: 'block-taller-than-page' }],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tone: 'warning',
+          title: expect.stringContaining('超出页面'),
+        }),
+      ),
+    )
   })
 
   it('commits a page setup change as one undoable revision', async () => {
