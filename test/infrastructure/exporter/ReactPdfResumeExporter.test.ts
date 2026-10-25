@@ -165,7 +165,12 @@ describe('ReactPdfResumeExporter', () => {
             displayName: '张三',
             email: null,
             phone: null,
-            links: [{ label: 'GitHub', url: 'https://github.com/example' }],
+            links: [
+              { label: 'GitHub', url: 'https://github.com/example' },
+              // Stays text: a non-web scheme must not become an annotation a
+              // recipient's viewer could launch a local handler from.
+              { label: '本地', url: 'file:///C:/notes.txt' },
+            ],
           },
           layout: { mode: 'flow', columnSpan: 1 },
           textStyle: null,
@@ -182,8 +187,10 @@ describe('ReactPdfResumeExporter', () => {
     const linkUrls = annotations
       .filter((annotation) => annotation.subtype === 'Link')
       .map((annotation) => annotation.url)
-    expect(linkUrls).toContain('https://github.com/example')
-    expect(await allText(bytes)).toContain('张三')
+    expect(linkUrls).toEqual(['https://github.com/example'])
+    const text = await allText(bytes)
+    expect(text).toContain('张三')
+    expect(text).toContain('file:///C:/notes.txt')
   })
 
   it('renders a divider and an empty document without failing', async () => {

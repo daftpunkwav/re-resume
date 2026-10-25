@@ -83,7 +83,7 @@ function BlockView(props: {
     )
   }
   const urls = source !== null && source.content.type === 'profile'
-    ? source.content.links.map((link) => link.url)
+    ? source.content.links.map((link) => link.url).filter(isWebUrl)
     : []
   const { fontSize, lineHeight } = laidOut.textStyle
   const step = fontSize * lineHeight
@@ -150,6 +150,15 @@ function runSegments(run: TextRun, urls: readonly string[], key: string): ReactE
     segments.push(...runSegments({ ...run, text: hit.after }, urls, `${key}-after`))
   }
   return segments
+}
+
+/**
+ * Only web URLs become link annotations. A file: or custom-scheme URL in the
+ * profile would export as a PDF link that invites a recipient's viewer to
+ * launch a local handler — the text stays, the clickable annotation does not.
+ */
+function isWebUrl(url: string): boolean {
+  return url.startsWith('https://') || url.startsWith('http://')
 }
 
 function firstUrlIn(
