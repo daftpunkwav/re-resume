@@ -268,11 +268,18 @@ export interface CompositionRootOptions {
  * import, one font registration pass per session, no cost at boot.
  */
 function lazyPdfExporter(fonts: FontRegistry): () => Promise<ResumePdfExporter> {
-  let resolved: ResumePdfExporter | null = null
-  return async () => {
-    resolved ??= new (await import('../infrastructure/exporter/react-pdf/ReactPdfResumeExporter'))
-      .ReactPdfResumeExporter(fonts)
-    return resolved
+  let inFlight: Promise<ResumePdfExporter> | null = null
+  return () => {
+    // The in-flight promise is cached, not the resolved value: concurrent
+    // callers share one import and one instance instead of racing to build
+    // their own, and a failed import clears the slot so the next call retries.
+    inFlight ??= import('../infrastructure/exporter/react-pdf/ReactPdfResumeExporter')
+      .then(({ ReactPdfResumeExporter }) => new ReactPdfResumeExporter(fonts))
+      .catch((failure: unknown) => {
+        inFlight = null
+        throw failure
+      })
+    return inFlight
   }
 }
 
