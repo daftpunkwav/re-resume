@@ -205,6 +205,12 @@ describe('ResumeEditorPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
     await waitFor(() => expect(harness.services.resumes.exportPdfToFile).toHaveBeenCalled())
+    // The call happening is not the run finishing: the no-notice assertion
+    // below must not race the microtasks the run still has to run. The mock's
+    // returned promise is the signal — awaiting it (plus one queue tick for
+    // the awaiting handler to resume) puts the assertion after the run.
+    await harness.services.resumes.exportPdfToFile.mock.results[0]?.value
+    await Promise.resolve()
     // dispatch clears the outcome before the run; a dismissal sets no new one.
     const outcomeCalls = harness.onOutcome.mock.calls.filter(([outcome]) => outcome !== null)
     expect(outcomeCalls).toHaveLength(0)

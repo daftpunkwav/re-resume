@@ -95,6 +95,13 @@ function BlockView(props: {
           wrap={false}
           style={{
             position: 'absolute',
+            // wrap={false} only stops page wrapping, not line breaking: an
+            // absolutely positioned element breaks against the space between
+            // its left edge and the page edge. A line near the right margin
+            // would have almost none left and get re-broken there. The box is
+            // the width the measurer decided the line fits in, so breaking is
+            // never triggered no matter where the line sits.
+            width: line.width,
             top: top + step * index,
             left: left + line.x,
             fontFamily: laidOut.textStyle.fontFamily,
