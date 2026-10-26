@@ -53,21 +53,19 @@
         // explicit call made by application code.
         "form-action": ["'none'"],
 
-        // WASM — RESERVED, NOT PRESENT TODAY.
+        // WASM, instantiated from bytes that ship inside the bundle.
         //
-        // A WebAssembly dependency needs `'wasm-unsafe-eval'` added to this
-        // directive. WebAssembly.instantiate and WebAssembly.instantiateStreaming
-        // are gated by the script policy, so a WASM module cannot load under
-        // `'self'` alone. The reason this is reserved rather than shipped: the
-        // PDF renderer registers a WASM layout engine (yoga-layout), and that
-        // is the dependency that needs it. Nothing in the bundle compiles
-        // WebAssembly yet, so the directive is absent.
+        // The PDF renderer's layout engine (yoga-layout) embeds its WebAssembly
+        // module as base64 and instantiates it through
+        // WebAssembly.instantiate/instantiateStreaming, which the script policy
+        // gates: a WASM module cannot load under `'self'` alone.
         //
-        // When the WASM dependency lands, add `'wasm-unsafe-eval'` to script-src
-        // in the same change. Not to default-src, and not `'unsafe-eval'`: the
-        // former is broader than needed, the latter permits string-to-code
-        // compilation that nothing requires.
-        "script-src": ["'self'"],
+        // `'wasm-unsafe-eval'` is the narrow keyword for exactly that: it
+        // permits WebAssembly compilation and nothing else. Not added to
+        // default-src, and not `'unsafe-eval'`: the former is broader than
+        // needed, the latter permits string-to-code compilation that nothing
+        // requires.
+        "script-src": ["'self'", "'wasm-unsafe-eval'"],
 
         // No unsafe-eval and no unsafe-inline here: script execution is confined
         // to the bundle, and inline handlers do not execute.
@@ -107,8 +105,10 @@
         "form-action": ["'none'"],
         // Vite's React Fast Refresh preamble is an inline module script. This
         // relaxation is development-only and does not apply to the production
-        // policy above.
-        "script-src": ["'self'", "'unsafe-inline'"],
+        // policy above. The WASM keyword matches the production policy: the
+        // PDF renderer's layout engine instantiates its embedded module in
+        // development too.
+        "script-src": ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"],
         "style-src": ["'self'", "'unsafe-inline'", "http://localhost:1420"],
         "img-src": ["'self'", "data:", "blob:", "http://localhost:1420"],
         "font-src": ["'self'", "data:", "http://localhost:1420"],

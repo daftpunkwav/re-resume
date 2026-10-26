@@ -27,6 +27,7 @@ const DOMAIN_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   claimPending: '存在待确认的断言，定稿前请先确认或拒绝它们。',
   referencedByBlocks: '仍被简历引用，请先在这些简历中解除引用。',
   invalidClaimTransition: '这条断言当前的状态不允许这个操作。',
+  resumeNotFound: '找不到这份简历，它可能已被删除。',
 }
 
 export interface ReadableError {

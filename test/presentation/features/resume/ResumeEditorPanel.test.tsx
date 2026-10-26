@@ -158,6 +158,87 @@ describe('ResumeEditorPanel', () => {
     await waitFor(() => expect(harness.services.resumes.redo).toHaveBeenCalledWith(DRAFT_ID))
   })
 
+  it('exports a PDF through the workbench and reports where the file landed', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [],
+      overflows: [],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.services.resumes.exportPdfToFile).toHaveBeenCalledWith(DRAFT_ID),
+    )
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tone: 'success',
+          title: expect.stringContaining('简历.pdf'),
+        }),
+      ),
+    )
+  })
+
+  it('warns when the exported PDF still cites pending claims', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [asBlockId('block-1')],
+      overflows: [],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({ tone: 'warning' }),
+      ),
+    )
+  })
+
+  it('reports nothing when the save dialog is dismissed', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({ outcome: 'cancelled' })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() => expect(harness.services.resumes.exportPdfToFile).toHaveBeenCalled())
+    // The call happening is not the run finishing: the no-notice assertion
+    // below must not race the microtasks the run still has to run. The mock's
+    // returned promise is the signal — awaiting it (plus one queue tick for
+    // the awaiting handler to resume) puts the assertion after the run.
+    await harness.services.resumes.exportPdfToFile.mock.results[0]?.value
+    await Promise.resolve()
+    // dispatch clears the outcome before the run; a dismissal sets no new one.
+    const outcomeCalls = harness.onOutcome.mock.calls.filter(([outcome]) => outcome !== null)
+    expect(outcomeCalls).toHaveLength(0)
+  })
+
+  it('warns when the layout reported content the PDF will clip', async () => {
+    const harness = stubWorkbench(makeResume())
+    harness.services.resumes.exportPdfToFile.mockResolvedValue({
+      outcome: 'saved',
+      path: 'C:/Users/demo/Documents/简历.pdf',
+      pendingClaimBlocks: [],
+      overflows: [{ blockId: asBlockId('block-1'), reason: 'block-taller-than-page' }],
+    })
+    await renderEditor(harness)
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 PDF' }))
+    await waitFor(() =>
+      expect(harness.onOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tone: 'warning',
+          title: expect.stringContaining('超出页面'),
+        }),
+      ),
+    )
+  })
+
   it('commits a page setup change as one undoable revision', async () => {
     const harness = stubWorkbench(makeResume())
     await renderEditor(harness)

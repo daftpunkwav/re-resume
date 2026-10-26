@@ -37,9 +37,12 @@ import type { Resume } from '../domain/resume/Resume'
 import type { Revision } from '../domain/resume/Revision'
 import type { DocumentChange } from '../domain/resume/DocumentChange'
 import type { PageSetup } from '../domain/resume/PageSetup'
-import type { LayoutInput, LayoutOutput } from '../domain/resume/PageLayout'
+import type { LayoutInput, LayoutOutput, OverflowReport } from '../domain/resume/PageLayout'
 import type { MaterializedBlock, ResumeSnapshot } from '../domain/resume/ResumeSnapshot'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
+import type { ResumePdfExporter } from '../domain/resume/ports/ResumePdfExporter'
+import type { PdfFileSaver } from '../domain/resume/ports/PdfFileSaver'
+import type { BlockId } from '../domain/shared/branded-id'
 import type { AgentRun } from '../domain/generation/AgentRun'
 import type { ModelChunk, ModelProvider, ToolSchema } from '../domain/generation/ports/ModelProvider'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
@@ -57,8 +60,10 @@ import { SqliteJobPostingRepository } from '../infrastructure/persistence/Sqlite
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
+import type { FontRegistry } from '../infrastructure/measurement/FontRegistry'
 import { registerCanvasFonts } from '../infrastructure/measurement/CanvasFontRegistration'
 import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
+import { TauriPdfFileSaver } from '../infrastructure/filesystem/TauriPdfFileSaver'
 import { createTauriHttpClient } from '../infrastructure/http/TauriHttpClient'
 import { AnthropicProvider } from '../infrastructure/http/ProviderAdapters/AnthropicProvider'
 import { OpenAiCompatibleProvider } from '../infrastructure/http/ProviderAdapters/OpenAiCompatibleProvider'
@@ -94,6 +99,7 @@ import type { VersionDiff, VersionSelector } from '../application/resume/Compare
 import { detectStaleReferences } from '../application/resume/DetectStaleReferences'
 import type { StaleReference } from '../application/resume/DetectStaleReferences'
 import { materializeBlocks } from '../application/resume/materializeBlocks'
+import { exportPdf } from '../application/export/ExportPdf'
 import { layout } from '../application/layout/layout'
 import { runAgentTask } from '../application/generation/RunAgentTask'
 import { buildToolRegistry } from '../application/generation/buildToolRegistry'
@@ -138,6 +144,18 @@ export interface ProfileSettings {
   update(command: UpdateProfileCommand): Promise<Result<Profile, unknown>>
 }
 
+/** What one export request came to: written somewhere, or walked away from. */
+export type PdfFileSaveOutcome =
+  | {
+      readonly outcome: 'saved'
+      readonly path: string
+      /** Blocks citing pending claims; the caller must surface the notice. */
+      readonly pendingClaimBlocks: readonly BlockId[]
+      /** Layout overflows; the PDF clips them, so the caller must say so. */
+      readonly overflows: readonly OverflowReport[]
+    }
+  | { readonly outcome: 'cancelled' }
+
 export interface ResumeWorkbench {
   list(): Promise<readonly Resume[]>
   get(id: ResumeId): Promise<Resume | null>
@@ -153,6 +171,12 @@ export interface ResumeWorkbench {
   materialize(resumeId: ResumeId): Promise<readonly MaterializedBlock[]>
   /** Pure: pagination and overflow for an already-materialized document. */
   layOut(blocks: readonly MaterializedBlock[], page: PageSetup): LayoutOutput
+  /**
+   * Renders to PDF and hands the bytes to the save dialog: frozen resumes
+   * export their newest snapshot, drafts their current blocks gated on claim
+   * status. A dismissed dialog is a cancellation, not a failure.
+   */
+  exportPdfToFile(resumeId: ResumeId): Promise<PdfFileSaveOutcome>
   /** Derived on demand; never persisted. */
   staleReferences(
     experienceId: ExperienceId,
@@ -239,12 +263,39 @@ export interface CompositionRootOptions {
   readonly provider: ProviderDescriptor | null
 }
 
+/**
+ * Resolves the PDF exporter on first use and keeps the instance: one dynamic
+ * import, one font registration pass per session, no cost at boot.
+ */
+function lazyPdfExporter(fonts: FontRegistry): () => Promise<ResumePdfExporter> {
+  let inFlight: Promise<ResumePdfExporter> | null = null
+  return () => {
+    // The in-flight promise is cached, not the resolved value: concurrent
+    // callers share one import and one instance instead of racing to build
+    // their own, and a failed import clears the slot so the next call retries.
+    inFlight ??= import('../infrastructure/exporter/react-pdf/ReactPdfResumeExporter')
+      .then(({ ReactPdfResumeExporter }) => new ReactPdfResumeExporter(fonts))
+      .catch((failure: unknown) => {
+        inFlight = null
+        throw failure
+      })
+    return inFlight
+  }
+}
+
 /** Everything the service factories below share, resolved once per root. */
 interface Wiring {
   readonly clock: Clock
   readonly ids: IdGenerator
   readonly database: SqlDatabase
   readonly measurer: TextMeasurer
+  /**
+   * The PDF renderer is loaded on the first export, not at boot: it drags the
+   * renderer, its WASM layout engine and pdfkit into the bundle, and export
+   * is a rare action that must not cost every startup a megabyte of parsing.
+   */
+  readonly loadPdfExporter: () => Promise<ResumePdfExporter>
+  readonly pdfSaver: PdfFileSaver
   readonly experienceRepo: ExperienceRepository
   readonly profileRepo: ProfileRepository
   /** The port plus the creation capability CreateResume and DuplicateResume declare. */
@@ -314,6 +365,8 @@ export async function createCompositionRoot(
     ids,
     database,
     measurer: createFontkitTextMeasurer(fontRegistry),
+    loadPdfExporter: lazyPdfExporter(fontRegistry),
+    pdfSaver: new TauriPdfFileSaver(),
     experienceRepo: new SqliteExperienceRepository(database),
     profileRepo: new SqliteProfileRepository(database),
     resumeRepo: new SqliteResumeRepository(database, clock, ids),
@@ -416,6 +469,26 @@ function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
       return materializeBlocks(wiring.experienceRepo, resumeId, resume.blocks)
     },
     layOut: (blocks, page) => layout({ blocks, page, measurer }),
+    exportPdfToFile: async (resumeId) => {
+      const exported = await exportPdf(
+        wiring.resumeRepo,
+        wiring.experienceRepo,
+        (blocks, page) => layout({ blocks, page, measurer }),
+        await wiring.loadPdfExporter(),
+        resumeId,
+      )
+      const resume = await wiring.resumeRepo.findById(resumeId)
+      const suggestedName = `${resume?.title ?? 'resume'}.pdf`
+      const path = await wiring.pdfSaver.save(exported.bytes, suggestedName)
+      return path === null
+        ? { outcome: 'cancelled' }
+        : {
+            outcome: 'saved',
+            path,
+            pendingClaimBlocks: exported.pendingClaimBlocks,
+            overflows: exported.overflows,
+          }
+    },
     staleReferences: async (experienceId, knownFactVersion) => {
       const [resumes, experience] = await Promise.all([
         wiring.resumeRepo.listAll(),
