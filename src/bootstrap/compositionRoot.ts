@@ -367,7 +367,7 @@ export async function createCompositionRoot(
     database,
     measurer: createFontkitTextMeasurer(fontRegistry),
     loadPdfExporter: lazyPdfExporter(fontRegistry),
-    pdfSaver: new TauriPdfFileSaver(),
+    pdfSaver: new TauriPdfFileSaver(ids),
     experienceRepo: new SqliteExperienceRepository(database),
     profileRepo: new SqliteProfileRepository(database),
     resumeRepo: new SqliteResumeRepository(database, clock, ids),

@@ -83,6 +83,28 @@
       "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
     },
 
+    // The exporter writes into a temporary file beside the destination and
+    // renames it over the destination, so the replacement is atomic: a write
+    // that fails halfway leaves the previous document intact. The rename
+    // checks both paths against this scope, and the temporary file is in the
+    // destination's own directory.
+    {
+      "identifier": "fs:allow-rename",
+      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
+    },
+
+    // Removing the temporary file an export left behind, and asking whether
+    // it is there at all: a write that never reached the disk leaves no file
+    // behind, and removing a file that was never created is itself an error.
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
+    },
+
     // --- Stronghold -----------------------------------------------------
     // Credential storage, per StrongholdSecretStore in infrastructure/security.
     // Taken as individual commands rather than `stronghold:default` so the Vault
