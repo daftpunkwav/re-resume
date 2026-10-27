@@ -12,6 +12,14 @@ publish = false
 name = "re_resume_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# The binary is the desktop entry point and has no tests of its own. Its test
+# harness links the GUI runtime, which cannot load without the application
+# manifest that the build embeds into binary targets only, so it is not built.
+[[bin]]
+name = "re-resume"
+path = "src/main.rs"
+test = false
+
 [build-dependencies]
 # `config-json5` is what lets the capability file carry comments: Tauri parses
 # capability files with json5 only when this feature is on.

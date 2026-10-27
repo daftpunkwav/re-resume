@@ -68,7 +68,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             connection::pin_sqlite_connection,
-            export::allow_export_directory
+            export::publish_export
         ])
         .setup(|app| {
             // Stronghold needs a salt file to derive the snapshot key from, and

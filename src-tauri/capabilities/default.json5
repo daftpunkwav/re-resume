@@ -64,7 +64,10 @@
 
     // --- File dialogs ---------------------------------------------------
     // Choosing where an exported PDF or DOCX is written. Export is the only
-    // user-initiated file write in the application.
+    // user-initiated file write in the application. The dialog records the
+    // chosen path in the file system plugin's runtime scope; that grant is what
+    // `export::publish_export` (src-tauri/src/export.rs) checks the destination
+    // against. The grant is not a write permission of its own.
     "dialog:allow-save",
 
     // Selecting an existing file to bring into the experience library. `allow-message`
@@ -73,45 +76,17 @@
     "dialog:allow-open",
 
     // --- File system ----------------------------------------------------
-    // Writing the bytes the exporter produces to the path the save dialog
-    // returned. The scope is the two standard user destinations a document is
-    // saved into; nothing else on disk is writable from the webview.
+    // No file system command is granted to the webview. The export is written
+    // by `export::publish_export` (in src-tauri/src/export.rs), an application
+    // command: it checks the destination against the grant the save dialog
+    // made, then writes the bytes and the temporary file the publication goes
+    // through on the native side, outside the plugin's scope. Granting the fs
+    // commands instead would widen the webview's reach to every file the
+    // dialog's grant or a capability scope covers, and no frontend feature
+    // needs that.
     //
-    // `fs:default` is not taken, so no directory outside this scope is reachable.
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
-    },
-
-    // The exporter writes into a temporary file beside the destination and
-    // renames it over the destination, so the replacement is atomic: a write
-    // that fails halfway leaves the previous document intact. The rename
-    // checks both paths against this scope, and the temporary file is in the
-    // destination's own directory.
-    {
-      "identifier": "fs:allow-rename",
-      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
-    },
-
-    // Removing the temporary file an export left behind, and asking whether
-    // it is there at all: a write that never reached the disk leaves no file
-    // behind, and removing a file that was never created is itself an error.
-    {
-      "identifier": "fs:allow-exists",
-      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
-    },
-    {
-      "identifier": "fs:allow-remove",
-      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
-    },
-
-    // The directory an export is written into is granted by the native shell
-    // rather than by a permission: `export::allow_export_directory` (in
-    // src-tauri/src/export.rs) extends the plugin's runtime scope with the
-    // directory of a destination the save dialog already granted, so the
-    // temporary file the export writes through is reachable. It is an
-    // application command, so it carries no entry here; it reads no user data
-    // and opens no file of its own.
+    // The plugin itself stays registered: it holds the runtime scope the save
+    // dialog grants into, which is what the publication checks against.
 
     // --- Stronghold -----------------------------------------------------
     // Credential storage, per StrongholdSecretStore in infrastructure/security.
