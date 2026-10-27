@@ -99,6 +99,7 @@ import type { VersionDiff, VersionSelector } from '../application/resume/Compare
 import { detectStaleReferences } from '../application/resume/DetectStaleReferences'
 import type { StaleReference } from '../application/resume/DetectStaleReferences'
 import { materializeBlocks } from '../application/resume/materializeBlocks'
+import { loadResumeExperiences } from '../application/resume/loadResumeExperiences'
 import { exportPdf } from '../application/export/ExportPdf'
 import { layout } from '../application/layout/layout'
 import { runAgentTask } from '../application/generation/RunAgentTask'
@@ -466,7 +467,8 @@ function buildResumeWorkbench(wiring: Wiring): ResumeWorkbench {
       if (resume === null) {
         throw new Error(`Cannot materialize resume "${resumeId}": no such resume.`)
       }
-      return materializeBlocks(wiring.experienceRepo, resumeId, resume.blocks)
+      const experiences = await loadResumeExperiences(wiring.experienceRepo, resume.id, resume.blocks)
+      return materializeBlocks(experiences, resume.blocks)
     },
     layOut: (blocks, page) => layout({ blocks, page, measurer }),
     exportPdfToFile: async (resumeId) => {

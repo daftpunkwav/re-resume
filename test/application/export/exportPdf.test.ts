@@ -21,6 +21,7 @@ import type { Block } from '../../../src/domain/resume/Block'
 import { describeChange } from '../../../src/domain/resume/DocumentChange'
 import { addClaim, addVariant, createExperience } from '../../../src/domain/catalog/Experience'
 import type { Experience } from '../../../src/domain/catalog/Experience'
+import type { ExperienceRepository } from '../../../src/domain/catalog/ports/ExperienceRepository'
 import type { ClaimStatus } from '../../../src/domain/catalog/ClaimStatus'
 import { parseDateTime } from '../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
@@ -34,6 +35,7 @@ import {
 } from '../../../src/domain/shared/branded-id'
 import type { ClaimId } from '../../../src/domain/shared/branded-id'
 import type { PdfExportInput, ResumePdfExporter } from '../../../src/domain/resume/ports/ResumePdfExporter'
+import { DriftingExperienceRepository } from '../../support/driftingExperienceRepository'
 import { FixedClock, SequentialIdGenerator } from '../../support/fakeEnvironment'
 import { InMemoryExperienceRepository } from '../../support/inMemoryCatalogRepositories'
 import { InMemoryResumeRepository, initialRevision } from '../../support/inMemoryResumeRepository'
@@ -124,7 +126,7 @@ function experienceBlock(id: string, claimIds: readonly ClaimId[]): Block {
 }
 
 async function seededDraftRepo(
-  experienceRepo: InMemoryExperienceRepository,
+  experienceRepo: ExperienceRepository,
   blocks: readonly Block[],
 ): Promise<InMemoryResumeRepository> {
   const repo = new InMemoryResumeRepository(() => NOW)
@@ -214,6 +216,27 @@ describe('exportPdf', () => {
 
     expect(exported.bytes).toBe(BYTES)
     expect(exported.pendingClaimBlocks).toEqual([asBlockId('block-1')])
+  })
+
+  it('reads the cited experiences once, so a claim rejected afterwards is not dropped', async () => {
+    const experienceRepo = new DriftingExperienceRepository(
+      experienceWithClaim('confirmed'),
+      experienceWithClaim('rejected'),
+    )
+    const repo = await seededDraftRepo(experienceRepo, [
+      experienceBlock('block-1', [CITED_CLAIM_ID]),
+    ])
+    // From here on the library changes under the export, as a rejection from
+    // another run would.
+    experienceRepo.armed = true
+    const exporter = new RecordingExporter()
+
+    const exported = await exportPdf(repo, experienceRepo, layoutEcho, exporter, RESUME_ID)
+
+    // The statement the gate saw is the statement the export carries.
+    expect(exported.pendingClaimBlocks).toEqual([])
+    expect(exporter.lastInput?.blocks[0]?.claims).toHaveLength(1)
+    expect(experienceRepo.reads).toBe(1)
   })
 
   it('exports a frozen resume from its snapshot, ignoring later library edits', async () => {

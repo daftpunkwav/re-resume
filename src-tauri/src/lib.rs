@@ -13,6 +13,7 @@
 //!   what is registered here. Registering a plugin grants nothing on its own.
 
 mod connection;
+mod export;
 
 use tauri::Manager;
 use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
@@ -65,7 +66,10 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![connection::pin_sqlite_connection])
+        .invoke_handler(tauri::generate_handler![
+            connection::pin_sqlite_connection,
+            export::publish_export
+        ])
         .setup(|app| {
             // Stronghold needs a salt file to derive the snapshot key from, and
             // it writes that file on first use. Its parent is the app's local

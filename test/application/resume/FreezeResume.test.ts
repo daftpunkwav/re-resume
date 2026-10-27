@@ -9,6 +9,7 @@ import type { Block } from '../../../src/domain/resume/Block'
 import { describeChange } from '../../../src/domain/resume/DocumentChange'
 import { addClaim, addVariant, createExperience } from '../../../src/domain/catalog/Experience'
 import type { Experience } from '../../../src/domain/catalog/Experience'
+import type { ClaimStatus } from '../../../src/domain/catalog/ClaimStatus'
 import { parseDateTime } from '../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
 import {
@@ -20,6 +21,7 @@ import {
   asVariantId,
 } from '../../../src/domain/shared/branded-id'
 import type { ClaimId } from '../../../src/domain/shared/branded-id'
+import { DriftingExperienceRepository } from '../../support/driftingExperienceRepository'
 import { FixedClock, SequentialIdGenerator } from '../../support/fakeEnvironment'
 import { InMemoryExperienceRepository } from '../../support/inMemoryCatalogRepositories'
 import { InMemoryResumeRepository, initialRevision } from '../../support/inMemoryResumeRepository'
@@ -31,7 +33,7 @@ const EXPERIENCE_ID = asExperienceId('experience-1')
 const VARIANT_ID = asVariantId('variant-1')
 const CONFIRMED_CLAIM_ID = asClaimId('claim-confirmed')
 
-function experience(claimStatus: 'confirmed' | 'pending'): Experience {
+function experience(claimStatus: ClaimStatus): Experience {
   const withVariant = addVariant(
     createExperience(
       { id: EXPERIENCE_ID, kind: 'work', title: '后端工程师', organization: '某公司' },
@@ -148,6 +150,38 @@ describe('freezeResume', () => {
       asBlockId('block-0'),
       asBlockId('block-1'),
     ])
+  })
+
+  it('reads the cited experiences once, so a claim rejected afterwards is not dropped', async () => {
+    const repo = await seededResume()
+    const experienceRepo = new DriftingExperienceRepository(
+      experience('confirmed'),
+      experience('rejected'),
+    )
+    await commitDocumentChange(
+      repo,
+      experienceRepo,
+      RESUME_ID,
+      describeChange({ label: '添加经历', origin: 'user', runId: null }, (state) => ({
+        ...state,
+        blocks: [experienceBlock([CONFIRMED_CLAIM_ID])],
+      })),
+    )
+    // From here on the library changes under the freeze, as a rejection from
+    // another run would.
+    experienceRepo.armed = true
+
+    const snapshot = await freezeResume(
+      repo,
+      experienceRepo,
+      new SequentialIdGenerator('snapshot'),
+      new FixedClock(),
+      RESUME_ID,
+    )
+
+    // The statement the gate saw is the statement the snapshot carries.
+    expect(snapshot.materializedBlocks[0]?.claims).toHaveLength(1)
+    expect(experienceRepo.reads).toBe(1)
   })
 
   it('refuses a block that still cites an unconfirmed claim', async () => {

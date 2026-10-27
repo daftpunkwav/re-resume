@@ -64,7 +64,10 @@
 
     // --- File dialogs ---------------------------------------------------
     // Choosing where an exported PDF or DOCX is written. Export is the only
-    // user-initiated file write in the application.
+    // user-initiated file write in the application. Both dialogs record the
+    // paths the user picks in the file system plugin's runtime scope; that
+    // record is what `export::publish_export` (src-tauri/src/export.rs) checks
+    // a destination against. The record is not a write permission of its own.
     "dialog:allow-save",
 
     // Selecting an existing file to bring into the experience library. `allow-message`
@@ -73,15 +76,16 @@
     "dialog:allow-open",
 
     // --- File system ----------------------------------------------------
-    // Writing the bytes the exporter produces to the path the save dialog
-    // returned. The scope is the two standard user destinations a document is
-    // saved into; nothing else on disk is writable from the webview.
+    // No file system command is granted to the webview. The export is written
+    // by `export::publish_export` (in src-tauri/src/export.rs), an application
+    // command: it checks the destination against the grant a dialog made, then
+    // writes the bytes and the temporary file the publication goes through on
+    // the native side, outside the plugin's scope. Granting the fs commands
+    // instead would widen the webview's reach to every file a dialog grant or a
+    // capability scope covers, and no frontend feature needs that.
     //
-    // `fs:default` is not taken, so no directory outside this scope is reachable.
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
-    },
+    // The plugin itself stays registered: it holds the runtime scope the dialogs
+    // grant into, which is what the publication checks against.
 
     // --- Stronghold -----------------------------------------------------
     // Credential storage, per StrongholdSecretStore in infrastructure/security.
