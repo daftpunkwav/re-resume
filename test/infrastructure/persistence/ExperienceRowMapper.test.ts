@@ -6,7 +6,7 @@ import {
   toVariantRows,
 } from '../../../src/infrastructure/persistence/mappers/ExperienceRowMapper'
 import type { ClaimRow, ExperienceRow } from '../../../src/infrastructure/persistence/mappers/ExperienceRowMapper'
-import { RowMappingError } from '../../../src/infrastructure/persistence/mappers/JsonEnvelope'
+import { RowMappingError } from '../../../src/infrastructure/persistence/JsonEnvelope'
 import { addClaim, addVariant, createExperience } from '../../../src/domain/catalog/Experience'
 import type { Experience } from '../../../src/domain/catalog/Experience'
 import { parseDateTime, parseIsoDate } from '../../../src/domain/shared/DateTime'

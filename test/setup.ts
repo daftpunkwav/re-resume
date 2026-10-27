@@ -57,3 +57,23 @@ function resizeEntry(target: Element, width: number, height: number): ResizeObse
 }
 
 globalThis.ResizeObserver = TestResizeObserver
+
+/**
+ * jsdom has no media query engine, and the interface asks it two questions:
+ * whether the operating system prefers a dark palette, and whether motion
+ * should be reduced. The default answer is "no" to both; a test that needs the
+ * other answer replaces this double for its own case.
+ */
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList
+}

@@ -5,8 +5,8 @@
  * snapshots.
  *
  * Constraints:
- * - saveDocument performs four steps — supersede the abandoned branch, append
- *   the new revision, move the cursor, trim — inside one transaction. Partial
+ * - saveDocument performs four steps 鈥?supersede the abandoned branch, append
+ *   the new revision, move the cursor, trim 鈥?inside one transaction. Partial
  *   application is a contract violation: a revision without a cursor move is an
  *   invisible edit, and a cursor moved without a trim is unbounded growth.
  * - seq is max(seq) + 1 over the whole history including superseded rows, so a
@@ -28,7 +28,7 @@ import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepositor
 import type { Clock } from '../../domain/shared/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeId, RevisionId, SnapshotId } from '../../domain/shared/branded-id'
-import { RowMappingError } from './mappers/JsonEnvelope'
+import { RowMappingError } from './JsonEnvelope'
 import {
   fromDocumentRevisionRow,
   fromResumeSnapshotRow,
@@ -229,7 +229,7 @@ export class SqliteResumeRepository implements ResumeRepository {
 
   /**
    * Freezing is two writes: the snapshot that justifies the status, and the
-   * status itself. Invariant 3 holds because both land together — a frozen
+   * status itself. Invariant 3 holds because both land together 鈥?a frozen
    * resume without its snapshot is unreachable, not merely unlikely.
    *
    * Both conditions the freeze was prepared against are re-read here rather
@@ -341,7 +341,7 @@ export class SqliteResumeRepository implements ResumeRepository {
    * Keeps the newest limit live revisions. The delete bound is the older of the
    * window start and the cursor, so a cursor that somehow sits behind the window
    * stretches the window back to reach it: the cursor and everything reachable
-   * from it by redo are never trimmed. Superseded rows are never deleted — an
+   * from it by redo are never trimmed. Superseded rows are never deleted 鈥?an
    * abandoned branch is kept for audit.
    */
   async #trimHistory(

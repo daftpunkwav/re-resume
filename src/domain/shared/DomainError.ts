@@ -13,18 +13,81 @@
  * - Codes are part of the application contract; renaming one is a breaking change.
  */
 
+/**
+ * The closed v2 code set. Codes are grouped the way the technical contract
+ * states them: field validation, library, resume, revision chain, conversation,
+ * attachments, change log, settings and model access.
+ */
 export const DOMAIN_ERROR_CODES = [
+  // Field validation.
+  'blankRequiredField',
+  'fieldTooLong',
+  'unknownField',
+  'invalidFieldValue',
+  'endBeforeStart',
+  'moduleKindMismatch',
+  // Information library.
+  'entryNotFound',
+  'entryReferenced',
+  'customModuleNotFound',
+  'customModuleLimit',
+  'customFieldLimit',
+  'duplicateFieldKey',
+  'fieldRemovalBlocked',
+  // Resume document.
+  'resumeNotFound',
+  'resumeFrozen',
+  'emptyResume',
+  'sectionNotFound',
+  'duplicateSection',
+  'sectionLimitExceeded',
+  'overrideNotFound',
+  'overrideLimit',
+  'templateNotFound',
+  'invalidPageSetup',
+  'canvasBlockNotFound',
+  'canvasBlockOutOfBounds',
+  'missingReference',
+  'frozenWithoutSnapshot',
+  // Revision chain.
+  'cursorNotOnLiveChain',
+  'revisionMismatch',
+  // Conversation and messages.
+  'conversationNotFound',
+  'messageNotFound',
+  'messageNotRetryable',
+  // Attachments.
+  'attachmentNotFound',
+  'attachmentTooLarge',
+  'unsupportedImageType',
+  // Change log.
+  'changeNotFound',
+  'changeAlreadyUndone',
+  'changeOutOfOrder',
+  // Settings and model access.
+  'invalidSettings',
+  'providerNotFound',
+  'providerNotConfigured',
+  'modelCallFailed',
+] as const
+
+export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
+
+/**
+ * Codes thrown by the v1 modules that are being replaced. They stay declared
+ * until those modules are deleted so that the retained code keeps compiling;
+ * no current module throws them.
+ *
+ * @deprecated Use a code from `DOMAIN_ERROR_CODES`.
+ */
+export const LEGACY_DOMAIN_ERROR_CODES = [
   'emptyTitle',
   'currentWithEndDate',
-  'endBeforeStart',
   'duplicateVariantLabel',
   'duplicateClaimStatement',
   'duplicateBlockId',
   'multipleProfileBlocks',
-  'emptyResume',
-  'frozenWithoutSnapshot',
   'frozenResumeImmutable',
-  'cursorNotOnLiveChain',
   'variantNotInExperience',
   'variantUnconfirmed',
   'claimRejected',
@@ -32,23 +95,26 @@ export const DOMAIN_ERROR_CODES = [
   'claimPending',
   'referencedByBlocks',
   'invalidClaimTransition',
-  'resumeNotFound',
 ] as const
 
-export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
+export type LegacyDomainErrorCode = (typeof LEGACY_DOMAIN_ERROR_CODES)[number]
 
 export interface DomainErrorDetail {
   readonly entity: string
   readonly id: string
-  /** Referencing resumes and blocks; populated by reference checks. */
+  /** Identifiers that blocked the operation, for example the referencing resumes. */
   readonly blockers: readonly string[]
 }
 
 export class DomainError extends Error {
-  readonly code: DomainErrorCode
+  readonly code: DomainErrorCode | LegacyDomainErrorCode
   readonly detail: DomainErrorDetail | null
 
-  constructor(code: DomainErrorCode, message: string, detail: DomainErrorDetail | null = null) {
+  constructor(
+    code: DomainErrorCode | LegacyDomainErrorCode,
+    message: string,
+    detail: DomainErrorDetail | null = null,
+  ) {
     super(message)
     this.name = 'DomainError'
     this.code = code

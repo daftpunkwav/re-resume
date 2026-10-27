@@ -1,8 +1,8 @@
 /**
  * @file AgentRunRowMapper
- * @description Row ↔ domain mapping for the agent-run audit chain: the run
+ * @description Row 鈫?domain mapping for the agent-run audit chain: the run
  * itself and the tool invocations it executed. Both live here because
- * `tool_invocation.run_id` owns the rows for provenance — a tool call without
+ * `tool_invocation.run_id` owns the rows for provenance 鈥?a tool call without
  * a run is exactly the untraceable record the schema is built to prevent.
  *
  * Constraints:
@@ -10,7 +10,7 @@
  *   verbatim as the envelope payload. The domain keeps them as opaque text
  *   because a tool's arguments are not a document model: re-serializing them
  *   through the mapper would rewrite bytes the user may read in an audit view.
- *   The envelope still applies — the column stores `{"v":1,"data":"…"}` and a
+ *   The envelope still applies 鈥?the column stores `{"v":1,"data":"鈥?}` and a
  *   bare `{}` is not a valid stored value.
  */
 
@@ -22,7 +22,7 @@ import type { DateTime } from '../../../domain/shared/DateTime'
 import { asAgentRunId, asJobPostingId, asResumeId, asToolInvocationId } from '../../../domain/shared/branded-id'
 import type { AgentRun } from '../../../domain/generation/AgentRun'
 import type { ToolInvocation } from '../../../domain/generation/ToolInvocation'
-import { RowMappingError, readJsonStringEnvelope, writeJsonEnvelope } from './JsonEnvelope'
+import { RowMappingError, readJsonStringEnvelope, writeJsonEnvelope } from '../JsonEnvelope'
 
 export interface AgentRunRow {
   readonly id: string

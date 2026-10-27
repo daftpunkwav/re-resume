@@ -1,6 +1,6 @@
 /**
  * @file ExperienceRowMapper
- * @description Row ↔ aggregate mapping for the experience aggregate: the fact
+ * @description Row 鈫?aggregate mapping for the experience aggregate: the fact
  * row plus the variant and claim rows it owns. This is the only place a stored
  * string becomes a branded identifier, a calendar brand or a validated enum, so
  * a malformed row is refused here instead of surfacing as a wrong resume block
@@ -28,7 +28,7 @@ import {
 import type { Experience } from '../../../domain/catalog/Experience'
 import type { Variant } from '../../../domain/catalog/Variant'
 import type { Claim } from '../../../domain/catalog/Claim'
-import { RowMappingError, readJsonRecordEnvelope, writeJsonEnvelope } from './JsonEnvelope'
+import { RowMappingError, readJsonRecordEnvelope, writeJsonEnvelope } from '../JsonEnvelope'
 
 export interface ExperienceRow {
   readonly id: string

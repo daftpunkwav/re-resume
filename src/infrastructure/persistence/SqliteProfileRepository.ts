@@ -17,7 +17,7 @@ import { parseDateTime } from '../../domain/shared/DateTime'
 import { asProfileId } from '../../domain/shared/branded-id'
 import type { Profile } from '../../domain/catalog/Profile'
 import type { ProfileRepository } from '../../domain/catalog/ports/ProfileRepository'
-import { RowMappingError } from './mappers/JsonEnvelope'
+import { RowMappingError } from './JsonEnvelope'
 import { parseProfileLinksEnvelope, serializeProfileLinks } from './mappers/ResumeRowMapper'
 import type { SqlDatabase } from './sqlite'
 

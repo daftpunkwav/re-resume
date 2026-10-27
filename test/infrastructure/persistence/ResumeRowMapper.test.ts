@@ -12,7 +12,7 @@ import type {
   ResumeRow,
   ResumeSnapshotRow,
 } from '../../../src/infrastructure/persistence/mappers/ResumeRowMapper'
-import { RowMappingError } from '../../../src/infrastructure/persistence/mappers/JsonEnvelope'
+import { RowMappingError } from '../../../src/infrastructure/persistence/JsonEnvelope'
 import type { Block } from '../../../src/domain/resume/Block'
 import type { Revision } from '../../../src/domain/resume/Revision'
 import type { ResumeSnapshot } from '../../../src/domain/resume/ResumeSnapshot'
