@@ -11,8 +11,9 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { Dialog } from '../../src/presentation/app/components/Dialog'
-import { applyAppearance } from '../../src/presentation/app/theme/useAppearance'
-import type { ColorScheme, ThemeId } from '../../src/presentation/app/theme/themes'
+import { applyAppearance } from '../../src/presentation/app/theme/applyAppearance'
+import { DEFAULT_APP_SETTINGS } from '../../src/domain/settings/AppSettings'
+import type { ColorScheme, ThemeId } from '../../src/domain/settings/AppSettings'
 import '../../src/presentation/styles'
 
 /** The outline the panel that holds the focus is painted with. */
@@ -32,7 +33,7 @@ const noop = (): void => undefined
  * themes.
  */
 function ringOf(themeId: ThemeId, colorScheme: ColorScheme): Ring {
-  applyAppearance(themeId, colorScheme)
+  applyAppearance({ ...DEFAULT_APP_SETTINGS, themeId, colorScheme })
   const { unmount } = render(
     <Dialog open title="定稿这份简历" onConfirm={noop} onClose={noop} />,
   )
@@ -91,7 +92,7 @@ describe('the focus indicator of the dialog panel', () => {
   })
 
   it('paints the ring only while the panel holds the focus', () => {
-    applyAppearance('trae', 'dark')
+    applyAppearance({ ...DEFAULT_APP_SETTINGS, themeId: 'trae', colorScheme: 'dark' })
     render(
       <>
         <button type="button">打开</button>

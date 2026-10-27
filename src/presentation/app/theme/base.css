@@ -4,6 +4,12 @@
  * Colour lives in themes.css and is the only thing a theme overrides. Shape,
  * spacing, type and motion are shared, so switching theme changes the palette
  * and the shape language without any component knowing.
+ *
+ * The interface scale is one multiplier: text sizes, control heights and the
+ * reusable gutters are expressed against it, so the zoom control changes the
+ * whole interface at once instead of only the type. Spacing that lays out a
+ * region (the four-pixel scale below) is deliberately left unscaled: the panel
+ * widths and the window layout are the user's, not the zoom's.
  */
 
 :root {
@@ -21,25 +27,51 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-xl: 18px;
   --radius-full: 999px;
   --font-sans: -apple-system, blinkmacsystemfont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   --font-mono: ui-monospace, sfmono-regular, 'JetBrains Mono', menlo, consolas, monospace;
-  --text-size-xs: 11px;
-  --text-size-sm: 12px;
-  --text-size-base: 13px;
-  --text-size-md: 15px;
-  --text-size-lg: 18px;
-  --text-size-xl: 22px;
+
+  /* Interface scale and density: written by applyAppearance(). */
+  --ui-scale: 1;
+  --density: 1;
+  --text-size-xs: calc(11px * var(--ui-scale));
+  --text-size-sm: calc(12px * var(--ui-scale));
+  --text-size-base: calc(13px * var(--ui-scale));
+  --text-size-md: calc(15px * var(--ui-scale));
+  --text-size-lg: calc(18px * var(--ui-scale));
+  --text-size-xl: calc(22px * var(--ui-scale));
+  --text-size-chat: calc(14px * var(--ui-scale));
+  --text-size-code: calc(12px * var(--ui-scale));
   --leading-tight: 1.3;
+  --leading-snug: 1.4;
   --leading-normal: 1.55;
+  --line-height-chat: 1.7;
+  --control-height: calc(28px * var(--ui-scale) * var(--density));
+  --control-height-lg: calc(34px * var(--ui-scale) * var(--density));
+  --panel-gutter: calc(12px * var(--ui-scale));
+  --duration-instant: 80ms;
   --duration-fast: 120ms;
   --duration-base: 180ms;
-  --duration-slow: 260ms;
+  --duration-slow: 220ms;
   --ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --sidebar-width: 216px;
-  --titlebar-height: 44px;
+  --sidebar-collapsed-width: 56px;
+  --titlebar-height: 52px;
+  --panel-right-width: 400px;
+  --panel-right-min: 320px;
+  --panel-right-max: 720px;
+  --bubble-user: rgb(0 122 255 / 8%);
+  --highlight-agent: var(--accent-ring);
+}
+
+[data-density='compact'] {
+  --density: 0.85;
 }
 
 *,
@@ -60,7 +92,7 @@ body {
   font-size: var(--text-size-base);
   line-height: var(--leading-normal);
   color: var(--text-primary);
-  background: var(--surface-canvas);
+  background: var(--surface-app);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
@@ -126,13 +158,20 @@ svg {
   flex-shrink: 0;
 }
 
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: var(--text-size-code);
+}
+
 /* Keyboard focus ring. :focus-visible needs Safari 15.4, so the ungated
    :focus rule is the fallback for 15.0-15.3: every focused element rings,
    mouse included — degraded fidelity, not a lost signal. Where the engine
    can parse :focus-visible, the ring moves to keyboard focus only. */
 :focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: var(--focus-ring-offset);
   border-radius: var(--radius-sm);
 }
 
@@ -144,10 +183,18 @@ svg {
   /* stylelint-disable-next-line plugin/no-unsupported-browser-features --
      Gated by the @supports condition above, which the checker cannot read. */
   :focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
     border-radius: var(--radius-sm);
   }
+}
+
+/* Regions that take programmatic focus so a shortcut can move between them:
+   the ring says where the keyboard is, and it is drawn on the container that
+   received the focus, not on a child the user did not choose. */
+.region-focus:focus {
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: calc(-1 * var(--focus-ring-offset));
 }
 
 ::selection {
@@ -174,11 +221,38 @@ svg {
   background-clip: content-box;
 }
 
+/* Elements that exist for assistive technology only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Motion is a preference, not a decoration the interface decides for the user.
+ * The operating-system setting is handled here; the in-app switch writes
+ * data-motion="reduced" on the document element and takes the same path.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+[data-motion='reduced'] *,
+[data-motion='reduced'] *::before,
+[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
