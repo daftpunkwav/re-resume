@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { save } from '@tauri-apps/plugin-dialog'
 import { exists, remove, rename, writeFile } from '@tauri-apps/plugin-fs'
 import { basename, dirname, join } from '@tauri-apps/api/path'
+import { invoke } from '@tauri-apps/api/core'
 import { TauriPdfFileSaver } from '../../../src/infrastructure/filesystem/TauriPdfFileSaver'
 import { SequentialIdGenerator } from '../../support/fakeEnvironment'
 
@@ -23,6 +24,7 @@ vi.mock('@tauri-apps/api/path', () => ({
   dirname: vi.fn(),
   join: vi.fn(),
 }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 const DESTINATION = 'C:/Users/me/Documents/resume.pdf'
 const DIRECTORY = 'C:/Users/me/Documents'
@@ -43,6 +45,7 @@ beforeEach(() => {
   vi.mocked(rename).mockResolvedValue(undefined)
   vi.mocked(remove).mockResolvedValue(undefined)
   vi.mocked(exists).mockResolvedValue(true)
+  vi.mocked(invoke).mockResolvedValue(undefined)
 })
 
 describe('TauriPdfFileSaver', () => {
@@ -58,6 +61,17 @@ describe('TauriPdfFileSaver', () => {
     await saver().save(BYTES, 'resume.pdf')
 
     expect(writeFile).not.toHaveBeenCalledWith(DESTINATION, expect.anything())
+  })
+
+  it('asks the native shell for the destination directory before writing', async () => {
+    await saver().save(BYTES, 'resume.pdf')
+
+    expect(invoke).toHaveBeenCalledWith('allow_export_directory', { destination: DESTINATION })
+    // The grant has to be in place before the temporary file is written: the
+    // dialog granted the destination, not the sibling the export writes to.
+    expect(vi.mocked(invoke).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(writeFile).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
   })
 
   it('reports nothing when the user dismisses the dialog', async () => {

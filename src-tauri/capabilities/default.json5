@@ -105,6 +105,14 @@
       "allow": [{ "path": "$DOCUMENT/**" }, { "path": "$DOWNLOAD/**" }],
     },
 
+    // The directory an export is written into is granted by the native shell
+    // rather than by a permission: `export::allow_export_directory` (in
+    // src-tauri/src/export.rs) extends the plugin's runtime scope with the
+    // directory of a destination the save dialog already granted, so the
+    // temporary file the export writes through is reachable. It is an
+    // application command, so it carries no entry here; it reads no user data
+    // and opens no file of its own.
+
     // --- Stronghold -----------------------------------------------------
     // Credential storage, per StrongholdSecretStore in infrastructure/security.
     // Taken as individual commands rather than `stronghold:default` so the Vault

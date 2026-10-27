@@ -19,6 +19,9 @@
  *   two.
  * - The temporary name carries a unique suffix, so two exports to the same
  *   destination cannot write over each other's bytes.
+ * - The save dialog grants the destination file, not the directory around
+ *   it, so the native shell is asked to grant that directory before the
+ *   temporary file is written.
  */
 
 import type { PdfFileSaver } from '../../domain/resume/ports/PdfFileSaver'
@@ -59,6 +62,7 @@ async function publishThroughTemporaryFile(
 ): Promise<void> {
   const { basename, dirname, join } = await import('@tauri-apps/api/path')
   const { rename, writeFile } = await import('@tauri-apps/plugin-fs')
+  await allowExportDirectory(destination)
   const temporary = await join(
     await dirname(destination),
     `${await basename(destination)}.${sanitizeFileName(suffix)}.part`,
@@ -70,6 +74,17 @@ async function publishThroughTemporaryFile(
     await discardTemporaryFile(temporary, failure)
     throw failure
   }
+}
+
+/**
+ * Asks the native shell to grant the file system plugin the directory the
+ * destination is in. The save dialog grants the destination file itself; the
+ * temporary file the export writes through is a sibling of it, and the grant
+ * the dialog made does not reach a sibling.
+ */
+async function allowExportDirectory(destination: string): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('allow_export_directory', { destination })
 }
 
 /**
