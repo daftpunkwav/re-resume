@@ -47,43 +47,54 @@ class FakeProviderDatabase implements SqlDatabase {
   readonly rows = new Map<string, Row>()
 
   async execute(query: string, bindValues: readonly SqlValue[] = []): Promise<SqlQueryResult> {
-    if (query.startsWith('INSERT INTO provider_config')) {
-      const [id, name, kind, baseUrl, modelId, secretRef, supportsImages, isActive, createdAt, updatedAt] =
-        bindValues
-      this.rows.set(String(id), {
-        id: id ?? null,
-        name: name ?? null,
-        kind: kind ?? null,
-        base_url: baseUrl ?? null,
-        model_id: modelId ?? null,
-        secret_ref: secretRef ?? null,
-        supports_images: supportsImages ?? null,
-        is_active: isActive ?? null,
-        created_at: createdAt ?? null,
-        updated_at: updatedAt ?? null,
-      })
-      return { rowsAffected: 1 }
-    }
+    if (query.startsWith('INSERT INTO provider_config')) return this.insertRow(bindValues)
     if (query === 'UPDATE provider_config SET is_active = 0 WHERE is_active = 1') {
-      let affected = 0
-      for (const row of this.rows.values()) {
-        if (row.is_active === 1) {
-          row.is_active = 0
-          affected += 1
-        }
-      }
-      return { rowsAffected: affected }
+      return this.clearActiveRow()
     }
     if (query.startsWith('UPDATE provider_config SET is_active = 1 WHERE id = $1')) {
-      const row = this.rows.get(String(bindValues[0]))
-      if (row === undefined) return { rowsAffected: 0 }
-      row.is_active = 1
-      return { rowsAffected: 1 }
+      return this.activateRow(String(bindValues[0]))
     }
     if (query.startsWith('DELETE FROM provider_config WHERE id = $1')) {
-      return { rowsAffected: this.rows.delete(String(bindValues[0])) ? 1 : 0 }
+      const deleted = this.rows.delete(String(bindValues[0]))
+      return { rowsAffected: deleted ? 1 : 0 }
     }
     throw new Error(`FakeProviderDatabase cannot execute: ${query}`)
+  }
+
+  private insertRow(bindValues: readonly SqlValue[]): SqlQueryResult {
+    const [id, name, kind, baseUrl, modelId, secretRef, supportsImages, isActive, createdAt, updatedAt] =
+      bindValues
+    this.rows.set(String(id), {
+      id: id ?? null,
+      name: name ?? null,
+      kind: kind ?? null,
+      base_url: baseUrl ?? null,
+      model_id: modelId ?? null,
+      secret_ref: secretRef ?? null,
+      supports_images: supportsImages ?? null,
+      is_active: isActive ?? null,
+      created_at: createdAt ?? null,
+      updated_at: updatedAt ?? null,
+    })
+    return { rowsAffected: 1 }
+  }
+
+  private clearActiveRow(): SqlQueryResult {
+    let affected = 0
+    for (const row of this.rows.values()) {
+      if (row.is_active === 1) {
+        row.is_active = 0
+        affected += 1
+      }
+    }
+    return { rowsAffected: affected }
+  }
+
+  private activateRow(id: string): SqlQueryResult {
+    const row = this.rows.get(id)
+    if (row === undefined) return { rowsAffected: 0 }
+    row.is_active = 1
+    return { rowsAffected: 1 }
   }
 
   async select<T>(query: string, bindValues: readonly SqlValue[] = []): Promise<readonly T[]> {
