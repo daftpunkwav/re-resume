@@ -30,9 +30,11 @@ describe('TauriPdfFileSaver', () => {
     const written = await saver().save(BYTES, 'resume.pdf')
 
     expect(written).toBe(DESTINATION)
+    // The native command takes `bytes: Vec<u8>`, which the IPC body carries as
+    // a number array; the assertion pins that shape rather than the input.
     expect(invoke).toHaveBeenCalledWith('publish_export', {
       destination: DESTINATION,
-      bytes: BYTES,
+      bytes: [1, 2, 3],
     })
     // The native publication is the only call: the webview asks for no file
     // system command and for no scope grant of its own.

@@ -36,7 +36,11 @@ export class TauriPdfFileSaver implements PdfFileSaver {
     })
     if (path === null) return null
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('publish_export', { destination: path, bytes })
+    // The command takes the bytes as `Vec<u8>`. Sending them as a number array
+    // makes the wire shape the command deserializes part of the call itself
+    // instead of something the IPC serializer has to infer.
+    const payload = { destination: path, bytes: Array.from(bytes) }
+    await invoke('publish_export', payload)
     return path
   }
 }

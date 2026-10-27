@@ -1,14 +1,15 @@
 //! Publishes an exported document from the native side.
 //!
 //! Responsibilities:
-//! - Check that an export destination is a path the save dialog granted
+//! - Check that an export destination is covered by a dialog grant
 //! - Write the bytes to a temporary file beside the destination and rename it
 //!   over the destination, so a failed write leaves the previous document intact
 //!
 //! Contracts:
 //! - `publish_export(destination, bytes)` returns nothing on success and a
-//!   message describing the failure otherwise. The destination is the path the
-//!   save dialog returned; the bytes are the rendered document.
+//!   message describing the failure otherwise. In the export flow the
+//!   destination is the path the save dialog returned; the bytes are the
+//!   rendered document.
 //!
 //! Constraints:
 //! - Nothing here extends the file system plugin's scope. The webview is not
@@ -16,9 +17,12 @@
 //!   sibling, read it, replace it or remove it.
 //! - The temporary file is named here, not by the caller: a name from the
 //!   webview could point outside the destination's own directory.
-//! - Only a destination the save dialog granted is written. The dialog is what
-//!   records the user's choice of where to write, and this command must not
-//!   become a write into any path the webview names.
+//! - Only a destination the plugin's runtime scope already covers is written,
+//!   and this command grants nothing. In the export flow that grant is the path
+//!   the save dialog returned; the scope also holds what the open dialog
+//!   recorded (the capability file grants it for imports), and such a path
+//!   passes too. The check therefore bounds writes to paths a user picked in a
+//!   dialog, not to the save dialog's choice alone.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -35,10 +39,12 @@ static NEXT_TEMPORARY_SUFFIX: AtomicU64 = AtomicU64::new(0);
 
 /// Writes `bytes` over the export destination.
 ///
-/// The destination must be a path the save dialog granted: the dialog records
-/// the user's choice, and a path the webview names on its own is not that
-/// choice. Without the check this command would write wherever the webview
-/// asked it to.
+/// The destination must be a path the file system plugin's runtime scope
+/// covers. In the export flow the save dialog recorded that path when the user
+/// chose it; the open dialog records the same way, so a path it granted passes
+/// as well. This command adds nothing to the scope, so it cannot widen what a
+/// dialog recorded, and it must not become a write into any path the webview
+/// names by itself.
 ///
 /// The command runs on the async runtime rather than the main thread, because
 /// writing a document is file I/O the event loop has no reason to wait on.
@@ -51,7 +57,7 @@ pub fn publish_export<R: tauri::Runtime>(
     let destination = PathBuf::from(destination);
     if !app.fs_scope().is_allowed(&destination) {
         return Err(format!(
-            "the export destination {} was not granted by a save dialog",
+            "the export destination {} was not granted by a file dialog",
             destination.display()
         ));
     }
