@@ -33,8 +33,9 @@ import {
   asRevisionId,
   asVariantId,
 } from '../../../src/domain/shared/branded-id'
-import type { ClaimId, ExperienceId } from '../../../src/domain/shared/branded-id'
+import type { ClaimId } from '../../../src/domain/shared/branded-id'
 import type { PdfExportInput, ResumePdfExporter } from '../../../src/domain/resume/ports/ResumePdfExporter'
+import { DriftingExperienceRepository } from '../../support/driftingExperienceRepository'
 import { FixedClock, SequentialIdGenerator } from '../../support/fakeEnvironment'
 import { InMemoryExperienceRepository } from '../../support/inMemoryCatalogRepositories'
 import { InMemoryResumeRepository, initialRevision } from '../../support/inMemoryResumeRepository'
@@ -122,36 +123,6 @@ function experienceBlock(id: string, claimIds: readonly ClaimId[]): Block {
     layout: DEFAULT_FLOW_LAYOUT,
     textStyle: null,
   }
-}
-
-/**
- * A repository that answers with a different experience on every read, so a
- * second pass over the same blocks sees a different claim status than the
- * first. That is what a rejection landing between two reads looks like.
- */
-class DriftingExperienceRepository implements ExperienceRepository {
-  /** Reads since the drift was armed. */
-  reads = 0
-  armed = false
-
-  constructor(
-    private readonly confirmed: Experience,
-    private readonly rejected: Experience,
-  ) {}
-
-  async findById(_id: ExperienceId): Promise<Experience | null> {
-    if (!this.armed) return this.confirmed
-    this.reads += 1
-    return this.reads === 1 ? this.confirmed : this.rejected
-  }
-
-  async listAll(): Promise<readonly Experience[]> {
-    return []
-  }
-
-  async save(_experience: Experience): Promise<void> {}
-
-  async remove(_id: ExperienceId): Promise<void> {}
 }
 
 async function seededDraftRepo(
