@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod'
+import { loadResumeExperiences } from '../../resume/loadResumeExperiences'
 import { materializeBlocks } from '../../resume/materializeBlocks'
 import type { OverflowReport } from '../../../domain/resume/PageLayout'
 import type { TextMeasurer } from '../../../domain/resume/ports/TextMeasurer'
@@ -57,7 +58,8 @@ export function buildCheckResumeLayoutTool(
     ): Promise<ResumeLayoutReport> => {
       const resume = await ctx.resumes.findById(asResumeId(input.resumeId))
       if (resume === null) return { kind: 'notFound', resumeId: input.resumeId }
-      const blocks = await materializeBlocks(ctx.experiences, resume.id, resume.blocks)
+      const experiences = await loadResumeExperiences(ctx.experiences, resume.id, resume.blocks)
+      const blocks = materializeBlocks(experiences, resume.blocks)
       const laidOut = ctx.layout({ blocks, page: resume.pageSetup, measurer })
       return {
         kind: 'checked',

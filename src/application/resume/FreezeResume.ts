@@ -14,6 +14,8 @@
  *   live document stays as it was so duplication can copy it.
  * - The cursor must sit on the newest revision, otherwise "finalize" would
  *   silently publish a state the user already undid.
+ * - The claim scan and the materialization read the same loaded experiences,
+ *   so a statement rejected between them cannot slip into the snapshot.
  */
 
 import { DomainError } from '../../domain/shared/DomainError'
@@ -34,8 +36,10 @@ import type { Clock } from '../../domain/shared/Clock'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
-import type { ExperienceId, ResumeId } from '../../domain/shared/branded-id'
+import type { ResumeId } from '../../domain/shared/branded-id'
 import { asSnapshotId } from '../../domain/shared/branded-id'
+import { loadResumeExperiences } from './loadResumeExperiences'
+import type { ResumeExperiences } from './loadResumeExperiences'
 import { materializeBlocks } from './materializeBlocks'
 
 export async function freezeResume(
@@ -48,18 +52,15 @@ export async function freezeResume(
   const resume = await loadResume(resumeRepo, resumeId)
   assertMutable(resume)
   await assertCursorIsNewest(resumeRepo, resume)
-  await assertNoPendingClaim(experienceRepo, resume)
+  const experiences = await loadResumeExperiences(experienceRepo, resume.id, resume.blocks)
+  assertNoPendingClaim(resume, experiences)
   assertHasSubstantiveContent(resume.id, resume.blocks)
   const frozen = freezeResumeAggregate(
     resume,
     asSnapshotId(ids.next()),
     clock.now(),
     {
-      materializedBlocks: await materializeBlocks(
-        experienceRepo,
-        resume.id,
-        resume.blocks,
-      ),
+      materializedBlocks: materializeBlocks(experiences, resume.blocks),
       pageSetup: resume.pageSetup,
     },
   )
@@ -90,15 +91,11 @@ async function assertCursorIsNewest(
   )
 }
 
-async function assertNoPendingClaim(
-  experienceRepo: ExperienceRepository,
-  resume: Resume,
-): Promise<void> {
-  const loaded = new Map<ExperienceId, Experience>()
+function assertNoPendingClaim(resume: Resume, experiences: ResumeExperiences): void {
   const pending: string[] = []
   for (const block of resume.blocks) {
     if (!isExperienceContent(block.content)) continue
-    const experience = await loadExperience(experienceRepo, loaded, resume.id, block.content)
+    const experience = experiences.get(block.content.experienceId)
     for (const claimId of pendingClaimIds(experience, block.content)) pending.push(claimId)
   }
   if (pending.length === 0) return
@@ -125,26 +122,6 @@ function pendingClaimIds(experience: Experience, content: ExperienceContent): re
     if (claim.status === 'pending') pending.push(claimId)
   }
   return pending
-}
-
-async function loadExperience(
-  experienceRepo: ExperienceRepository,
-  loaded: Map<ExperienceId, Experience>,
-  resumeId: ResumeId,
-  content: ExperienceContent,
-): Promise<Experience> {
-  const cached = loaded.get(content.experienceId)
-  if (cached !== undefined) return cached
-  const experience = await experienceRepo.findById(content.experienceId)
-  if (experience === null) {
-    throw new DomainError(
-      'variantNotInExperience',
-      'A block references an experience that no longer exists.',
-      { entity: 'resume', id: resumeId, blockers: [content.experienceId] },
-    )
-  }
-  loaded.set(content.experienceId, experience)
-  return experience
 }
 
 async function loadResume(resumeRepo: ResumeRepository, resumeId: ResumeId): Promise<Resume> {

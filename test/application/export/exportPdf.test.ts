@@ -21,6 +21,7 @@ import type { Block } from '../../../src/domain/resume/Block'
 import { describeChange } from '../../../src/domain/resume/DocumentChange'
 import { addClaim, addVariant, createExperience } from '../../../src/domain/catalog/Experience'
 import type { Experience } from '../../../src/domain/catalog/Experience'
+import type { ExperienceRepository } from '../../../src/domain/catalog/ports/ExperienceRepository'
 import type { ClaimStatus } from '../../../src/domain/catalog/ClaimStatus'
 import { parseDateTime } from '../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
@@ -32,7 +33,7 @@ import {
   asRevisionId,
   asVariantId,
 } from '../../../src/domain/shared/branded-id'
-import type { ClaimId } from '../../../src/domain/shared/branded-id'
+import type { ClaimId, ExperienceId } from '../../../src/domain/shared/branded-id'
 import type { PdfExportInput, ResumePdfExporter } from '../../../src/domain/resume/ports/ResumePdfExporter'
 import { FixedClock, SequentialIdGenerator } from '../../support/fakeEnvironment'
 import { InMemoryExperienceRepository } from '../../support/inMemoryCatalogRepositories'
@@ -123,8 +124,38 @@ function experienceBlock(id: string, claimIds: readonly ClaimId[]): Block {
   }
 }
 
+/**
+ * A repository that answers with a different experience on every read, so a
+ * second pass over the same blocks sees a different claim status than the
+ * first. That is what a rejection landing between two reads looks like.
+ */
+class DriftingExperienceRepository implements ExperienceRepository {
+  /** Reads since the drift was armed. */
+  reads = 0
+  armed = false
+
+  constructor(
+    private readonly confirmed: Experience,
+    private readonly rejected: Experience,
+  ) {}
+
+  async findById(_id: ExperienceId): Promise<Experience | null> {
+    if (!this.armed) return this.confirmed
+    this.reads += 1
+    return this.reads === 1 ? this.confirmed : this.rejected
+  }
+
+  async listAll(): Promise<readonly Experience[]> {
+    return []
+  }
+
+  async save(_experience: Experience): Promise<void> {}
+
+  async remove(_id: ExperienceId): Promise<void> {}
+}
+
 async function seededDraftRepo(
-  experienceRepo: InMemoryExperienceRepository,
+  experienceRepo: ExperienceRepository,
   blocks: readonly Block[],
 ): Promise<InMemoryResumeRepository> {
   const repo = new InMemoryResumeRepository(() => NOW)
@@ -214,6 +245,27 @@ describe('exportPdf', () => {
 
     expect(exported.bytes).toBe(BYTES)
     expect(exported.pendingClaimBlocks).toEqual([asBlockId('block-1')])
+  })
+
+  it('reads the cited experiences once, so a claim rejected afterwards is not dropped', async () => {
+    const experienceRepo = new DriftingExperienceRepository(
+      experienceWithClaim('confirmed'),
+      experienceWithClaim('rejected'),
+    )
+    const repo = await seededDraftRepo(experienceRepo, [
+      experienceBlock('block-1', [CITED_CLAIM_ID]),
+    ])
+    // From here on the library changes under the export, as a rejection from
+    // another run would.
+    experienceRepo.armed = true
+    const exporter = new RecordingExporter()
+
+    const exported = await exportPdf(repo, experienceRepo, layoutEcho, exporter, RESUME_ID)
+
+    // The statement the gate saw is the statement the export carries.
+    expect(exported.pendingClaimBlocks).toEqual([])
+    expect(exporter.lastInput?.blocks[0]?.claims).toHaveLength(1)
+    expect(experienceRepo.reads).toBe(1)
   })
 
   it('exports a frozen resume from its snapshot, ignoring later library edits', async () => {

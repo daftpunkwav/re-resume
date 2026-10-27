@@ -15,6 +15,7 @@ import { compareResumeVersions } from '../../../src/application/generation/tools
 import type { JobPostingRepository } from '../../../src/application/generation/ParseJobPosting'
 import { commitDocumentChange } from '../../../src/application/resume/CommitDocumentChange'
 import { materializeBlocks } from '../../../src/application/resume/materializeBlocks'
+import { loadResumeExperiences } from '../../../src/application/resume/loadResumeExperiences'
 import { describeChange } from '../../../src/domain/resume/DocumentChange'
 import { layout } from '../../../src/application/layout/layout'
 import { FixtureTextMeasurer } from '../../../src/infrastructure/measurement/FixtureTextMeasurer'
@@ -316,7 +317,8 @@ describe('read tools', () => {
     const resume = await resumes.findById(RESUME_ID)
     if (resume === null) throw new Error('the seeded resume should exist')
 
-    const blocks = await materializeBlocks(experiences, resume.id, resume.blocks)
+    const loaded = await loadResumeExperiences(experiences, resume.id, resume.blocks)
+    const blocks = materializeBlocks(loaded, resume.blocks)
     const laidOut = ctx.layout({ blocks, page: A4_PAGE_SETUP, measurer: new FixtureTextMeasurer() })
 
     expect(blocks[0]?.content.type).toBe('experience')

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { materializeBlocks } from '../../../src/application/resume/materializeBlocks'
+import { loadResumeExperiences } from '../../../src/application/resume/loadResumeExperiences'
 import { DEFAULT_FLOW_LAYOUT } from '../../../src/domain/resume/Layout'
 import { DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import type { Block } from '../../../src/domain/resume/Block'
@@ -93,7 +94,8 @@ function experienceBlock(
 }
 
 async function materialize(blocks: readonly Block[], repository: InMemoryExperienceRepository) {
-  return materializeBlocks(repository, RESUME_ID, blocks)
+  const experiences = await loadResumeExperiences(repository, RESUME_ID, blocks)
+  return materializeBlocks(experiences, blocks)
 }
 
 describe('materializeBlocks', () => {

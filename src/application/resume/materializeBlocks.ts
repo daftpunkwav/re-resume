@@ -10,16 +10,17 @@
  * - Copy block identity, layout and text style so a snapshot renders standalone
  *
  * Constraints:
- * - A missing experience, variant or claim raises DomainError. An empty block
- *   would freeze a hole into the resume instead of a refusal.
+ * - The experiences arrive loaded: the caller reads them once and hands the
+ *   same set to the claim scan and to this function, so the two cannot
+ *   disagree about a claim's status.
+ * - A missing variant or claim raises DomainError. An empty block would freeze
+ *   a hole into the resume instead of a refusal.
  * - graphic keeps its assetId: image bytes are the one live reference a
  *   snapshot retains.
  */
 
 import { DomainError } from '../../domain/shared/DomainError'
-import type { ResumeId } from '../../domain/shared/branded-id'
 import type { Experience } from '../../domain/catalog/Experience'
-import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import { isExperienceContent } from '../../domain/resume/Block'
 import type { Block, BlockContent, ExperienceContent } from '../../domain/resume/Block'
 import type {
@@ -27,13 +28,12 @@ import type {
   MaterializedClaim,
   MaterializedContent,
 } from '../../domain/resume/ResumeSnapshot'
+import type { ResumeExperiences } from './loadResumeExperiences'
 
-export async function materializeBlocks(
-  experienceRepo: ExperienceRepository,
-  resumeId: ResumeId,
+export function materializeBlocks(
+  experiences: ResumeExperiences,
   blocks: readonly Block[],
-): Promise<readonly MaterializedBlock[]> {
-  const loaded = new Map<string, Experience>()
+): readonly MaterializedBlock[] {
   const materialized: MaterializedBlock[] = []
   for (const block of blocks) {
     if (!isExperienceContent(block.content)) {
@@ -46,7 +46,7 @@ export async function materializeBlocks(
       })
       continue
     }
-    const experience = await loadExperience(experienceRepo, loaded, resumeId, block.content)
+    const experience = experiences.get(block.content.experienceId)
     materialized.push({
       id: block.id,
       content: expandExperience(experience, block.content),
@@ -119,24 +119,4 @@ function inlineClaims(
     })
   }
   return claims
-}
-
-async function loadExperience(
-  experienceRepo: ExperienceRepository,
-  loaded: Map<string, Experience>,
-  resumeId: ResumeId,
-  content: ExperienceContent,
-): Promise<Experience> {
-  const cached = loaded.get(content.experienceId)
-  if (cached !== undefined) return cached
-  const experience = await experienceRepo.findById(content.experienceId)
-  if (experience === null) {
-    throw new DomainError(
-      'variantNotInExperience',
-      'This block references an experience that no longer exists.',
-      { entity: 'resume', id: resumeId, blockers: [content.experienceId] },
-    )
-  }
-  loaded.set(content.experienceId, experience)
-  return experience
 }

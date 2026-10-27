@@ -14,8 +14,10 @@
  * - Lay the representation out and delegate rendering to the port
  *
  * Constraints:
- * - The claim scan runs before materialization on purpose: materialization
- *   skips every non-confirmed claim silently, so it cannot be the gate.
+ * - The claim scan and the materialization read the same loaded experiences,
+ *   so a statement rejected between them cannot be: there is one read.
+ * - The scan still gates the export. Materialization drops every
+ *   non-confirmed claim silently, so it cannot be the gate.
  * - The use case never touches platform APIs; writing the bytes to a file is
  *   the caller's concern.
  */
@@ -31,7 +33,9 @@ import type { Experience } from '../../domain/catalog/Experience'
 import type { ExperienceRepository } from '../../domain/catalog/ports/ExperienceRepository'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { ResumePdfExporter } from '../../domain/resume/ports/ResumePdfExporter'
-import type { BlockId, ExperienceId, ResumeId } from '../../domain/shared/branded-id'
+import type { BlockId, ResumeId } from '../../domain/shared/branded-id'
+import { loadResumeExperiences } from '../resume/loadResumeExperiences'
+import type { ResumeExperiences } from '../resume/loadResumeExperiences'
 import { materializeBlocks } from '../resume/materializeBlocks'
 
 export interface ExportedPdf {
@@ -106,7 +110,8 @@ async function draftOf(
   experienceRepo: ExperienceRepository,
   resume: Resume,
 ): Promise<ExportRepresentation> {
-  const rejectedBlocks = await blocksCitingClaims(experienceRepo, resume, (claim) =>
+  const experiences = await loadResumeExperiences(experienceRepo, resume.id, resume.blocks)
+  const rejectedBlocks = blocksCitingClaims(resume, experiences, (claim) =>
     claim === undefined || claim.status === 'rejected',
   )
   if (rejectedBlocks.length > 0) {
@@ -116,13 +121,11 @@ async function draftOf(
       { entity: 'resume', id: resume.id, blockers: rejectedBlocks },
     )
   }
-  const pendingClaimBlocks = await blocksCitingClaims(
-    experienceRepo,
-    resume,
-    (claim) => claim !== undefined && claim.status === 'pending',
+  const pendingClaimBlocks = blocksCitingClaims(resume, experiences, (claim) =>
+    claim !== undefined && claim.status === 'pending',
   )
   return {
-    blocks: await materializeBlocks(experienceRepo, resume.id, resume.blocks),
+    blocks: materializeBlocks(experiences, resume.blocks),
     page: resume.pageSetup,
     pendingClaimBlocks,
   }
@@ -133,41 +136,19 @@ async function draftOf(
  * no longer exists counts as rejected: its statement cannot be confirmed any
  * more, the same reading the freeze gate takes.
  */
-async function blocksCitingClaims(
-  experienceRepo: ExperienceRepository,
+function blocksCitingClaims(
   resume: Resume,
+  experiences: ResumeExperiences,
   cited: (claim: Experience['claims'][number] | undefined) => boolean,
-): Promise<readonly BlockId[]> {
-  const loaded = new Map<ExperienceId, Experience>()
+): readonly BlockId[] {
   const blockIds: BlockId[] = []
   for (const block of resume.blocks) {
     if (!isExperienceContent(block.content)) continue
     const content: ExperienceContent = block.content
-    if (!(await blockCites(experienceRepo, loaded, resume.id, content, cited))) continue
+    if (!citesClaim(experiences.get(content.experienceId), content, cited)) continue
     blockIds.push(block.id)
   }
   return blockIds
-}
-
-async function blockCites(
-  experienceRepo: ExperienceRepository,
-  loaded: Map<ExperienceId, Experience>,
-  resumeId: ResumeId,
-  content: ExperienceContent,
-  cited: (claim: Experience['claims'][number] | undefined) => boolean,
-): Promise<boolean> {
-  const cached = loaded.get(content.experienceId)
-  if (cached !== undefined) return citesClaim(cached, content, cited)
-  const experience = await experienceRepo.findById(content.experienceId)
-  if (experience === null) {
-    throw new DomainError(
-      'variantNotInExperience',
-      'A block references an experience that no longer exists.',
-      { entity: 'resume', id: resumeId, blockers: [content.experienceId] },
-    )
-  }
-  loaded.set(content.experienceId, experience)
-  return citesClaim(experience, content, cited)
 }
 
 function citesClaim(
