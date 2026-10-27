@@ -37,7 +37,7 @@ import { SystemClock } from '../infrastructure/platform/systemClock'
  */
 export const DATABASE_CONNECTION_STRING = 'sqlite:re-resume.db'
 
-/** The database file name inside the application data directory. */
+/** The database file name inside the application config directory. */
 const DATABASE_FILE_NAME = 're-resume.db'
 
 export interface CompositionRootOptions {
@@ -72,13 +72,18 @@ async function recordPreMigrationBackup(): Promise<void> {
   }
 }
 
-/** Absolute location of the database file, or null when it cannot be resolved. */
+/**
+ * Absolute location of the database file, or null when it cannot be resolved.
+ * The directory is the one the SQL plugin resolves a relative `sqlite:` URL
+ * against (the application config directory), so this path is the same file the
+ * plugin opens.
+ */
 async function resolveDatabaseFile(): Promise<string | null> {
   try {
-    const { appDataDir, join } = await import('@tauri-apps/api/path')
-    return await join(await appDataDir(), DATABASE_FILE_NAME)
+    const { appConfigDir, join } = await import('@tauri-apps/api/path')
+    return await join(await appConfigDir(), DATABASE_FILE_NAME)
   } catch {
-    // A window that cannot name its data directory still runs: the database is
+    // A window that cannot name its config directory still runs: the database is
     // opened through the plugin, which resolves the directory itself.
     return null
   }

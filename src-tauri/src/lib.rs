@@ -19,11 +19,12 @@ mod export;
 use tauri::Manager;
 use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
 
-/// Connection string of the application database. Relative to Tauri's app data
-/// directory. This string must match the one the frontend passes to
-/// `Database.load`: the plugin runs the migrations registered below against a
-/// connection opened with exactly this string, and a connection under any other
-/// name would start with no schema.
+/// Connection string of the application database. Relative to Tauri's app
+/// config directory, which is the directory the SQL plugin resolves it against.
+/// This string must match the one the frontend passes to `Database.load`: the
+/// plugin runs the migrations registered below against a connection opened with
+/// exactly this string, and a connection under any other name would start with
+/// no schema.
 ///
 /// The SQL plugin does not preload this connection; the frontend loads it after
 /// it has asked the native side for the pre-migration backup.

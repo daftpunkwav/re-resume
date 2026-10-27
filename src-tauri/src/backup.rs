@@ -1,7 +1,7 @@
 //! One-time copy of the database as it stood before the schema rebuild.
 //!
 //! Responsibilities:
-//! - Copy `<app data>/re-resume.db` to `<app data>/re-resume.pre-v2.db` once
+//! - Copy `<app config>/re-resume.db` to `<app config>/re-resume.pre-v2.db` once
 //! - Report which of the three outcomes happened: copied, already copied, no
 //!   database to copy
 //!
@@ -11,12 +11,16 @@
 //!   absent. The frontend records the outcome and does not act on it.
 //!
 //! Constraints:
+//! - The source is resolved under `app_config_dir()`: the SQL plugin resolves a
+//!   relative `sqlite:` URL against the application configuration directory, so
+//!   the copy must read from that same directory rather than from app data,
+//!   which only happens to be the same path on some platforms.
 //! - The copy happens before the frontend loads the SQL plugin, which is what
 //!   runs the migrations; once the plugin has connected, the file it would copy
 //!   already holds the rebuilt schema. The frontend calls this command before
 //!   the first `Database.load`.
 //! - The destination is named here, not by the caller: a path from the webview
-//!   would be a write outside the application data directory.
+//!   would be a write outside the application configuration directory.
 //! - An existing destination is never overwritten. It is the copy of the
 //!   pre-rebuild state, and a later launch must not replace it with the rebuilt
 //!   schema.
@@ -25,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::Manager;
 
-/// File name of the database the SQL plugin opens, relative to the app data
+/// File name of the database the SQL plugin opens, relative to the app config
 /// directory. Must match `DATABASE_URL` in `lib.rs`.
 const DATABASE_FILE_NAME: &str = "re-resume.db";
 
@@ -38,18 +42,18 @@ const BACKUP_FILE_NAME: &str = "re-resume.pre-v2.db";
 /// shows its boot state while the frontend waits for the answer.
 #[tauri::command(async)]
 pub fn backup_database_once<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
-    let data_directory = app
+    let config_directory = app
         .path()
-        .app_data_dir()
-        .map_err(|error| format!("cannot resolve the application data directory: {error}"))?;
-    copy_once(&data_directory)
+        .app_config_dir()
+        .map_err(|error| format!("cannot resolve the application config directory: {error}"))?;
+    copy_once(&config_directory)
 }
 
 /// The copy itself, separated from the Tauri handle so the decision logic can
 /// be read and tested without a running application.
-fn copy_once(data_directory: &Path) -> Result<String, String> {
-    let source = data_directory.join(DATABASE_FILE_NAME);
-    let destination: PathBuf = data_directory.join(BACKUP_FILE_NAME);
+fn copy_once(config_directory: &Path) -> Result<String, String> {
+    let source = config_directory.join(DATABASE_FILE_NAME);
+    let destination: PathBuf = config_directory.join(BACKUP_FILE_NAME);
 
     if destination.exists() {
         return Ok(format!("exists: {}", destination.display()));
