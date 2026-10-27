@@ -147,13 +147,6 @@
   },
 
   "plugins": {
-    "sql": {
-      // Connecting at startup runs the migrations registered in lib.rs before
-      // the frontend opens its own connection, so the schema is in place by the
-      // time the first query is issued.
-      "preload": ["sqlite:re-resume.db"]
-    },
-
     "http": {
       // The URL scope in capabilities/default.json5 is only a real boundary if
       // redirects are checked against it too, and the plugin's default is not to
