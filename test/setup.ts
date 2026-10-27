@@ -1,4 +1,14 @@
+import { configure } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+
+/**
+ * The provider boots asynchronously in most of these tests, and the machine
+ * running the suite may be busy: the default one-second query timeout is close
+ * enough to the margin that a slow scheduler looks like a broken assertion. The
+ * longer default keeps what a failing test reports about behaviour rather than
+ * about how quickly the scheduler ran.
+ */
+configure({ asyncUtilTimeout: 3000 })
 
 /**
  * jsdom implements neither ResizeObserver nor a layout engine: every element

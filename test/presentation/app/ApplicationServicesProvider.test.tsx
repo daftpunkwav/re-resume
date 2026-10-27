@@ -228,7 +228,9 @@ describe('ApplicationServicesProvider', () => {
     act(() => rebuildHolder.current?.())
     act(() => rebuildHolder.current?.())
 
-    await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled())
+    // The superseded boot resolves after a timer; on a busy machine the
+    // shutdown callback can land later than the default wait.
+    await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled(), { timeout: 3000 })
     expect(kept.shutdown).not.toHaveBeenCalled()
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
   })

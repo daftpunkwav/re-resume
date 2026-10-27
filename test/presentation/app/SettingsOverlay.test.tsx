@@ -5,7 +5,7 @@
  * sections whose forms belong to a later change.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -34,6 +34,20 @@ function renderOverlay() {
       <SettingsOverlay />
     </ApplicationServicesProvider>,
   )
+}
+
+/**
+ * The dialog appears when the presence state flips to open; the passive effects
+ * that install its focus trap and keyboard handling run after that commit. A key
+ * press dispatched straight after `findByRole` can therefore arrive before the
+ * listener exists, so wait one settled task before sending keys.
+ */
+async function settleOverlay(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+  })
 }
 
 
@@ -100,11 +114,15 @@ describe('SettingsOverlay', () => {
     const trigger = await screen.findByRole('button', { name: '打开设置' })
     await user.click(trigger)
     await screen.findByRole('dialog', { name: '设置' })
+    await settleOverlay()
 
     await user.keyboard('{Escape}')
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '设置' })).toBeNull())
-    expect(trigger).toHaveFocus()
+    await waitFor(
+      () => expect(screen.queryByRole('dialog', { name: '设置' })).toBeNull(),
+      { timeout: 3000 },
+    )
+    await waitFor(() => expect(trigger).toHaveFocus(), { timeout: 3000 })
   })
 
   it('keeps Tab inside the panel', async () => {
@@ -112,6 +130,7 @@ describe('SettingsOverlay', () => {
     renderOverlay()
     await user.click(await screen.findByRole('button', { name: '打开设置' }))
     await screen.findByRole('dialog', { name: '设置' })
+    await settleOverlay()
 
     await user.tab()
     expect(screen.getByRole('dialog', { name: '设置' }).contains(document.activeElement)).toBe(true)

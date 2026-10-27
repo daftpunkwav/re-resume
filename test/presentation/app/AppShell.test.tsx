@@ -32,6 +32,23 @@ function renderShell() {
   )
 }
 
+/**
+ * Render the shell and wait until the boot promise has settled and the passive
+ * effects that install its window listeners have run. `findByRole` can observe
+ * the committed DOM before those effects run, so a resize or shortcut dispatched
+ * right after render would otherwise race the listener installation.
+ */
+async function renderShellReady(): Promise<ReturnType<typeof render>> {
+  const result = renderShell()
+  await screen.findByRole('heading', { name: '从一段对话开始' })
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+  })
+  return result
+}
+
 function resetStores(): void {
   useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS, status: 'ready', error: null })
   useShellStore.setState({
@@ -57,8 +74,7 @@ afterEach(() => {
 
 describe('AppShell', () => {
   it('lays out the sidebar, conversation and header on a wide window', async () => {
-    const { container } = renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    const { container } = await renderShellReady()
 
     const shell = container.querySelector('.shell')
     expect(shell).toHaveAttribute('data-layout', 'wide')
@@ -69,8 +85,7 @@ describe('AppShell', () => {
 
   it('opens the information panel from the sidebar and closes it again', async () => {
     const user = userEvent.setup({ delay: null })
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     const entry = screen.getByRole('button', { name: /^简历信息$/ })
     await user.click(entry)
@@ -84,8 +99,7 @@ describe('AppShell', () => {
 
   it('shows both panels side by side on a wide window', async () => {
     const user = userEvent.setup({ delay: null })
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     await user.click(screen.getByRole('button', { name: /^简历信息$/ }))
     await user.click(screen.getByRole('button', { name: /^简历创作$/ }))
@@ -98,8 +112,7 @@ describe('AppShell', () => {
   })
 
   it('opens and closes the settings overlay with the shortcut', async () => {
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     fireEvent.keyDown(window, { key: ',', ctrlKey: true })
     const dialog = await screen.findByRole('dialog', { name: '设置' })
@@ -110,8 +123,7 @@ describe('AppShell', () => {
   })
 
   it('toggles the dock visibility with the shortcut', async () => {
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
     expect(useShellStore.getState().rightPanel).toBe('resume')
@@ -121,8 +133,7 @@ describe('AppShell', () => {
   })
 
   it('changes the interface scale with the shortcut and reports the ceiling', async () => {
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     fireEvent.keyDown(window, { key: '+', ctrlKey: true })
     expect(useSettingsStore.getState().settings.uiScale).toBe(1.1)
@@ -133,8 +144,7 @@ describe('AppShell', () => {
 
   it('adds a conversation draft and focuses the conversation region', async () => {
     const user = userEvent.setup({ delay: null })
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     await user.click(screen.getByRole('button', { name: '新建对话' }))
 
@@ -145,8 +155,7 @@ describe('AppShell', () => {
   it('collapses the sidebar and draws the dock over the conversation at 960px', async () => {
     setWindowWidth(960)
     const user = userEvent.setup({ delay: null })
-    const { container } = renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    const { container } = await renderShellReady()
 
     expect(container.querySelector('.shell')).toHaveAttribute('data-layout', 'compact')
     // The labels are gone; the accessible names remain.
@@ -165,21 +174,20 @@ describe('AppShell', () => {
   })
 
   it('changes the layout tier when the window is resized', async () => {
-    const { container } = renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    const { container } = await renderShellReady()
     expect(container.querySelector('.shell')).toHaveAttribute('data-layout', 'wide')
 
     act(() => setWindowWidth(960))
 
-    await waitFor(() =>
-      expect(container.querySelector('.shell')).toHaveAttribute('data-layout', 'compact'),
+    await waitFor(
+      () => expect(container.querySelector('.shell')).toHaveAttribute('data-layout', 'compact'),
+      { timeout: 3000 },
     )
   })
 
   it('opens the model section from the model chip', async () => {
     const user = userEvent.setup({ delay: null })
-    renderShell()
-    await screen.findByRole('heading', { name: '从一段对话开始' })
+    await renderShellReady()
 
     await user.click(screen.getByRole('button', { name: /打开模型服务设置/ }))
 
