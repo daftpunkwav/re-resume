@@ -1,0 +1,232 @@
+/**
+ * @file PanelDock
+ * @description The right-hand tool area: one panel, both panels side by side,
+ * or — below the wide breakpoint with both open — one panel at a time behind
+ * tabs. It owns the drag edge between itself and the conversation.
+ *
+ * Responsibilities:
+ * - Render the open panel or panels and the header that closes them
+ * - Split the dock in two when both panels are open on a wide window, with a
+ *   draggable divider between the panes
+ * - Hide itself when no panel is open; the window allocates no width for it
+ *
+ * Constraints:
+ * - The panel contents belong to the information and resume features; this
+ *   file only frames them (placeholders until those features land). The
+ *   information panel arrives with PR-06, the resume panel with PR-08.
+ * - While closed, the contents are unmounted rather than hidden: a region that
+ *   cannot be seen must not keep its buttons in the tab order.
+ */
+
+import { useRef, useState } from 'react'
+import type { KeyboardEvent, PointerEvent } from 'react'
+import {
+  PANEL_WIDTH_MAX,
+  PANEL_WIDTH_MIN,
+  PANEL_WIDTH_NARROW_MAX,
+} from '../../domain/settings/AppSettings'
+import { IconButton } from './components/IconButton'
+import { TabList } from './components/Tabs'
+import { InfoPanelPlaceholder } from './placeholders/InfoPanelPlaceholder'
+import { ResumePanelPlaceholder } from './placeholders/ResumePanelPlaceholder'
+import { ResizeHandle } from './ResizeHandle'
+import type { LayoutTier } from './useLayoutTier'
+import { useShellStore } from './stores/shellStore'
+
+export interface PanelDockProps {
+  readonly tier: LayoutTier
+}
+
+type PanelKind = 'resume' | 'info'
+
+const PANEL_TABS = [
+  { id: 'resume', label: '简历创作' },
+  { id: 'info', label: '简历信息' },
+] as const satisfies readonly { readonly id: PanelKind; readonly label: string }[]
+
+const PANEL_TITLES: Readonly<Record<PanelKind, string>> = {
+  resume: '简历创作',
+  info: '简历信息',
+}
+
+/** Below this width two panes would each fall under their own minimum. */
+const TWO_PANE_MIN_WIDTH = PANEL_WIDTH_MIN * 2
+
+function panelBody(kind: PanelKind) {
+  return kind === 'resume' ? <ResumePanelPlaceholder /> : <InfoPanelPlaceholder />
+}
+
+function PaneHeader({ kind, onClose }: { readonly kind: PanelKind; readonly onClose: () => void }) {
+  const title = PANEL_TITLES[kind]
+  return (
+    <header className="dock-head">
+      <h2 className="dock-title">{title}</h2>
+      <IconButton icon="close" label={`关闭${title}`} size="small" onClick={onClose} />
+    </header>
+  )
+}
+
+/**
+ * The divider between the two panes. The split is a view preference of the
+ * current window, not a stored setting, so it starts at the middle and lives
+ * as long as the window does.
+ */
+function SplitDivider({
+  ratio,
+  bounds,
+  onChange,
+}: {
+  readonly ratio: number
+  readonly bounds: { readonly minimum: number; readonly maximum: number }
+  readonly onChange: (ratio: number) => void
+}) {
+  const drag = useRef<{ readonly pointerId: number; readonly rect: DOMRect } | null>(null)
+
+  const ratioAt = (clientX: number, rect: DOMRect): number => {
+    const raw = rect.width === 0 ? 0.5 : (clientX - rect.left) / rect.width
+    return Math.min(bounds.maximum, Math.max(bounds.minimum, raw))
+  }
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return
+    const split = event.currentTarget.closest<HTMLElement>('.panel-split')
+    if (split === null) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drag.current = { pointerId: event.pointerId, rect: split.getBoundingClientRect() }
+  }
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
+    const state = drag.current
+    if (state === null || state.pointerId !== event.pointerId) return
+    onChange(ratioAt(event.clientX, state.rect))
+  }
+
+  const onPointerUp = (): void => {
+    drag.current = null
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const step = event.shiftKey ? 0.08 : 0.02
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      onChange(Math.max(bounds.minimum, ratio - step))
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      onChange(Math.min(bounds.maximum, ratio + step))
+    }
+  }
+
+  return (
+    <div
+      className="panel-splitter"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整面板分栏"
+      aria-valuenow={Math.round(ratio * 100)}
+      aria-valuemin={Math.round(bounds.minimum * 100)}
+      aria-valuemax={Math.round(bounds.maximum * 100)}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onKeyDown={onKeyDown}
+    />
+  )
+}
+
+export function PanelDock({ tier }: PanelDockProps) {
+  const rightPanel = useShellStore((state) => state.rightPanel)
+  const rightWidth = useShellStore((state) => state.rightWidth)
+  const setRightWidth = useShellStore((state) => state.setRightWidth)
+  const setRightPanel = useShellStore((state) => state.setRightPanel)
+  const togglePanel = useShellStore((state) => state.togglePanel)
+
+  const [activeTab, setActiveTab] = useState<PanelKind>('resume')
+  const [splitRatio, setSplitRatio] = useState(0.5)
+
+  const open = rightPanel !== 'none'
+  const maximum = tier === 'wide' ? PANEL_WIDTH_MAX : PANEL_WIDTH_NARROW_MAX
+  const storedWidth = Math.min(rightWidth, maximum)
+  const both = rightPanel === 'both'
+  // With both panels open on a wide window the dock has to be wide enough for
+  // two panes at their own minimum; the stored width is not rewritten, so
+  // closing one panel returns to the width the user chose.
+  const dockWidth =
+    both && tier === 'wide' ? Math.max(storedWidth, TWO_PANE_MIN_WIDTH) : storedWidth
+  const splitView = both && tier === 'wide' && dockWidth >= TWO_PANE_MIN_WIDTH
+  const minimumRatio = dockWidth === 0 ? 0.5 : Math.min(0.5, PANEL_WIDTH_MIN / dockWidth)
+  const bounds = { minimum: minimumRatio, maximum: 1 - minimumRatio }
+  const resizeMinimum = splitView ? TWO_PANE_MIN_WIDTH : PANEL_WIDTH_MIN
+
+  const closeAll = (): void => setRightPanel('none')
+
+  return (
+    <aside
+      className="panel-dock"
+      data-open={open}
+      aria-label="右侧面板"
+      // Nothing focusable is rendered while the dock is closed, so hiding it
+      // from assistive technology cannot strand the tab order in it.
+      aria-hidden={open ? undefined : true}
+      data-region={open ? 'panel' : undefined}
+      tabIndex={open ? -1 : undefined}
+    >
+      {open ? (
+        <>
+          <div className="panel-dock-surface">
+            {splitView ? (
+              <div className="panel-split">
+                <section
+                  className="dock-pane"
+                  style={{ flexBasis: `${Math.round(splitRatio * 100)}%` }}
+                  aria-label="简历创作"
+                >
+                  <PaneHeader kind="resume" onClose={() => togglePanel('resume')} />
+                  <div className="dock-body">{panelBody('resume')}</div>
+                </section>
+                <SplitDivider ratio={splitRatio} bounds={bounds} onChange={setSplitRatio} />
+                <section className="dock-pane" aria-label="简历信息">
+                  <PaneHeader kind="info" onClose={() => togglePanel('info')} />
+                  <div className="dock-body">{panelBody('info')}</div>
+                </section>
+              </div>
+            ) : (
+              <>
+                <header className="dock-head">
+                  {both ? (
+                    <TabList
+                      tabs={PANEL_TABS}
+                      active={activeTab}
+                      onChange={setActiveTab}
+                      label="面板切换"
+                      className="tabs-list-dock"
+                    />
+                  ) : (
+                    <h2 className="dock-title">
+                      {PANEL_TITLES[rightPanel === 'resume' ? 'resume' : 'info']}
+                    </h2>
+                  )}
+                  <IconButton icon="close" label="关闭面板" size="small" onClick={closeAll} />
+                </header>
+                <div className="dock-body">
+                  {panelBody(both ? activeTab : rightPanel === 'resume' ? 'resume' : 'info')}
+                </div>
+              </>
+            )}
+          </div>
+          {tier === 'compact' ? null : (
+            <ResizeHandle
+              width={dockWidth}
+              minimum={resizeMinimum}
+              maximum={maximum}
+              onCommit={(width) => setRightWidth(width, maximum)}
+            />
+          )}
+        </>
+      ) : null}
+    </aside>
+  )
+}
