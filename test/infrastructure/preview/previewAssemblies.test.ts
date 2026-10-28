@@ -23,6 +23,11 @@ import {
   SequentialIdGenerator,
 } from '../../../src/infrastructure/preview/deterministicEnvironment'
 import { PREVIEW_SCRIPT } from '../../../src/infrastructure/preview/fixtures'
+import {
+  PREVIEW_CONVERSATION_ID,
+  PREVIEW_RUN_ID,
+} from '../../../src/infrastructure/preview/fixtures.conversation'
+import { createPreviewConversationService } from '../../../src/bootstrap/previewConversation'
 
 async function collect(stream: AsyncIterable<ModelChunk>): Promise<ModelChunk[]> {
   const chunks: ModelChunk[] = []
@@ -126,5 +131,64 @@ describe('InMemorySecretStore', () => {
   it('returns null for a reference that was never stored', async () => {
     const store = new InMemorySecretStore()
     await expect(store.load('provider:missing')).resolves.toBeNull()
+  })
+})
+
+describe('the preview conversation assembly', () => {
+  it('serves the seeded conversation, transcript and run', async () => {
+    const { service } = createPreviewConversationService()
+
+    const listed = await service.listConversations()
+    expect(listed.conversations.map((conversation) => conversation.id)).toEqual([
+      PREVIEW_CONVERSATION_ID,
+    ])
+    const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 10)
+    expect(messages.map((message) => message.kind)).toEqual(['user', 'tool', 'assistant'])
+    expect(messages.every((message) => message.runId === PREVIEW_RUN_ID || message.seq === 1)).toBe(
+      true,
+    )
+  })
+
+  it('streams a deterministic answer through the scripted model', async () => {
+    const { service } = createPreviewConversationService()
+    const events: string[] = []
+    const run = await service.runTurn(
+      {
+        conversationId: PREVIEW_CONVERSATION_ID,
+        userMessage: {
+          conversationId: PREVIEW_CONVERSATION_ID,
+          kind: 'user',
+          markdown: '继续。',
+        },
+        model: null,
+        activeResumeId: null,
+      },
+      (event) => {
+        events.push(event.type)
+      },
+    )
+
+    expect(run.status).toBe('completed')
+    expect(events[0]).toBe('runStarted')
+    expect(events.at(-1)).toBe('done')
+    const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 20)
+    const assistant = [...messages].reverse().find((message) => message.kind === 'assistant')
+    expect(assistant?.markdown).toContain('信息库')
+    expect(assistant?.status).toBe('complete')
+  })
+
+  it('creates, renames and deletes conversations against the same memory store', async () => {
+    const { service } = createPreviewConversationService()
+    const created = await service.createConversation({ title: '预览会话' })
+    const renamed = await service.renameConversation({
+      conversationId: created.id,
+      title: '重命名后的会话',
+    })
+    expect(renamed.title).toBe('重命名后的会话')
+    await service.deleteConversation({ conversationId: created.id })
+    const listed = await service.listConversations()
+    expect(listed.conversations.map((conversation) => conversation.id)).toEqual([
+      PREVIEW_CONVERSATION_ID,
+    ])
   })
 })
