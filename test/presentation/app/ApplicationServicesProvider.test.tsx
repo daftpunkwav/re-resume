@@ -24,6 +24,7 @@ import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
 import { stubCompositionRoot } from '../../support/stubCompositionRoot'
 
 function stubRoot(): CompositionRoot {
+  const base = stubCompositionRoot()
   return {
     appInfo: {
       version: '0.0.0-test',
@@ -36,9 +37,11 @@ function stubRoot(): CompositionRoot {
       read: async () => DEFAULT_APP_SETTINGS,
       save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
     },
-    info: stubCompositionRoot().info,
-    resume: stubCompositionRoot().resume,
+    info: base.info,
+    resume: base.resume,
     conversation: createPreviewConversationService().service,
+    providers: base.providers,
+    libraryChanges: base.libraryChanges,
     secrets: new InMemorySecretStore(),
     shutdown: vi.fn(async () => undefined),
   }

@@ -56,7 +56,11 @@ function requireEntry(value: InfoEntry | null | undefined, id: InfoEntryId): Inf
 
 /** Change records of a preview session, newest last. */
 export class InMemoryChangeLogRepository implements ChangeLogRepository {
-  readonly #records: ChangeRecord[] = []
+  readonly #records: ChangeRecord[]
+
+  constructor(initial: readonly ChangeRecord[] = []) {
+    this.#records = [...initial]
+  }
 
   async findById(id: ChangeRecordId): Promise<ChangeRecord | null> {
     return this.#records.find((record) => record.id === id) ?? null

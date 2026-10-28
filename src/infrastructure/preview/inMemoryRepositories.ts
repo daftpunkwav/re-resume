@@ -35,7 +35,11 @@ export class InMemoryAppSettingsRepository implements AppSettingsRepository {
 }
 
 export class InMemoryProviderConfigRepository implements ProviderConfigRepository {
-  readonly #rows = new Map<string, ProviderConfig>()
+  readonly #rows: Map<string, ProviderConfig>
+
+  constructor(initial: readonly ProviderConfig[] = []) {
+    this.#rows = new Map(initial.map((config) => [config.id, config]))
+  }
 
   async listAll(): Promise<readonly ProviderConfig[]> {
     return [...this.#rows.values()]
@@ -66,7 +70,11 @@ export class InMemoryProviderConfigRepository implements ProviderConfigRepositor
 
 /** Credentials held for the lifetime of the preview session. */
 export class InMemorySecretStore implements SecretStore {
-  readonly #secrets = new Map<string, string>()
+  readonly #secrets: Map<string, string>
+
+  constructor(initial: readonly (readonly [string, string])[] = []) {
+    this.#secrets = new Map(initial)
+  }
 
   async store(ref: string, secret: string): Promise<void> {
     this.#secrets.set(ref, secret)

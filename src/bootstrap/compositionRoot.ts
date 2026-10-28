@@ -29,12 +29,16 @@ import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import {
   createConversationService,
+  createProviderFromConfig,
   readActiveProviderSecret,
   resolveActiveProvider,
 } from './wiring/conversation'
 import type { ConversationRepositories } from './wiring/conversation'
 import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
 import { buildToolRegistry } from '../application/generation/buildToolRegistry'
+import { PROVIDER_CONNECTION_TIMEOUT_MS } from '../application/settings/providerConfiguration'
+import { createProviderService } from './wiring/providers'
+import { createLibraryChangesService } from './wiring/changes'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
@@ -48,6 +52,7 @@ import { ResumeEntryReferences } from '../infrastructure/persistence/resume/Resu
 import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
 import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
+import { SqliteChangeRecordRepository } from '../infrastructure/persistence/info/SqliteChangeRecordRepository'
 import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
 import { SqliteConversationRepository } from '../infrastructure/persistence/conversation/SqliteConversationRepository'
@@ -264,6 +269,7 @@ export async function createCompositionRoot(
     const settingsRepository = new SqliteAppSettingsRepository(database, clock)
     const customModuleRepository = new SqliteCustomModuleRepository(database)
     const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
+    const changeLog = new SqliteChangeRecordRepository(database)
     const ids = new RandomIdGenerator()
     const resumes = new SqliteResumeRepository(database, clock, ids)
     const providerConfigs = new SqliteProviderConfigRepository(database)
@@ -274,6 +280,23 @@ export async function createCompositionRoot(
       secrets,
       clock,
       ids,
+    })
+    // The probe talks to the same API as a turn, so it shares the transport
+    // contract; the root keeps one client per surface instead of reaching for a
+    // global.
+    const http = createTauriHttpClient()
+    const providers = createProviderService({
+      providers: providerConfigs,
+      settings: settingsRepository,
+      secrets,
+      clock,
+      ids,
+      createProvider: (config, apiKey) =>
+        createProviderFromConfig(config, apiKey, {
+          http,
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          connectTimeoutMs: PROVIDER_CONNECTION_TIMEOUT_MS,
+        }),
     })
     const databaseFile = await resolveDatabaseFile()
     const info = createInfoService({
@@ -298,6 +321,13 @@ export async function createCompositionRoot(
         ids,
       }),
       conversation,
+      providers,
+      libraryChanges: createLibraryChangesService({
+        changes: changeLog,
+        entries: infoEntries,
+        customModules: customModuleRepository,
+        clock,
+      }),
       secrets,
       shutdown: async (): Promise<void> => {
         await database.close()
