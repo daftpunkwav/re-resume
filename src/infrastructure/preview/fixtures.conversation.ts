@@ -20,7 +20,11 @@ import type { Conversation } from '../../domain/conversation/Conversation'
 import type { Message } from '../../domain/conversation/Message'
 import type { MessageContext } from '../../domain/conversation/MessageContext'
 import type { InfoEntry } from '../../domain/info/InfoEntry'
-import type { ModelChunk } from '../../domain/generation/ports/ModelProvider'
+import type {
+  ChatRequest,
+  ModelChunk,
+} from '../../domain/generation/ports/ModelProvider'
+import type { ScriptedTurn } from './ScriptedModelProvider'
 import type { ToolInvocation } from '../../domain/generation/ToolInvocation'
 import type { DateTime } from '../../domain/shared/DateTime'
 import { parseDateTime } from '../../domain/shared/DateTime'
@@ -351,3 +355,158 @@ export const PREVIEW_FAILURE_SCRIPT: readonly ModelChunk[] = [
 /** The message the failure script ends with; shown on the assistant bubble. */
 export const PREVIEW_FAILURE_MESSAGE =
   '模型服务返回 503：服务暂时不可用，请稍后重试。'
+
+
+/** The sample posting the preview tool chain analyzes. */
+const PREVIEW_JOB_DESCRIPTION = [
+  '岗位：后端开发工程师（电商中台）',
+  '职责：负责订单与结算链路的设计、开发与性能优化；',
+  '参与服务拆分与稳定性建设。',
+  '要求：熟悉 TypeScript 或 Java，熟悉关系型数据库与缓存；',
+  '有高并发系统经验者优先。',
+].join('\n')
+
+/** The summary text the preview chain writes into the resume. */
+const PREVIEW_SUMMARY_TEXT =
+  '三年后端开发经验，主导订单中台结算链路优化与领域服务拆分，' +
+  '习惯用数据验证方案，注重可观测与可回滚的小步迭代。'
+
+function toolCall(name: string, args: unknown): ModelChunk {
+  return { type: 'toolCall', name, argsJson: JSON.stringify(args) }
+}
+
+function textChunks(lines: readonly string[]): readonly ModelChunk[] {
+  return lines.map((line) => ({ type: 'text' as const, textDelta: line }))
+}
+
+/** Every tool result the request carries, in call order. */
+function toolResultContents(request: ChatRequest): readonly string[] {
+  const contents: string[] = []
+  for (const message of request.messages) {
+    for (const part of message.parts) {
+      if (part.kind === 'toolResult') contents.push(part.content)
+    }
+  }
+  return contents
+}
+
+/** The value of the newest tool result whose JSON parses, or null. */
+function lastToolValue(request: ChatRequest): Record<string, unknown> | null {
+  const contents = toolResultContents(request)
+  for (let index = contents.length - 1; index >= 0; index -= 1) {
+    const content = contents[index] ?? ''
+    try {
+      const envelope = JSON.parse(content) as { ok?: unknown; value?: unknown }
+      if (envelope.ok === true && typeof envelope.value === 'object' && envelope.value !== null) {
+        return envelope.value as Record<string, unknown>
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+function resumeIdOf(request: ChatRequest): string | null {
+  const value = lastToolValue(request)
+  return value !== null && typeof value.resumeId === 'string' ? value.resumeId : null
+}
+
+function sectionIdsOf(request: ChatRequest): readonly string[] {
+  const value = lastToolValue(request)
+  if (value === null || !Array.isArray(value.sections)) return []
+  return value.sections
+    .map((section) =>
+      typeof section === 'object' && section !== null && typeof (section as { sectionId?: unknown }).sectionId === 'string'
+        ? ((section as { sectionId: string }).sectionId)
+        : null,
+    )
+    .filter((sectionId): sectionId is string => sectionId !== null)
+}
+
+const PREVIEW_SELECTION = [
+  { moduleKind: 'personal' as const, entryIds: ['preview-personal-1'] },
+  { moduleKind: 'jobIntent' as const, entryIds: ['preview-job-intent-1'] },
+  { moduleKind: 'education' as const, entryIds: ['preview-education-1'] },
+  { moduleKind: 'internship' as const, entryIds: ['preview-internship-1'] },
+  { moduleKind: 'project' as const, entryIds: ['preview-project-1', 'preview-project-2'] },
+  { moduleKind: 'skill' as const, entryIds: ['preview-skill-1', 'preview-skill-2'] },
+]
+
+/**
+ * The scripted end-to-end chain: analyze the posting (whose extraction is its
+ * own model request), search the library, create a resume with a selection, read
+ * it back for its identifiers, reorder chapters, write the summary and check the
+ * layout before reporting. Later turns derive their identifiers from the tool
+ * results the run loop fed back, which is the same conversation shape a real
+ * model sees.
+ */
+export const PREVIEW_TOOL_CHAIN_TURNS: readonly ScriptedTurn[] = [
+  () => [toolCall('analyzeJobDescription', { text: PREVIEW_JOB_DESCRIPTION })],
+  // The extraction use case runs its own request behind the tool; its answer is
+  // the structured parse. Every statement below is copied from the posting.
+  () => [
+    {
+      type: 'text',
+      textDelta: JSON.stringify({
+        title: '后端开发工程师',
+        company: null,
+        responsibilities: [
+          '负责订单与结算链路的设计、开发与性能优化',
+          '参与服务拆分与稳定性建设',
+        ],
+        requirements: ['熟悉 TypeScript 或 Java', '熟悉关系型数据库与缓存'],
+        keywords: ['TypeScript', 'Java', '高并发'],
+      }),
+    },
+  ],
+  () => [toolCall('searchInfoEntries', { keyword: '项目' })],
+  () => [
+    toolCall('createResume', {
+      title: '后端开发工程师简历',
+      targetJob: { title: '后端开发工程师', company: '字节跳动' },
+      templateId: 'classic-single',
+      selection: PREVIEW_SELECTION,
+    }),
+  ],
+  (request) => {
+    const resumeId = resumeIdOf(request)
+    return resumeId === null
+      ? textChunks(['创建简历没有返回标识，先停在这里。'])
+      : [toolCall('getResume', { resumeId })]
+  },
+  (request) => {
+    const resumeId = resumeIdOf(request)
+    const sectionIds = sectionIdsOf(request)
+    if (resumeId === null || sectionIds.length === 0) {
+      return textChunks(['读取简历没有返回章节，先停在这里。'])
+    }
+    return [
+      toolCall('setSectionOrder', {
+        resumeId,
+        orderedSectionIds: [...sectionIds].reverse(),
+      }),
+    ]
+  },
+  (request) => {
+    const resumeId = resumeIdOf(request)
+    return resumeId === null
+      ? textChunks(['调整章节后没有拿到简历标识，先停在这里。'])
+      : [toolCall('writeResumeSummary', { resumeId, text: PREVIEW_SUMMARY_TEXT })]
+  },
+  (request) => {
+    const resumeId = resumeIdOf(request)
+    return resumeId === null
+      ? textChunks(['写总结后没有拿到简历标识，先停在这里。'])
+      : [toolCall('checkLayoutOverflow', { resumeId })]
+  },
+  () =>
+    textChunks([
+      '我已经完成这一轮简历整理：\n\n',
+      '1. 分析了岗位描述，提取出订单、结算与高并发相关的重点。\n',
+      '2. 从信息库挑选了个人信息、求职意向、教育、实习、项目与技能条目。\n',
+      '3. 创建简历、调整章节顺序，并写入面向该岗位的总结。\n',
+      '4. 检查了排版溢出，结果见上方的工具卡片。\n\n',
+      '右侧简历面板可以查看结果；每张写操作卡片都能单独撤销。',
+    ]),
+]

@@ -9,13 +9,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChangeRecord } from '../../../../src/domain/changes/ChangeRecord'
-import { asChangeRecordId, asMessageId } from '../../../../src/domain/shared/branded-id'
+import {
+  asChangeRecordId,
+  asMessageId,
+  asResumeId,
+  asRevisionId,
+} from '../../../../src/domain/shared/branded-id'
 import { ModelCallError } from '../../../../src/infrastructure/http/ProviderAdapters/errors'
 import { createInfoService } from '../../../../src/bootstrap/wiring/info'
 import { createConversationService } from '../../../../src/bootstrap/wiring/conversation'
 import { createAppSettingsService } from '../../../../src/bootstrap/wiring/appSettings'
 import { ActiveRunRegistry } from '../../../../src/application/generation/activeRunRegistry'
-import { buildToolRegistry } from '../../../../src/application/generation/buildToolRegistry'
+import { ResumeEntryReferences } from '../../../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import {
   InMemoryChangeLogRepository,
   InMemoryCustomModuleRepository,
@@ -36,6 +41,7 @@ interface Harness {
   readonly bed: ConversationBed
   readonly services: ConversationServices
   readonly undo: ReturnType<typeof vi.fn>
+  readonly undoRevision: ReturnType<typeof vi.fn>
 }
 
 function createHarness(): Harness {
@@ -51,13 +57,20 @@ function createHarness(): Harness {
       invocations: bed.invocations,
       fileStore: bed.fileStore,
     },
+    library: {
+      entries: bed.entries,
+      customModules: bed.customModules,
+      references: new ResumeEntryReferences(bed.resumes),
+      resumes: bed.resumes,
+      changes: bed.changes,
+      measurer: bed.measurer,
+    },
     clock: bed.clock,
     ids: bed.ids,
     model: bed.model,
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
-    registry: buildToolRegistry(),
   })
   const infoClock = new FixedClock()
   const infoIds = new SequentialIdGenerator('info')
@@ -73,14 +86,16 @@ function createHarness(): Harness {
   })
   const settingsRepository = new InMemoryAppSettingsRepository(DEFAULT_APP_SETTINGS)
   const undo = vi.fn(async (input: { changeId: string }) => ({ id: input.changeId }) as unknown as ChangeRecord)
+  const undoRevision = vi.fn(async () => ({ label: '修改' }))
   return {
     bed,
     undo,
+    undoRevision,
     services: {
       conversation,
       info,
       settings: createAppSettingsService({ repository: settingsRepository }),
-      libraryChanges: { undo },
+      libraryChanges: { undo, undoRevision },
     },
   }
 }
@@ -313,5 +328,43 @@ describe('conversationStore undo', () => {
     expect(done).toBe(false)
     expect(useConversationStore.getState().error?.message).toContain('已经撤销')
     expect(useConversationStore.getState().undone.has('change-1')).toBe(false)
+  })
+
+  it('reverses a resume revision through the revision capability', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    const done = await useConversationStore
+      .getState()
+      .undoRevision(asResumeId('resume-1'), asRevisionId('revision-1'))
+
+    expect(done).toBe(true)
+    expect(harness.undoRevision).toHaveBeenCalledWith({
+      resumeId: 'resume-1',
+      revisionId: 'revision-1',
+    })
+    expect(useConversationStore.getState().undone.has('revision-1')).toBe(true)
+    await expect(
+      useConversationStore
+        .getState()
+        .undoRevision(asResumeId('resume-1'), asRevisionId('revision-1')),
+    ).resolves.toBe(false)
+  })
+
+  it('reports a refused revision undo and keeps the button available', async () => {
+    const harness = createHarness()
+    harness.undoRevision.mockRejectedValueOnce(new Error('已不是当前版本。'))
+    await connect(harness)
+    await flush()
+
+    const done = await useConversationStore
+      .getState()
+      .undoRevision(asResumeId('resume-1'), asRevisionId('revision-1'))
+
+    expect(done).toBe(false)
+    expect(useConversationStore.getState().error?.message).toContain('当前版本')
+    expect(useConversationStore.getState().undone.has('revision-1')).toBe(false)
+    expect(useConversationStore.getState().undoBusy.has('revision-1')).toBe(false)
   })
 })

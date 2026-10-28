@@ -23,9 +23,9 @@
  * - A cancellation that arrives while a tool runs takes effect after the tool
  *   settles: the call is bounded by its own timeout and letting it finish keeps
  *   the audit row truthful about what was written.
- * - Context blocks for the resume and the information library are produced by
- *   the layers that own those models, so this build leaves them null. The
- *   budget, truncation and history rules are implemented and tested here.
+ * - The resume and library context blocks are read through the same use cases
+ *   and ports the tools use, so what the model is told and what it can change
+ *   never disagree.
  */
 
 import type {
@@ -70,6 +70,11 @@ import type { MessageContextRepository } from '../../domain/conversation/ports/M
 import type { MessageRepository } from '../../domain/conversation/ports/MessageRepository'
 import type { JobPostingRepository } from '../../domain/generation/ports/JobPostingRepository'
 import type { ToolInvocationRepository } from '../../domain/generation/ports/ToolInvocationRepository'
+import type { ChangeLogRepository } from '../../domain/changes/ports/ChangeLogRepository'
+import type { CustomModuleRepository } from '../../domain/info/ports/CustomModuleRepository'
+import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepository'
+import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
+import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
 import { appendMessage } from '../conversation/appendMessage'
 import type { AppendMessageInput } from '../conversation/appendMessage'
 import { autoTitleConversation } from '../conversation/autoTitle'
@@ -85,6 +90,11 @@ import { redactSecret } from './redactSecret'
 import { buildFixedSystemPromptSections, buildSystemPrompt } from './systemPrompt'
 import { executeToolCall } from './toolExecution'
 import { truncateToolResult } from './toolOutcome'
+import {
+  buildLibraryOverviewBlock,
+  buildResumeContextBlock,
+} from './tools/contextBlocks'
+import { findActiveResume, summarizeResume } from './tools/resumeSummary'
 
 /** Hard ceiling of one model request, including the time spent streaming it. */
 export const MODEL_TURN_TIMEOUT_MS = 120_000
@@ -146,6 +156,11 @@ export interface RunAgentTurnDeps {
   readonly jobPostings: JobPostingRepository
   readonly attachments: AttachmentRepository
   readonly fileStore: FileStore
+  readonly infoEntries: InfoEntryRepository
+  readonly customModules: CustomModuleRepository
+  readonly resumes: ResumeRepository
+  readonly changes: ChangeLogRepository
+  readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
   readonly emit: (event: AgentEvent) => void
@@ -732,6 +747,11 @@ function buildToolContext(
     jobPostings: deps.jobPostings,
     attachments: deps.attachments,
     fileStore: deps.fileStore,
+    infoEntries: deps.infoEntries,
+    customModules: deps.customModules,
+    resumes: deps.resumes,
+    changes: deps.changes,
+    measurer: deps.measurer,
     clock: deps.clock,
     ids: deps.ids,
     runId,
@@ -804,10 +824,14 @@ async function readContext(
     chips.push(resolved.chip)
   }
   const conversation = await deps.conversations.findById(input.conversationId)
+  const [resumeSummary, libraryOverview] = await Promise.all([
+    readResumeSummaryBlock(deps, input, conversation?.activeResumeId ?? null),
+    readLibraryOverviewBlock(deps),
+  ])
   const sources: AgentContextSources = {
     preamble: buildFixedSystemPromptSections(),
-    resumeSummary: null,
-    libraryOverview: null,
+    resumeSummary,
+    libraryOverview,
     chips,
     jobPosting,
     history,
@@ -822,6 +846,47 @@ async function readContext(
     }
   }
   return { ok: true, value: assembled.value }
+}
+
+/** Renders the current-resume block; no active resume means no block. */
+async function readResumeSummaryBlock(
+  deps: RunAgentTurnDeps,
+  input: RunAgentTurnInput,
+  conversationResumeId: ResumeId | null,
+): Promise<string | null> {
+  const resume = await findActiveResume(
+    { resumes: deps.resumes },
+    input.conversationId,
+    input.activeResumeId,
+    conversationResumeId,
+  )
+  if (resume === null) return null
+  const summary = await summarizeResume(
+    {
+      resumes: deps.resumes,
+      entries: deps.infoEntries,
+      customModules: deps.customModules,
+      jobPostings: deps.jobPostings,
+    },
+    resume,
+  )
+  return buildResumeContextBlock(summary)
+}
+
+/** Renders the library overview: module counts plus their leading titles. */
+async function readLibraryOverviewBlock(deps: RunAgentTurnDeps): Promise<string | null> {
+  const [entries, customModules] = await Promise.all([
+    deps.infoEntries.listAll(),
+    deps.customModules.listAll(),
+  ])
+  const titlesByModule = new Map<string, string[]>()
+  for (const entry of entries) {
+    const key = `${entry.moduleKind}:${entry.customModuleId ?? ''}`
+    const titles = titlesByModule.get(key) ?? []
+    titles.push(entry.title)
+    titlesByModule.set(key, titles)
+  }
+  return buildLibraryOverviewBlock(titlesByModule, customModules, entries.length)
 }
 
 async function resolveChip(

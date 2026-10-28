@@ -17,7 +17,6 @@ import { redactJsonSecrets, redactSecret } from '../../../src/application/genera
 import { retryRun } from '../../../src/application/generation/retryRun'
 import { runAgentTurn } from '../../../src/application/generation/runAgentTurn'
 import type { RunAgentTurnDeps } from '../../../src/application/generation/runAgentTurn'
-import { buildToolRegistry } from '../../../src/application/generation/buildToolRegistry'
 import { summarizeToolArgs } from '../../../src/application/generation/toolArgsSummary'
 import { executeToolCall } from '../../../src/application/generation/toolExecution'
 import {
@@ -50,7 +49,7 @@ function turnDeps(
   return {
     model: bed.model,
     titleModel: null,
-    registry: buildToolRegistry(),
+    registry: bed.registry,
     conversations: bed.conversations,
     messages: bed.messages,
     messageContexts: bed.messageContexts,
@@ -59,6 +58,11 @@ function turnDeps(
     jobPostings: bed.jobPostings,
     attachments: bed.attachments,
     fileStore: bed.fileStore,
+    infoEntries: bed.entries,
+    customModules: bed.customModules,
+    resumes: bed.resumes,
+    changes: bed.changes,
+    measurer: bed.measurer,
     clock: bed.clock,
     ids: bed.ids,
     emit: bed.emit,
@@ -374,6 +378,11 @@ describe('the tool execution pipeline', () => {
       jobPostings: bed.jobPostings,
       attachments: bed.attachments,
       fileStore: bed.fileStore,
+      infoEntries: bed.entries,
+      customModules: bed.customModules,
+      resumes: bed.resumes,
+      changes: bed.changes,
+      measurer: bed.measurer,
       clock: bed.clock,
       ids: bed.ids,
       runId: asAgentRunId('run-1'),
@@ -458,7 +467,7 @@ describe('the tool execution pipeline', () => {
 
     const outcome = await executeToolCall(
       {
-        registry: buildToolRegistry(),
+        registry: bed.registry,
         invocations: bed.invocations,
         clock: bed.clock,
         ids: bed.ids,

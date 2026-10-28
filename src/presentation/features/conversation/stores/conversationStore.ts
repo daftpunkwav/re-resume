@@ -36,7 +36,11 @@ import type {
 import type { Message } from '../../../../domain/conversation/Message'
 import type { MessageContext } from '../../../../domain/conversation/MessageContext'
 import type { AgentEvent } from '../../../../domain/generation/AgentEvent'
-import type { ChangeRecordId } from '../../../../domain/shared/branded-id'
+import type {
+  ChangeRecordId,
+  ResumeId,
+  RevisionId,
+} from '../../../../domain/shared/branded-id'
 import { moduleDescriptor } from '../../../../domain/info/InfoModuleKind'
 import type { CustomModuleDefinition } from '../../../../domain/info/CustomModule'
 import { describeError } from '../../../app/errorMessages'
@@ -113,6 +117,7 @@ interface ConversationState {
   togglePinned(conversationId: Conversation['id'], pinned: boolean): Promise<boolean>
   removeConversation(conversationId: Conversation['id']): Promise<boolean>
   undoChange(changeId: ChangeRecordId): Promise<boolean>
+  undoRevision(resumeId: ResumeId, revisionId: RevisionId): Promise<boolean>
   clearError(): void
 }
 
@@ -564,6 +569,33 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       set((state) => {
         const busy = new Set(state.undoBusy)
         busy.delete(changeId)
+        return { undoBusy: busy, error: describeError(failure) }
+      })
+      return false
+    }
+  },
+
+  async undoRevision(resumeId, revisionId) {
+    const current = services
+    if (current === null) return false
+    if (get().undoBusy.has(revisionId) || get().undone.has(revisionId)) return false
+    set((state) => ({ undoBusy: new Set(state.undoBusy).add(revisionId) }))
+    try {
+      await current.libraryChanges.undoRevision({ resumeId, revisionId })
+      set((state) => {
+        const busy = new Set(state.undoBusy)
+        busy.delete(revisionId)
+        return {
+          undoBusy: busy,
+          undone: new Set(state.undone).add(revisionId),
+        }
+      })
+      showToast('success', '已撤销这次修改')
+      return true
+    } catch (failure) {
+      set((state) => {
+        const busy = new Set(state.undoBusy)
+        busy.delete(revisionId)
         return { undoBusy: busy, error: describeError(failure) }
       })
       return false

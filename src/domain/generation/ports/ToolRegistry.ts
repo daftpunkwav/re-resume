@@ -29,6 +29,11 @@ import type { AttachmentRepository } from '../../conversation/ports/AttachmentRe
 import type { ConversationRepository } from '../../conversation/ports/ConversationRepository'
 import type { FileStore } from '../../conversation/ports/FileStore'
 import type { MessageRepository } from '../../conversation/ports/MessageRepository'
+import type { ChangeLogRepository } from '../../changes/ports/ChangeLogRepository'
+import type { CustomModuleRepository } from '../../info/ports/CustomModuleRepository'
+import type { InfoEntryRepository } from '../../info/ports/InfoEntryRepository'
+import type { ResumeRepository } from '../../resume/ports/ResumeRepository'
+import type { TextMeasurer } from '../../resume/ports/TextMeasurer'
 import type { JobPostingRepository } from './JobPostingRepository'
 import type { ToolSchema } from './ModelProvider'
 
@@ -42,9 +47,9 @@ export interface RegisteredTool<I, O> {
 }
 
 /**
- * Capabilities handed to every tool execution. Information-library, resume and
- * export access is added by the tool pack that needs it; the runtime itself
- * only owns conversation state.
+ * Capabilities handed to every tool execution. The conversation ports carry the
+ * run's own state; the library, resume and change ports are the write channels
+ * the tool pack uses, and the measurer is what the layout queries need.
  */
 export interface ToolContext {
   readonly conversations: ConversationRepository
@@ -52,6 +57,11 @@ export interface ToolContext {
   readonly jobPostings: JobPostingRepository
   readonly attachments: AttachmentRepository
   readonly fileStore: FileStore
+  readonly infoEntries: InfoEntryRepository
+  readonly customModules: CustomModuleRepository
+  readonly resumes: ResumeRepository
+  readonly changes: ChangeLogRepository
+  readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
   /** Required: every write a tool performs is attributed to this run. */

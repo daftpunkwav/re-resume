@@ -5,49 +5,36 @@
  * the interface needs no preview branch of its own.
  *
  * Responsibilities:
- * - Seed the fixture information library, the fixture resumes and the scripted
- *   conversation into in-memory repositories
- * - Use the deterministic clock and identifier source so a session is repeatable
+ * - Seed one memory state: the fixture information library, the fixture resumes,
+ *   the scripted conversations and their recorded tool calls
+ * - Assemble the conversation, library and resume services over that same state,
+ *   so a tool call the assistant makes is visible to both panels
  * - Answer the library's reference question from the in-memory resumes
  * - Measure with the fixture measurer, never the bundled fonts
  *
  * Constraints:
  * - Only loaded when the window is served in development with `?preview`; the
  *   production bundle does not contain this module.
- * - Areas added later extend this file by one wiring import and one spread;
- *   the root's contract stays in `capabilities.ts`.
- * - `?script=slow|failure` chooses the replay the scripted model uses; nothing
- *   else about the preview changes.
+ * - `?script=slow|failure` chooses the replay the scripted model uses; the
+ *   default replay is the end-to-end tool chain.
  */
 
-import type { CompositionRoot } from './capabilities'
+import type { AppSettingsRepository } from '../domain/settings/ports/AppSettingsRepository'
+import type { SecretStore } from '../domain/generation/ports/SecretStore'
+import type { CompositionRoot, ProviderService } from './capabilities'
 import { describeAppInfo } from './buildInfo'
-import { createAppSettingsService } from './wiring/appSettings'
+import { createAppSettingsService, createBackupService } from './wiring/appSettings'
+import { createSeedDataService } from './wiring/seed'
 import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import { createLibraryChangesService } from './wiring/changes'
 import { createProviderService } from './wiring/providers'
-import { createBackupService } from './wiring/appSettings'
-import { createSeedDataService } from './wiring/seed'
-import type { ProviderService } from './capabilities'
-import type { AppSettingsRepository } from '../domain/settings/ports/AppSettingsRepository'
-import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import {
   InMemoryAppSettingsRepository,
   InMemoryProviderConfigRepository,
   InMemorySecretStore,
 } from '../infrastructure/preview/inMemoryRepositories'
-import {
-  InMemoryChangeLogRepository,
-  InMemoryCustomModuleRepository,
-  InMemoryInfoEntryRepository,
-} from '../infrastructure/preview/inMemoryInfoRepositories'
-import {
-  FakeClock,
-  SequentialIdGenerator,
-} from '../infrastructure/preview/deterministicEnvironment'
-import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
-import { InMemoryResumeRepository } from '../infrastructure/preview/inMemoryResumeRepository'
+import { FakeClock, SequentialIdGenerator } from '../infrastructure/preview/deterministicEnvironment'
 import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
 import {
   PREVIEW_PROBE_SCRIPT,
@@ -56,28 +43,19 @@ import {
   PREVIEW_SETTINGS,
 } from '../infrastructure/preview/fixtures'
 import {
-  PREVIEW_CHANGE_RECORD,
   PREVIEW_CONVERSATION_SCRIPT,
   PREVIEW_FAILURE_MESSAGE,
   PREVIEW_FAILURE_SCRIPT,
   PREVIEW_SLOW_SCRIPT,
+  PREVIEW_TOOL_CHAIN_TURNS,
 } from '../infrastructure/preview/fixtures.conversation'
-import {
-  PREVIEW_INFO_CUSTOM_MODULES,
-  PREVIEW_INFO_ENTRIES,
-} from '../infrastructure/preview/fixtures.info'
-import { PREVIEW_RESUMES } from '../infrastructure/preview/fixtures.resume'
-import {
-  InMemoryAttachmentRepository,
-  InMemoryJobPostingRepository,
-} from '../infrastructure/preview/inMemoryConversationRepositories'
 import { ScriptedModelProvider } from '../infrastructure/preview/ScriptedModelProvider'
 import { createPreviewConversationService } from './previewConversation'
-import type { PreviewConversationOptions } from './previewConversation'
+import type { PreviewConversationOptions, PreviewConversationState } from './previewConversation'
 
-/** The replay selected by `?script=`; the default script answers normally. */
+/** The replay selected by `?script=`; the default replay is the tool chain. */
 function readReplay(): PreviewConversationOptions {
-  if (typeof window === 'undefined') return {}
+  if (typeof window === 'undefined') return { turns: PREVIEW_TOOL_CHAIN_TURNS }
   const script = new URLSearchParams(window.location.search).get('script')
   switch (script) {
     case 'slow':
@@ -93,52 +71,46 @@ function readReplay(): PreviewConversationOptions {
           afterChunks: PREVIEW_FAILURE_SCRIPT.length,
         },
       }
-    default:
+    case 'plain':
       return { script: PREVIEW_CONVERSATION_SCRIPT }
+    default:
+      return { turns: PREVIEW_TOOL_CHAIN_TURNS }
   }
 }
 
-/**
- * The preview library, its change log and the undo service share one set of
- * repositories: undoing a preview write is visible to the information panel the
- * same way it is in the native root.
- */
-function createPreviewLibrary(): {
+/** The library and resume capabilities over the shared preview state. */
+function createPreviewLibraryServices(state: PreviewConversationState): {
   readonly info: CompositionRoot['info']
-  readonly libraryChanges: CompositionRoot['libraryChanges']
   readonly resume: CompositionRoot['resume']
+  readonly libraryChanges: CompositionRoot['libraryChanges']
 } {
-  const clock = new FakeClock()
-  const ids = new SequentialIdGenerator('preview-info')
-  const changes = new InMemoryChangeLogRepository([PREVIEW_CHANGE_RECORD])
-  const entries = new InMemoryInfoEntryRepository(changes)
-  const customModules = new InMemoryCustomModuleRepository(entries, changes)
-  entries.seed(PREVIEW_INFO_ENTRIES)
-  customModules.seed(PREVIEW_INFO_CUSTOM_MODULES)
-  const resumes = new InMemoryResumeRepository(clock)
-  resumes.seed(PREVIEW_RESUMES)
   const info = createInfoService({
-    entries,
-    customModules,
-    references: new ResumeEntryReferences(resumes),
-    clock,
-    ids,
-  })
-  const resume = createResumeService({
-    resumes,
-    entries,
-    customModules,
-    jobPostings: new InMemoryJobPostingRepository(),
-    attachments: new InMemoryAttachmentRepository(),
-    updateInfoEntry: info.updateEntry,
-    measurer: new FixtureTextMeasurer(),
-    clock,
-    ids: new SequentialIdGenerator('preview-resume'),
+    entries: state.entries,
+    customModules: state.customModules,
+    references: new ResumeEntryReferences(state.resumes),
+    clock: state.clock,
+    ids: new SequentialIdGenerator('preview-info'),
   })
   return {
     info,
-    resume,
-    libraryChanges: createLibraryChangesService({ changes, entries, customModules, clock }),
+    resume: createResumeService({
+      resumes: state.resumes,
+      entries: state.entries,
+      customModules: state.customModules,
+      jobPostings: state.jobPostings,
+      attachments: state.attachments,
+      updateInfoEntry: info.updateEntry,
+      measurer: state.measurer,
+      clock: new FakeClock(),
+      ids: new SequentialIdGenerator('preview-resume'),
+    }),
+    libraryChanges: createLibraryChangesService({
+      changes: state.changes,
+      entries: state.entries,
+      customModules: state.customModules,
+      resumes: state.resumes,
+      clock: state.clock,
+    }),
   }
 }
 
@@ -182,8 +154,8 @@ function createPreviewState(): PreviewState {
   const secrets = new InMemorySecretStore(
     PREVIEW_PROVIDERS.map((config) => [config.secretRef, PREVIEW_PROVIDER_CREDENTIAL] as const),
   )
-  const library = createPreviewLibrary()
   const conversation = createPreviewConversationService(readReplay())
+  const library = createPreviewLibraryServices(conversation.state)
   return {
     settings,
     secrets,
@@ -197,8 +169,8 @@ function createPreviewState(): PreviewState {
       info: library.info,
       resume: library.resume,
       conversation: conversation.service,
-      messages: conversation.repositories.messages,
-      clock: new FakeClock(),
+      messages: conversation.state.messages,
+      clock: conversation.state.clock,
     }),
   }
 }

@@ -28,6 +28,7 @@ import {
   PREVIEW_OLDER_CONVERSATION_ID,
   PREVIEW_PINNED_CONVERSATION_ID,
   PREVIEW_RUN_ID,
+  PREVIEW_TOOL_CHAIN_TURNS,
 } from '../../../src/infrastructure/preview/fixtures.conversation'
 import { createPreviewConversationService } from '../../../src/bootstrap/previewConversation'
 
@@ -158,8 +159,10 @@ describe('the preview conversation assembly', () => {
     )
   })
 
-  it('streams a deterministic answer through the scripted model', async () => {
-    const { service } = createPreviewConversationService()
+  it('runs the scripted end-to-end tool chain', async () => {
+    const { service, state } = createPreviewConversationService({
+      turns: PREVIEW_TOOL_CHAIN_TURNS,
+    })
     const events: string[] = []
     const run = await service.runTurn(
       {
@@ -167,7 +170,7 @@ describe('the preview conversation assembly', () => {
         userMessage: {
           conversationId: PREVIEW_CONVERSATION_ID,
           kind: 'user',
-          markdown: '继续。',
+          markdown: '帮我按这个岗位整理一份简历。',
         },
         model: null,
         activeResumeId: null,
@@ -180,10 +183,25 @@ describe('the preview conversation assembly', () => {
     expect(run.status).toBe('completed')
     expect(events[0]).toBe('runStarted')
     expect(events.at(-1)).toBe('done')
-    const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 20)
+    expect(events).toContain('toolStart')
+    expect(events).toContain('toolEnd')
+
+    const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 40)
     const assistant = [...messages].reverse().find((message) => message.kind === 'assistant')
-    expect(assistant?.markdown).toContain('岗位重点')
+    expect(assistant?.markdown).toContain('完成这一轮简历整理')
     expect(assistant?.status).toBe('complete')
+
+    // The tools really wrote: one posting, one resume and the audit rows of the
+    // chain are all in the shared memory state.
+    const postings = await state.jobPostings.listRecent(10)
+    expect(postings).toHaveLength(1)
+    expect(postings[0]?.parsedByRunId).not.toBeNull()
+    const resumes = await state.resumes.listAll()
+    const created = resumes.find((resume) => resume.title === '后端开发工程师简历')
+    expect(created).toBeDefined()
+    const invocations = await state.invocations.listByRun(run.id)
+    expect(invocations.length).toBeGreaterThanOrEqual(6)
+    expect(invocations.every((invocation) => invocation.status === 'ok')).toBe(true)
   })
 
   it('creates, renames and deletes conversations against the same memory store', async () => {

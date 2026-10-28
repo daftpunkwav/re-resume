@@ -34,9 +34,8 @@ import {
   readActiveProviderSecret,
   resolveActiveProvider,
 } from './wiring/conversation'
-import type { ConversationRepositories } from './wiring/conversation'
+import type { ConversationLibrary, ConversationRepositories } from './wiring/conversation'
 import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
-import { buildToolRegistry } from '../application/generation/buildToolRegistry'
 import { PROVIDER_CONNECTION_TIMEOUT_MS } from '../application/settings/providerConfiguration'
 import { createProviderService } from './wiring/providers'
 import { createLibraryChangesService } from './wiring/changes'
@@ -187,6 +186,8 @@ async function createConversationRuntime(input: {
   readonly repositories: ConversationRepositories
   readonly providerConfigs: SqliteProviderConfigRepository
   readonly secrets: StrongholdSecretStore
+  readonly measuredLibrary: Omit<ConversationLibrary, 'measurer'>
+  readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
 }): Promise<ReturnType<typeof createConversationService>> {
@@ -203,13 +204,13 @@ async function createConversationRuntime(input: {
   })
   const conversation = createConversationService({
     repositories: input.repositories,
+    library: { ...input.measuredLibrary, measurer: input.measurer },
     clock: input.clock,
     ids: input.ids,
     model,
     titleModel: model,
     activeRuns: new ActiveRunRegistry(),
     secrets: providerSecrets,
-    registry: buildToolRegistry(),
     maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     onWarning: (message, warning) => {
       console.warn(`[conversation] ${message}`, warning)
@@ -341,6 +342,7 @@ function createLibraryRuntime(input: {
       changes: input.repositories.changes,
       entries: input.repositories.entries,
       customModules: input.repositories.customModules,
+      resumes: input.repositories.resumes,
       clock: input.clock,
     }),
   }
@@ -350,6 +352,8 @@ function createLibraryRuntime(input: {
 async function createAgentRuntime(input: {
   readonly conversationRepositories: ConversationRepositories
   readonly repositories: RootRepositories
+  readonly measuredLibrary: Omit<ConversationLibrary, 'measurer'>
+  readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
 }): Promise<Pick<CompositionRoot, 'conversation' | 'providers'>> {
@@ -357,6 +361,8 @@ async function createAgentRuntime(input: {
     repositories: input.conversationRepositories,
     providerConfigs: input.repositories.providerConfigs,
     secrets: input.repositories.secrets,
+    measuredLibrary: input.measuredLibrary,
+    measurer: input.measurer,
     clock: input.clock,
     ids: input.ids,
   })
@@ -390,9 +396,18 @@ export async function createCompositionRoot(
     })
     const fileStore = new UnavailableAttachmentStore()
     const conversationRepositories = createConversationRepositories(database, fileStore)
+    const measuredLibrary: Omit<ConversationLibrary, 'measurer'> = {
+      entries: repositories.entries,
+      customModules: repositories.customModules,
+      references: new ResumeEntryReferences(repositories.resumes),
+      resumes: repositories.resumes,
+      changes: repositories.changes,
+    }
     const agent = await createAgentRuntime({
       conversationRepositories,
       repositories,
+      measuredLibrary,
+      measurer,
       clock,
       ids,
     })

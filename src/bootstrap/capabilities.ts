@@ -137,7 +137,7 @@ import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { ProviderConfig } from '../domain/settings/ProviderConfig'
 import type { ChangeRecord } from '../domain/changes/ChangeRecord'
-import type { ChangeRecordId } from '../domain/shared/branded-id'
+import type { ChangeRecordId, RevisionId } from '../domain/shared/branded-id'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import type { MissingReference } from '../domain/resume/MissingReference'
 import type { Resume } from '../domain/resume/Resume'
@@ -224,6 +224,14 @@ export interface ProviderService {
  */
 export interface LibraryChangesService {
   readonly undo: (input: { readonly changeId: ChangeRecordId }) => Promise<ChangeRecord>
+  /**
+   * Reverses one resume revision the assistant produced, while it is still the
+   * cursor. A later write refuses with `changeOutOfOrder`.
+   */
+  readonly undoRevision: (input: {
+    readonly resumeId: ResumeId
+    readonly revisionId: RevisionId
+  }) => Promise<{ readonly label: string }>
 }
 
 /**
