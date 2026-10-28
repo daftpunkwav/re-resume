@@ -231,6 +231,33 @@ async function createConversationRuntime(input: {
   return conversation
 }
 
+/** Binds the provider use cases to the settings row and the encrypted secrets. */
+function createProviderRuntime(input: {
+  readonly providers: SqliteProviderConfigRepository
+  readonly settings: SqliteAppSettingsRepository
+  readonly secrets: StrongholdSecretStore
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): ReturnType<typeof createProviderService> {
+  // The probe talks to the same API as a turn, so it shares the transport
+  // contract; the root keeps one client per surface instead of reaching for a
+  // global.
+  const http = createTauriHttpClient()
+  return createProviderService({
+    providers: input.providers,
+    settings: input.settings,
+    secrets: input.secrets,
+    clock: input.clock,
+    ids: input.ids,
+    createProvider: (config, apiKey) =>
+      createProviderFromConfig(config, apiKey, {
+        http,
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        connectTimeoutMs: PROVIDER_CONNECTION_TIMEOUT_MS,
+      }),
+  })
+}
+
 /** Binds the resume use cases to the database, the library and the measurer. */
 function createResumeRuntime(input: {
   readonly database: ManagedSqlDatabase
@@ -281,22 +308,12 @@ export async function createCompositionRoot(
       clock,
       ids,
     })
-    // The probe talks to the same API as a turn, so it shares the transport
-    // contract; the root keeps one client per surface instead of reaching for a
-    // global.
-    const http = createTauriHttpClient()
-    const providers = createProviderService({
+    const providers = createProviderRuntime({
       providers: providerConfigs,
       settings: settingsRepository,
       secrets,
       clock,
       ids,
-      createProvider: (config, apiKey) =>
-        createProviderFromConfig(config, apiKey, {
-          http,
-          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-          connectTimeoutMs: PROVIDER_CONNECTION_TIMEOUT_MS,
-        }),
     })
     const databaseFile = await resolveDatabaseFile()
     const info = createInfoService({
