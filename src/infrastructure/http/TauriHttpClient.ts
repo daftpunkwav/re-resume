@@ -40,12 +40,16 @@ export interface OutboundRequest {
 
 export interface OutboundResponse {
   readonly status: number
+  /** Response headers with lowercased names, as the vendor adapters read them. */
+  readonly headers: Readonly<Record<string, string>>
   /** Resolves the whole body as text. */
   text(): Promise<string>
 }
 
 export interface OutboundStream {
   readonly status: number
+  /** Response headers with lowercased names, as the vendor adapters read them. */
+  readonly headers: Readonly<Record<string, string>>
   /** The response body as it arrives. */
   chunks(): AsyncIterable<Uint8Array>
   /**
@@ -80,6 +84,7 @@ class TauriHttpClient implements HttpClient {
     const response = await this.#callPlugin(request)
     return {
       status: response.status,
+      headers: readResponseHeaders(response),
       text: () => response.text(),
     }
   }
@@ -88,6 +93,7 @@ class TauriHttpClient implements HttpClient {
     const response = await this.#callPlugin(request)
     return {
       status: response.status,
+      headers: readResponseHeaders(response),
       chunks: () => readBodyChunks(response),
       serverSentEvents: () => readServerSentEvents(readBodyChunks(response)),
     }
@@ -204,4 +210,13 @@ export async function drainChunksAsText(
     if (text.length > maxChars) break
   }
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text
+}
+
+/** Lowercased response headers; the adapters read `retry-after` from them. */
+function readResponseHeaders(response: Response): Readonly<Record<string, string>> {
+  const headers: Record<string, string> = {}
+  response.headers.forEach((value, name) => {
+    headers[name.toLowerCase()] = value
+  })
+  return headers
 }

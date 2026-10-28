@@ -1,122 +1,255 @@
 /**
- * @file AnthropicProvider
- * @description The block protocol the messages wire format uses: a tool call
- * opens with a content block, accumulates argument fragments, and closes with
- * content_block_stop. The port speaks whole calls, so the test drives the four
- * events a call needs and what the port hands back.
+ * @file AnthropicProvider.test
+ * @description The Anthropic messages adapter: payload mapping for text, images
+ * and tool results, the block protocol for text and tool_use, the split usage
+ * frames, and the failure classification. The transport is scripted.
  */
 
 import { describe, expect, it } from 'vitest'
+
+import type { ChatRequest } from '../../../src/domain/generation/ports/ModelProvider'
 import { AnthropicProvider } from '../../../src/infrastructure/http/ProviderAdapters/AnthropicProvider'
-import type { HttpClient, OutboundRequest, OutboundStream } from '../../../src/infrastructure/http/TauriHttpClient'
-import type { ChatRequest, ModelChunk, ToolSchema } from '../../../src/domain/generation/ports/ModelProvider'
+import { ModelCallError } from '../../../src/infrastructure/http/ProviderAdapters/errors'
+import { collectChunks, scriptedHttpClient } from './fakeHttpClient'
 
-const REQUEST: ChatRequest = { system: null, messages: [{ role: 'user', text: '你好' }] }
+const CONFIG = {
+  id: 'provider-1',
+  modelId: 'claude-test',
+  baseUrl: 'https://api.anthropic.com/',
+  apiKey: 'sk-ant-test',
+  supportsImages: true,
+}
 
-function clientServing(frames: readonly string[]): HttpClient {
-  async function* noBody(): AsyncIterable<Uint8Array> {}
-  async function* events(): AsyncIterable<string> {
-    yield* frames
-  }
-  const stream: OutboundStream = {
-    status: 200,
-    chunks: () => noBody(),
-    serverSentEvents: () => events(),
-  }
+function provider(http: ReturnType<typeof scriptedHttpClient>): AnthropicProvider {
+  return new AnthropicProvider({ ...CONFIG, http })
+}
+
+function request(overrides: Partial<ChatRequest> = {}): ChatRequest {
   return {
-    send: async () => ({ status: 200, text: async () => '' }),
-    openStream: async (_request: OutboundRequest) => stream,
+    system: '你是助手。',
+    messages: [{ role: 'user', parts: [{ kind: 'text', text: '你好' }] }],
+    ...overrides,
   }
 }
 
-async function chunksFrom(frames: readonly string[]): Promise<readonly ModelChunk[]> {
-  const provider = new AnthropicProvider({
-    id: 'anthropic',
-    modelId: 'claude-test',
-    baseUrl: 'https://api.anthropic.com',
-    apiKey: 'sk-test',
-    http: clientServing(frames),
-  })
-  const tools: readonly ToolSchema[] = []
-  const chunks: ModelChunk[] = []
-  for await (const chunk of provider.stream(REQUEST, tools)) chunks.push(chunk)
-  return chunks
+function event(payload: unknown): string {
+  return JSON.stringify(payload)
 }
 
-function frame(event: unknown): string {
-  return JSON.stringify(event)
-}
+describe('AnthropicProvider', () => {
+  it('sends system at the top level, max_tokens and tools', async () => {
+    const http = scriptedHttpClient([{ events: [] }])
 
-describe('the Anthropic adapter', () => {
-  it('delivers the text a delta carries and skips an empty one', async () => {
-    await expect(
-      chunksFrom([
-        frame({ type: 'message_start' }),
-        frame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '你好' } }),
-        frame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '' } }),
-      ]),
-    ).resolves.toEqual([{ type: 'text', textDelta: '你好' }])
-  })
+    await collectChunks(
+      provider(http).stream(
+        request({ maxOutputTokens: 1024, temperature: 0.3 }),
+        [
+          {
+            name: 'searchInfoEntries',
+            description: '检索信息条目',
+            parametersJsonSchema: { type: 'object', properties: {} },
+          },
+        ],
+      ),
+    )
 
-  it('emits one tool call with its fragments joined, when the block closes', async () => {
-    await expect(
-      chunksFrom([
-        frame({
-          type: 'content_block_start',
-          index: 1,
-          content_block: { type: 'tool_use', id: 'toolu_1', name: 'searchExperiences' },
-        }),
-        frame({
-          type: 'content_block_delta',
-          index: 1,
-          delta: { type: 'input_json_delta', partial_json: '{"keyword":' },
-        }),
-        frame({
-          type: 'content_block_delta',
-          index: 1,
-          delta: { type: 'input_json_delta', partial_json: '"支付"}' },
-        }),
-        frame({ type: 'content_block_stop', index: 1 }),
-      ]),
-    ).resolves.toEqual([
-      { type: 'toolCall', name: 'searchExperiences', argsJson: '{"keyword":"支付"}' },
+    const sent = http.requests[0]
+    expect(sent?.url).toBe('https://api.anthropic.com/v1/messages')
+    expect(sent?.headers?.['x-api-key']).toBe('sk-ant-test')
+    expect(sent?.headers?.['anthropic-version']).toBe('2023-06-01')
+    const body = http.lastBody()
+    expect(body.model).toBe('claude-test')
+    expect(body.max_tokens).toBe(1024)
+    expect(body.temperature).toBe(0.3)
+    expect(body.system).toBe('你是助手。')
+    expect(body.messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '你好' }] },
+    ])
+    expect(body.tools).toEqual([
+      {
+        name: 'searchInfoEntries',
+        description: '检索信息条目',
+        input_schema: { type: 'object', properties: {} },
+      },
     ])
   })
 
-  it('hands over a call the stream left open rather than losing it', async () => {
-    await expect(
-      chunksFrom([
-        frame({
-          type: 'content_block_start',
-          index: 0,
-          content_block: { type: 'tool_use', id: 'toolu_1', name: 'createResumeDraft' },
+  it('defaults max_tokens to the wire format value when nothing sets it', async () => {
+    const http = scriptedHttpClient([{ events: [] }])
+    await collectChunks(provider(http).stream(request(), []))
+    expect(http.lastBody().max_tokens).toBe(4096)
+  })
+
+  it('maps image parts to base64 sources and tool results to text blocks', async () => {
+    const http = scriptedHttpClient([{ events: [] }])
+    await collectChunks(
+      provider(http).stream(
+        request({
+          messages: [
+            {
+              role: 'user',
+              parts: [
+                { kind: 'text', text: '看图' },
+                { kind: 'image', mimeType: 'image/jpeg', base64: 'aGVsbG8=' },
+              ],
+            },
+            {
+              role: 'user',
+              parts: [
+                { kind: 'toolResult', toolName: 'searchInfoEntries', content: '{"ok":true}' },
+              ],
+            },
+          ],
         }),
-        frame({
-          type: 'content_block_delta',
-          index: 0,
-          delta: { type: 'input_json_delta', partial_json: '{"jobPostingId":"p1"}' },
-        }),
-      ]),
-    ).resolves.toEqual([
-      { type: 'toolCall', name: 'createResumeDraft', argsJson: '{"jobPostingId":"p1"}' },
+        [],
+      ),
+    )
+
+    expect(http.lastBody().messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看图' },
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/jpeg', data: 'aGVsbG8=' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Result of searchInfoEntries:\n{"ok":true}' }],
+      },
     ])
   })
 
-  it('reports an error the endpoint sent inside the stream', async () => {
-    await expect(
-      chunksFrom([frame({ type: 'error', error: { message: '模型已下线' } })]),
-    ).rejects.toThrow(/模型已下线/)
+  it('yields text deltas and the combined usage', async () => {
+    const http = scriptedHttpClient([
+      {
+        events: [
+          event({ type: 'message_start', message: { usage: { input_tokens: 20 } } }),
+          event({ type: 'content_block_start', index: 0, content_block: { type: 'text' } }),
+          event({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: '你' },
+          }),
+          event({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: '好' },
+          }),
+          event({ type: 'content_block_stop', index: 0 }),
+          event({ type: 'message_delta', usage: { output_tokens: 5 } }),
+          event({ type: 'message_stop' }),
+        ],
+      },
+    ])
+
+    await expect(collectChunks(provider(http).stream(request(), []))).resolves.toEqual([
+      { type: 'text', textDelta: '你' },
+      { type: 'text', textDelta: '好' },
+      { type: 'usage', promptTokens: 20, completionTokens: 5 },
+    ])
   })
 
-  it('refuses argument fragments for a block it never saw opened', async () => {
-    await expect(
-      chunksFrom([
-        frame({
-          type: 'content_block_delta',
-          index: 3,
-          delta: { type: 'input_json_delta', partial_json: '{}' },
-        }),
-      ]),
-    ).rejects.toThrow(/without opening a tool_use block/)
+  it('assembles a tool_use block from its argument fragments', async () => {
+    const http = scriptedHttpClient([
+      {
+        events: [
+          event({
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'tool_use', name: 'searchInfoEntries' },
+          }),
+          event({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: '{"key' },
+          }),
+          event({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: 'word":"前端"}' },
+          }),
+          event({ type: 'content_block_stop', index: 1 }),
+          event({ type: 'message_stop' }),
+        ],
+      },
+    ])
+
+    await expect(collectChunks(provider(http).stream(request(), []))).resolves.toEqual([
+      { type: 'toolCall', name: 'searchInfoEntries', argsJson: '{"keyword":"前端"}' },
+    ])
+  })
+
+  it('hands over a tool call the stream never closed', async () => {
+    const http = scriptedHttpClient([
+      {
+        events: [
+          event({
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'tool_use', name: 'listResumes' },
+          }),
+        ],
+      },
+    ])
+
+    await expect(collectChunks(provider(http).stream(request(), []))).resolves.toEqual([
+      { type: 'toolCall', name: 'listResumes', argsJson: '{}' },
+    ])
+  })
+
+  it('reports an error event', async () => {
+    const http = scriptedHttpClient([
+      { events: [event({ type: 'error', error: { type: 'overloaded_error' } })] },
+    ])
+
+    await expect(collectChunks(provider(http).stream(request(), []))).rejects.toBeInstanceOf(
+      ModelCallError,
+    )
+  })
+
+  it('classifies a 403 as permanent and a 503 as retryable', async () => {
+    const forbidden = scriptedHttpClient([{ status: 403, body: 'forbidden' }])
+    await expect(collectChunks(provider(forbidden).stream(request(), []))).rejects.toMatchObject({
+      name: 'ModelCallError',
+      status: 403,
+      retryable: false,
+    })
+
+    const unavailable = scriptedHttpClient([{ status: 503, body: 'busy' }])
+    await expect(collectChunks(provider(unavailable).stream(request(), []))).rejects.toMatchObject({
+      name: 'ModelCallError',
+      status: 503,
+      retryable: true,
+    })
+  })
+
+  it('returns without a chunk when the turn is aborted', async () => {
+    const http = scriptedHttpClient([
+      {
+        events: [
+          event({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: '你' },
+          }),
+          event({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: '好' },
+          }),
+        ],
+      },
+    ])
+    const controller = new AbortController()
+    const chunks: unknown[] = []
+    for await (const chunk of provider(http).stream(request(), [], controller.signal)) {
+      chunks.push(chunk)
+      controller.abort()
+    }
+    expect(chunks).toEqual([{ type: 'text', textDelta: '你' }])
   })
 })
