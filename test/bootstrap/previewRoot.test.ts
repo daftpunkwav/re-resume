@@ -26,7 +26,7 @@ describe('createPreviewRoot', () => {
     expect(root.appInfo.runtime).toBe('browser')
     expect(root.appInfo.databaseFile).toBeNull()
     expect(root.appInfo.version).toBe(PACKAGE_VERSION)
-    expect(root.appInfo.license).toBe('MIT')
+    expect(root.appInfo.license).toBe('Apache-2.0')
   })
 
   it('reads the fixture preferences', async () => {

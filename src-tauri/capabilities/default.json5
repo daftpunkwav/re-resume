@@ -19,9 +19,12 @@
   "platforms": ["macOS", "windows"],
 
   "permissions": [
-    // Tauri core: event, window and webview commands. The event bus carries the
-    // agent-run progress events the presentation layer subscribes to.
-    "core:default",
+    // Tauri core: the only core API the frontend names is the path resolver
+    // (`appConfigDir`, `appDataDir`, `join`), so the window gets that permission
+    // family and nothing else. Custom application commands are registered by
+    // lib.rs and are not capability-gated; the event, window, webview, menu and
+    // tray families are not granted because no frontend feature uses them.
+    "core:path:default",
 
     // --- SQLite ---------------------------------------------------------
     // Read path for the application database: load, select and close.
@@ -64,28 +67,28 @@
 
     // --- File dialogs ---------------------------------------------------
     // Choosing where an exported PDF is written. Export is the only
-    // user-initiated file write in the application. Both dialogs record the
-    // paths the user picks in the file system plugin's runtime scope; that
-    // record is what `export::publish_export` (src-tauri/src/export.rs) checks
-    // a destination against. The record is not a write permission of its own.
+    // user-initiated file write in the application. The save dialog records the
+    // destination in the file system plugin's runtime scope; that record is what
+    // `export::publish_export` (src-tauri/src/export.rs) checks the destination
+    // against. The record is not a write permission of its own.
     "dialog:allow-save",
 
-    // Selecting an existing file. `allow-message` and `allow-confirm` are not
-    // granted: no frontend feature renders a native message or a native
-    // confirmation today.
-    "dialog:allow-open",
+    // Not granted, deliberately: dialog:allow-open, dialog:allow-message and
+    // dialog:allow-confirm. Backup import reads the chosen file itself through
+    // the webview's file input, and no frontend feature renders a native open
+    // dialog, message or confirmation today.
 
     // --- File system ----------------------------------------------------
     // No file system command is granted to the webview. The export is written
     // by `export::publish_export` (in src-tauri/src/export.rs), an application
-    // command: it checks the destination against the grant a dialog made, then
-    // writes the bytes and the temporary file the publication goes through on
-    // the native side, outside the plugin's scope. Granting the fs commands
+    // command: it checks the destination against the grant the save dialog made,
+    // then writes the bytes and the temporary file the publication goes through
+    // on the native side, outside the plugin's scope. Granting the fs commands
     // instead would widen the webview's reach to every file a dialog grant or a
     // capability scope covers, and no frontend feature needs that.
     //
-    // The plugin itself stays registered: it holds the runtime scope the dialogs
-    // grant into, which is what the publication checks against.
+    // The plugin itself stays registered: it holds the runtime scope the save
+    // dialog grants into, which is what the publication checks against.
 
     // --- Stronghold -----------------------------------------------------
     // Credential storage, per StrongholdSecretStore in infrastructure/security.

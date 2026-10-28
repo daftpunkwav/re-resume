@@ -36,6 +36,17 @@ specifier。
 系统库。只有这一步会提权：浏览器本体仍装在执行命令的用户下，所以整条命令不要用
 `sudo` 跑。
 
+### 端到端检查
+
+```bash
+pnpm run test:e2e
+```
+
+Playwright 针对浏览器预览装配（`?preview`）驱动真实界面：预览用内存实现提供与
+桌面窗口相同的能力，不依赖原生容器，也不需要网络（预览的模型服务是脚本化的）。
+测试框架会自行在 1445 端口启动 Vite；设置 `CI=1` 时改为每次新起服务、失败重试一次
+并输出 HTML 报告。
+
 ### 构建
 
 ```bash
@@ -49,9 +60,58 @@ pnpm run build
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-改动容器壳或插件权限后请执行。
+改动容器壳、其命令或插件权限后请执行。Rust 侧只承载容器：SQL 插件的迁移注册、
+迁移前备份、单连接 SQLite、附件文件存储与 PDF 发布。
+
+### 交互式预览
+
+```bash
+pnpm dev
+```
+
+打开 <http://localhost:1420/?preview> 使用内存版预览工作台。追加
+`&script=tools`（默认工具链）、`&script=plain`（纯文本回答）、`&script=slow`
+（慢速流式）或 `&script=failure`（模型失败）选择脚本化模型的重放。追加
+`&providers=none` 预览未配置模型服务的空态。预览入口只在开发模式存在，生产构建不会
+包含它。
+
+这是检查 1280×840 与 960×640 布局最快的方式：在该尺寸下，预览与桌面窗口的差别只有
+视口本身。
+
+### 发布构建
+
+```bash
+pnpm tauri build
+```
+
+前置条件：Rust MSVC 工具链、WebView2 运行时，以及 Tauri 打包器使用的 NSIS 与 WiX
+工具链（首次使用时下载，缓存在 `%LOCALAPPDATA%\tauri`）。Windows 上会产出：
+
+- `src-tauri/target/release/re-resume.exe`
+- `src-tauri/target/release/bundle/msi/ReResume_<version>_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/ReResume_<version>_x64-setup.exe`
+
+版本号写在三处，必须保持一致：`package.json`、`src-tauri/Cargo.toml` 与
+`src-tauri/tauri.conf.json`。`Cargo.lock` 会根据 `Cargo.toml` 更新打包 crate 的
+版本。发布构建未配置代码签名。
+
+真实窗口冒烟：用 WebView2 的远程调试参数启动发布可执行文件（或 `pnpm tauri dev`），
+再用 Playwright 通过 CDP 驱动：
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
+Start-Process src-tauri\target\release\re-resume.exe
+```
+
+```js
+const browser = await chromium.connectOverCDP('http://127.0.0.1:9222')
+```
+
+这样驱动的是 WebView2 的真实 DOM，并按窗口物理尺寸截图。不要用操作系统级窗口截图，
+它对 WebView2 可能返回过期帧。
 
 ### 行尾与空白
 
@@ -115,7 +175,7 @@ bash .githooks/test-pre-commit.sh
 ## 文档
 
 面向用户的文档以英文维护，并提供中文镜像 `<name>.zh.md`，两者在同一次改动中
-同步更新。
+同步更新。README 是例外：它是中文产品介绍，工作流部分链接到本文。
 
 ## 安全
 

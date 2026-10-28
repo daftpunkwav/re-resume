@@ -43,6 +43,18 @@ On Linux the same command installs the system libraries Chromium needs as well.
 Only that part elevates privileges: the browser itself is installed for the
 user who runs the command, so the command is not run through `sudo`.
 
+### End-to-end checks
+
+```bash
+pnpm run test:e2e
+```
+
+Playwright drives the real interface against the browser preview assembly
+(`?preview`), which answers the same capabilities over memory instead of SQLite.
+It needs no native container and no network: the preview's model provider is
+scripted. The harness starts Vite on port 1445 itself; set `CI=1` to make it
+start a fresh server, retry once and write an HTML report.
+
 ### Build
 
 ```bash
@@ -57,9 +69,66 @@ rather than failing on a user's machine.
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Run it after touching the container shell or a plugin permission.
+Run these after touching the container shell, its commands or a plugin
+permission. The Rust side owns only the container: the SQL plugin migration
+registration, the pre-migration backup, the single SQLite connection, attachment
+file storage, and PDF publication.
+
+### Interactive preview
+
+```bash
+pnpm dev
+```
+
+Open <http://localhost:1420/?preview> for the in-memory preview of the
+workbench. Add `&script=tools` (the default tool chain), `&script=plain` (a
+plain text answer), `&script=slow` (a slow stream) or `&script=failure` (a
+provider failure) to select the scripted model replay. Add `&providers=none` to
+preview the empty state without a configured model service. The preview entry is
+development-only and is compiled out of a production bundle.
+
+This is the fastest way to check layout changes at 1280×840 and 960×640: the
+viewport is the only difference between the preview and the desktop window at
+those sizes.
+
+### Release build
+
+```bash
+pnpm tauri build
+```
+
+Prerequisites: the Rust MSVC toolchain, the WebView2 runtime, and the Tauri
+bundler's NSIS and WiX toolchains (downloaded on first use and cached under
+`%LOCALAPPDATA%\tauri`). On Windows the command produces:
+
+- `src-tauri/target/release/re-resume.exe`
+- `src-tauri/target/release/bundle/msi/ReResume_<version>_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/ReResume_<version>_x64-setup.exe`
+
+The version lives in three places that must stay in sync: `package.json`,
+`src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`. `Cargo.lock` updates
+the packaged crate version from `Cargo.toml`. Release builds are unsigned; code
+signing is not configured.
+
+For a real-window smoke test, start the release executable (or `pnpm tauri dev`)
+with WebView2's remote debugging enabled, then drive it with Playwright over
+CDP:
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
+Start-Process src-tauri\target\release\re-resume.exe
+```
+
+```js
+const browser = await chromium.connectOverCDP('http://127.0.0.1:9222')
+```
+
+This drives the actual WebView2 DOM and produces screenshots at the physical
+window size; use it rather than OS-level window capture, which can return stale
+frames for WebView2.
 
 ### Line endings and whitespace
 
@@ -134,7 +203,9 @@ before merge.
 ## Documentation
 
 User-facing documents are maintained in English with a Chinese mirror named
-`<name>.zh.md`. Both are updated in the same change.
+`<name>.zh.md`. Both are updated in the same change. The README is the
+exception: it is the Chinese product introduction and links to this file for
+the workflow.
 
 ## Security
 

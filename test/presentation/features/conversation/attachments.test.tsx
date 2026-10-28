@@ -5,7 +5,7 @@
  * image row of a sent turn and its lightbox.
  */
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
@@ -17,6 +17,7 @@ import { UserBubble } from '../../../../src/presentation/features/conversation/M
 import { useConversationStore } from '../../../../src/presentation/features/conversation/stores/conversationStore'
 import { useProviderStore } from '../../../../src/presentation/features/conversation/stores/providerStore'
 import { stubCompositionRoot } from '../../../support/stubCompositionRoot'
+import { TestResizeObserver } from '../../../setup'
 import type { CompositionRoot } from '../../../../src/bootstrap/capabilities'
 
 function imageFile(name: string, marker: number): File {
@@ -190,5 +191,29 @@ describe('the image row of a user turn', () => {
 
     expect(await screen.findByText('帮我针对这个岗位做简历')).toBeInTheDocument()
     expect(await screen.findByRole('list', { name: '随消息发送的图片' })).toBeInTheDocument()
+  })
+})
+
+describe('the composer toolbar in a narrow column', () => {
+  it('drops the shortcut hint when the composer is too narrow for it', async () => {
+    await renderComposer()
+    const composer = document.querySelector('.composer')
+    expect(composer).not.toBeNull()
+    const element = composer as HTMLElement
+    expect(element).not.toHaveAttribute('data-compact')
+
+    const observer = TestResizeObserver.watching().find((candidate) =>
+      candidate.targets.includes(element),
+    )
+    expect(observer).toBeDefined()
+    act(() => {
+      observer?.report(320, 180)
+    })
+    expect(element).toHaveAttribute('data-compact', 'true')
+
+    act(() => {
+      observer?.report(640, 180)
+    })
+    expect(element).not.toHaveAttribute('data-compact')
   })
 })

@@ -30,7 +30,7 @@ function stubRoot(): CompositionRoot {
       version: '0.0.0-test',
       buildMode: 'test',
       runtime: 'browser',
-      license: 'MIT',
+      license: 'Apache-2.0',
       databaseFile: null,
     },
     settings: {

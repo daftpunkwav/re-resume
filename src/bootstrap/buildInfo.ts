@@ -7,7 +7,7 @@
 
 import type { AppInfo } from './capabilities'
 
-export const APPLICATION_LICENSE = 'MIT'
+export const APPLICATION_LICENSE = 'Apache-2.0'
 
 export function describeAppInfo(input: {
   readonly runtime: AppInfo['runtime']

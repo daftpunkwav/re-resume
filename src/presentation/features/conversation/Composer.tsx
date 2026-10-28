@@ -20,10 +20,9 @@
  *   chips render from the stored row or the still-open file.
  */
 
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, RefObject } from 'react'
 import { Button } from '../../app/components/Button'
-import { useShellStore } from '../../app/stores/shellStore'
 import { ComposerAttachments } from './attachments/ComposerAttachments'
 import { IMAGE_INPUT_ACCEPT, useImageIntake } from './attachments/useImageIntake'
 import { ContextChip } from './ContextChip'
@@ -56,9 +55,24 @@ export function Composer({ inputRef }: ComposerProps) {
   const providerStatus = useProviderStore((state) => state.status)
   const providers = useProviderStore((state) => state.providers)
   const activeProviderId = useProviderStore((state) => state.activeProviderId)
-  const openSettings = useShellStore((state) => state.openSettings)
   const composing = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  // The toolbar has four controls and a hint. When the conversation column is
+  // narrow (a dock can take most of the window), they cannot share one row
+  // without wrapping every character; the hint drops out and the controls wrap.
+  const [compact, setCompact] = useState(false)
+
+  useEffect(() => {
+    const element = composerRef.current
+    if (element === null || typeof ResizeObserver !== 'function') return
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width !== undefined) setCompact(width < 420)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   useAutoResize(inputRef, text)
 
@@ -100,7 +114,13 @@ export function Composer({ inputRef }: ComposerProps) {
       onDragLeave={imageIntake.onDragLeave}
       onDrop={imageIntake.onDrop}
     >
-      <div className="composer" data-busy={busy || undefined} data-dragging={imageIntake.dragging || undefined}>
+      <div
+        ref={composerRef}
+        className="composer"
+        data-busy={busy || undefined}
+        data-dragging={imageIntake.dragging || undefined}
+        data-compact={compact || undefined}
+      >
         <ComposerAttachments
           attachments={attachments}
           ingesting={attachmentIngesting}
@@ -173,15 +193,6 @@ export function Composer({ inputRef }: ComposerProps) {
               }}
             />
             <ModelPicker />
-            {missingModel ? (
-              <button
-                type="button"
-                className="composer-setup-hint"
-                onClick={() => openSettings('model')}
-              >
-                配置模型服务
-              </button>
-            ) : null}
           </div>
           <div className="composer-toolbar-trailing">
             <span className="composer-hint" id="composer-hint">

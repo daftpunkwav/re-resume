@@ -38,7 +38,7 @@ import { useShellStore } from './stores/shellStore'
 import type { FocusDomain } from './stores/shellStore'
 import { showToast } from './stores/toastStore'
 import { applyAppearance } from './theme/applyAppearance'
-import { useLayoutTier } from './useLayoutTier'
+import { canSplitPanels, useLayoutTier, useViewportWidth } from './useLayoutTier'
 import { TopBar } from './TopBar'
 import { WorkspaceIntegration } from './WorkspaceIntegration'
 import { ConversationView } from '../features/conversation/ConversationView'
@@ -54,6 +54,7 @@ function focusRegion(domain: FocusDomain): void {
 
 export function AppShell() {
   const tier = useLayoutTier()
+  const viewportWidth = useViewportWidth()
   const collapsedPreference = useShellStore((state) => state.sidebarCollapsed)
   const rightPanel = useShellStore((state) => state.rightPanel)
   const rightWidth = useShellStore((state) => state.rightWidth)
@@ -67,7 +68,7 @@ export function AppShell() {
   const collapsed = tier === 'compact' || collapsedPreference
   const maximum = tier === 'wide' ? PANEL_WIDTH_MAX : PANEL_WIDTH_NARROW_MAX
   let renderedWidth = Math.min(rightWidth, maximum)
-  if (tier === 'wide' && rightPanel === 'both') {
+  if (tier === 'wide' && rightPanel === 'both' && canSplitPanels(viewportWidth)) {
     renderedWidth = Math.max(renderedWidth, TWO_PANE_MIN_WIDTH)
   }
   const shellStyle = { '--panel-right-width': `${renderedWidth}px` } as CSSProperties
