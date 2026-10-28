@@ -144,6 +144,12 @@ function assertSectionShape(section: ResumeSection): void {
   if (!Number.isInteger(section.sortOrder) || section.sortOrder < 1) {
     throw sectionError('invalidFieldValue', 'A section order must be a positive integer.', section.id)
   }
+  assertUniqueEntryIds(section)
+  assertSelectionLimit(section)
+  assertSectionDisplayName(section)
+}
+
+function assertUniqueEntryIds(section: ResumeSection): void {
   const entries = new Set<string>()
   for (const entryId of section.entryIds) {
     if (entries.has(entryId)) {
@@ -156,6 +162,9 @@ function assertSectionShape(section: ResumeSection): void {
     }
     entries.add(entryId)
   }
+}
+
+function assertSelectionLimit(section: ResumeSection): void {
   const limit = sectionEntryLimit(section.moduleKind)
   if (section.entryIds.length > limit) {
     throw sectionError(
@@ -165,19 +174,21 @@ function assertSectionShape(section: ResumeSection): void {
       [section.id],
     )
   }
-  if (section.displayName !== null) {
-    const trimmed = section.displayName.trim()
-    if (
-      trimmed === '' ||
-      trimmed !== section.displayName ||
-      countCodePoints(trimmed) > SECTION_DISPLAY_NAME_MAX_LENGTH
-    ) {
-      throw sectionError(
-        'fieldTooLong',
-        'A section name is 1 to 24 characters and carries no surrounding whitespace.',
-        section.id,
-      )
-    }
+}
+
+function assertSectionDisplayName(section: ResumeSection): void {
+  if (section.displayName === null) return
+  const trimmed = section.displayName.trim()
+  if (
+    trimmed === '' ||
+    trimmed !== section.displayName ||
+    countCodePoints(trimmed) > SECTION_DISPLAY_NAME_MAX_LENGTH
+  ) {
+    throw sectionError(
+      'fieldTooLong',
+      'A section name is 1 to 24 characters and carries no surrounding whitespace.',
+      section.id,
+    )
   }
 }
 
@@ -192,27 +203,43 @@ export function assertSectionCollection(sections: readonly ResumeSection[]): voi
   const orders = new Set<number>()
   for (const section of sections) {
     assertSectionShape(section)
-    const key = sectionKey(section.moduleKind, section.customModuleId)
-    if (identities.has(key)) {
-      throw sectionError(
-        'duplicateSection',
-        'A module may appear as one section only.',
-        section.id,
-        [key],
-      )
-    }
-    identities.add(key)
-    if (orders.has(section.sortOrder)) {
-      throw sectionError(
-        'invalidFieldValue',
-        'Section orders must be unique.',
-        section.id,
-        [section.sortOrder.toString()],
-      )
-    }
-    orders.add(section.sortOrder)
+    assertUniqueSectionIdentity(section, identities)
+    assertUniqueSectionOrder(section, orders)
   }
-  for (let order = 1; order <= sections.length; order += 1) {
+  assertDenseSectionOrders(orders, sections.length)
+}
+
+function assertUniqueSectionIdentity(
+  section: ResumeSection,
+  identities: Set<string>,
+): void {
+  const key = sectionKey(section.moduleKind, section.customModuleId)
+  if (identities.has(key)) {
+    throw sectionError(
+      'duplicateSection',
+      'A module may appear as one section only.',
+      section.id,
+      [key],
+    )
+  }
+  identities.add(key)
+}
+
+function assertUniqueSectionOrder(section: ResumeSection, orders: Set<number>): void {
+  if (orders.has(section.sortOrder)) {
+    throw sectionError(
+      'invalidFieldValue',
+      'Section orders must be unique.',
+      section.id,
+      [section.sortOrder.toString()],
+    )
+  }
+  orders.add(section.sortOrder)
+}
+
+/** Orders are 1..n with no gaps, so the document order is unambiguous. */
+function assertDenseSectionOrders(orders: ReadonlySet<number>, length: number): void {
+  for (let order = 1; order <= length; order += 1) {
     if (!orders.has(order)) {
       throw sectionError(
         'invalidFieldValue',

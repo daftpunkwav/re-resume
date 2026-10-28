@@ -83,6 +83,17 @@ export function assertCanvasBlock(block: CanvasBlock, page: PageSetup): void {
   if (block.kind !== 'text' && block.kind !== 'divider' && block.kind !== 'image') {
     throw blockError('invalidFieldValue', 'Unknown canvas block kind.', block.id, [block.kind])
   }
+  assertPageIndex(block)
+  assertZIndex(block)
+  assertBox(block, page)
+  if (block.kind === 'text') {
+    assertTextBlockContent(block)
+    return
+  }
+  assertNonTextBlockContent(block)
+}
+
+function assertPageIndex(block: CanvasBlock): void {
   if (!Number.isInteger(block.pageIndex) || block.pageIndex < 0) {
     throw blockError(
       'canvasBlockOutOfBounds',
@@ -91,6 +102,9 @@ export function assertCanvasBlock(block: CanvasBlock, page: PageSetup): void {
       [String(block.pageIndex)],
     )
   }
+}
+
+function assertZIndex(block: CanvasBlock): void {
   if (!Number.isInteger(block.zIndex) || block.zIndex < 0 || block.zIndex > CANVAS_Z_INDEX_MAX) {
     throw blockError(
       'invalidFieldValue',
@@ -99,6 +113,10 @@ export function assertCanvasBlock(block: CanvasBlock, page: PageSetup): void {
       [String(block.zIndex)],
     )
   }
+}
+
+/** The box must be finite, at least the minimum size and inside the page. */
+function assertBox(block: CanvasBlock, page: PageSetup): void {
   assertFinite('x', block.x, block.id)
   assertFinite('y', block.y, block.id)
   assertFinite('width', block.width, block.id)
@@ -118,24 +136,28 @@ export function assertCanvasBlock(block: CanvasBlock, page: PageSetup): void {
   ) {
     throw blockError('canvasBlockOutOfBounds', 'The canvas block leaves the page.', block.id)
   }
-  if (block.kind === 'text') {
-    if (block.text === null || block.text.trim() === '') {
-      throw blockError('invalidFieldValue', 'A text block needs text.', block.id, ['text'])
-    }
-    if (countCodePoints(block.text) > CANVAS_BLOCK_MAX_TEXT_LENGTH) {
-      throw blockError(
-        'fieldTooLong',
-        `A canvas text block may be at most ${CANVAS_BLOCK_MAX_TEXT_LENGTH.toString()} characters.`,
-        block.id,
-        ['text'],
-      )
-    }
-    if (block.attachmentId !== null) {
-      throw blockError('invalidFieldValue', 'A text block cannot carry an attachment.', block.id)
-    }
-    if (block.textStyle !== null) assertTextStyle(block.textStyle)
-    return
+}
+
+function assertTextBlockContent(block: CanvasBlock): void {
+  if (block.text === null || block.text.trim() === '') {
+    throw blockError('invalidFieldValue', 'A text block needs text.', block.id, ['text'])
   }
+  if (countCodePoints(block.text) > CANVAS_BLOCK_MAX_TEXT_LENGTH) {
+    throw blockError(
+      'fieldTooLong',
+      `A canvas text block may be at most ${CANVAS_BLOCK_MAX_TEXT_LENGTH.toString()} characters.`,
+      block.id,
+      ['text'],
+    )
+  }
+  if (block.attachmentId !== null) {
+    throw blockError('invalidFieldValue', 'A text block cannot carry an attachment.', block.id)
+  }
+  if (block.textStyle !== null) assertTextStyle(block.textStyle)
+}
+
+/** Divider and image blocks carry no text; image blocks need an attachment. */
+function assertNonTextBlockContent(block: CanvasBlock): void {
   if (block.text !== null) {
     throw blockError('invalidFieldValue', `${block.kind} blocks carry no text.`, block.id)
   }

@@ -16,6 +16,8 @@ import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepos
 import type { JobPostingRepository } from '../../domain/generation/ports/JobPostingRepository'
 import type { MissingReference } from '../../domain/resume/MissingReference'
 import type { Resume } from '../../domain/resume/Resume'
+import type { ResumeOverride } from '../../domain/resume/ResumeOverride'
+import type { ResumeSection } from '../../domain/resume/ResumeSection'
 import { getTemplate } from '../../domain/resume/Template'
 import type { ResumeId } from '../../domain/shared/branded-id'
 import type { ResumeStoreDeps } from './resumeSource'
@@ -59,41 +61,59 @@ export async function missingReferencesOf(
   ])
   const entryIds = new Set<string>(entries.map((entry) => entry.id))
   const moduleIds = new Set<string>(customModules.map((module) => module.id))
-  for (const section of [...resume.document.sections].sort(
+  const sections = [...resume.document.sections].sort(
     (left, right) => left.sortOrder - right.sortOrder,
-  )) {
-    if (
-      section.moduleKind === 'custom' &&
-      section.customModuleId !== null &&
-      !moduleIds.has(section.customModuleId)
-    ) {
-      missing.push({
-        kind: 'customModule',
-        moduleId: section.customModuleId,
-        sectionId: section.id,
-      })
-    }
-    for (const entryId of section.entryIds) {
-      if (!entryIds.has(entryId)) {
-        missing.push({ kind: 'entry', entryId, sectionId: section.id })
-      }
-    }
+  )
+  for (const section of sections) {
+    pushMissingCustomModule(section, moduleIds, missing)
+    pushMissingEntries(section, entryIds, missing)
   }
-  for (const override of resume.document.overrides) {
-    if (override.target.kind !== 'entry') continue
-    if (!entryIds.has(override.target.entryId)) {
-      missing.push({
-        kind: 'override',
-        overrideId: override.id,
-        entryId: override.target.entryId,
-      })
-    }
-  }
+  pushMissingOverrideTargets(resume.document.overrides, entryIds, missing)
   const jobPostingId = resume.targetJob?.jobPostingId ?? null
-  if (jobPostingId !== null) {
-    if ((await deps.jobPostings.findById(jobPostingId)) === null) {
-      missing.push({ kind: 'jobPosting', jobPostingId })
-    }
+  if (jobPostingId !== null && (await deps.jobPostings.findById(jobPostingId)) === null) {
+    missing.push({ kind: 'jobPosting', jobPostingId })
   }
   return missing
+}
+
+function pushMissingCustomModule(
+  section: ResumeSection,
+  moduleIds: ReadonlySet<string>,
+  missing: MissingReference[],
+): void {
+  if (section.moduleKind !== 'custom') return
+  if (section.customModuleId === null || moduleIds.has(section.customModuleId)) return
+  missing.push({
+    kind: 'customModule',
+    moduleId: section.customModuleId,
+    sectionId: section.id,
+  })
+}
+
+function pushMissingEntries(
+  section: ResumeSection,
+  entryIds: ReadonlySet<string>,
+  missing: MissingReference[],
+): void {
+  for (const entryId of section.entryIds) {
+    if (!entryIds.has(entryId)) {
+      missing.push({ kind: 'entry', entryId, sectionId: section.id })
+    }
+  }
+}
+
+function pushMissingOverrideTargets(
+  overrides: readonly ResumeOverride[],
+  entryIds: ReadonlySet<string>,
+  missing: MissingReference[],
+): void {
+  for (const override of overrides) {
+    if (override.target.kind !== 'entry') continue
+    if (entryIds.has(override.target.entryId)) continue
+    missing.push({
+      kind: 'override',
+      overrideId: override.id,
+      entryId: override.target.entryId,
+    })
+  }
 }

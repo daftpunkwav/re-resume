@@ -120,6 +120,13 @@ function measureGeometry(input: LayoutInput): Geometry {
   }
 }
 
+/** The page and column the flow is currently filling. */
+interface FlowCursor {
+  page: number
+  column: 1 | 2
+  heights: ColumnHeights
+}
+
 /** Places every flow block, advancing page and column according to the rules. */
 function placeFlowBlocks(
   input: LayoutInput,
@@ -128,119 +135,181 @@ function placeFlowBlocks(
   placed: LaidOutBlock[],
   overflows: OverflowReport[],
 ): void {
-  let page = 0
-  let column: 1 | 2 = 1
-  let heights: ColumnHeights = { 1: 0, 2: 0 }
-
-  const newPage = (): void => {
-    page += 1
-    column = 1
-    heights = { 1: 0, 2: 0 }
-  }
-
-  const nextColumn = (): void => {
-    if (geometry.columns === SINGLE_COLUMN) {
-      newPage()
-      return
-    }
-    if (column === 1) column = 2
-    else newPage()
-  }
-
-  const addHeight = (placedColumn: 1 | 2, height: number): void => {
-    heights =
-      placedColumn === 1
-        ? { 1: height, 2: heights[2] }
-        : { 1: heights[1], 2: height }
-  }
-
+  const cursor: FlowCursor = { page: 0, column: 1, heights: { 1: 0, 2: 0 } }
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index]
     if (block === undefined) continue
-    const placement = block.placement
-    if (placement.mode !== 'flow') continue
-
-    if (placement.columnSpan === 2) {
-      const measured = measureBlock(block, geometry.spanWidth, input.measurer)
-      const start = Math.max(heights[1], heights[2])
-      if (start > 0 && start + measured.height > geometry.contentHeight) newPage()
-      const y = Math.max(heights[1], heights[2])
-      place(block, page, 1, 0, y, geometry.spanWidth, measured, placed)
-      if (measured.height > geometry.contentHeight) {
-        overflows.push({ blockId: block.id, pageIndex: page, reason: 'block-taller-than-column' })
-      }
-      // The block consumed the full width: both columns continue below it.
-      heights = { 1: y + measured.height, 2: y + measured.height }
-      column = 1
-      continue
-    }
-
-    // An explicit column ends the current column when it targets an earlier one,
-    // and jumps forward when it targets a later one (spec section 11.3). Once
-    // the block no longer fits and a page break is needed, the same target
-    // column is used again: placing a body block in the sidebar column of the
-    // next page would be a layout the template never asked for.
-    const explicitColumn =
-      placement.column === 'auto' || geometry.columns !== TWO_COLUMNS
-        ? null
-        : placement.column
-    if (explicitColumn !== null) {
-      if (explicitColumn < column) {
-        newPage()
-        column = explicitColumn
-      } else {
-        column = explicitColumn
-      }
-    }
-    if (geometry.columns === SINGLE_COLUMN) column = 1
-
-    const advance = (): void => {
-      if (explicitColumn === null) {
-        nextColumn()
-        return
-      }
-      newPage()
-      column = explicitColumn
-    }
-
-    let measured = measureBlock(block, geometry.widths[column], input.measurer)
-    let guard = 0
-    for (;;) {
-      const width = geometry.widths[column]
-      if (guard > 0) measured = measureBlock(block, width, input.measurer)
-      if (measured.height > geometry.contentHeight) {
-        // A block taller than a column is drawn from the top of a fresh column
-        // and reported; advancing further would leave empty pages ahead of it.
-        while (heights[column] > 0 && guard <= 4) {
-          advance()
-          guard += 1
-        }
-        measured = measureBlock(block, geometry.widths[column], input.measurer)
-        break
-      }
-      const required = keepWithNextRequirement(
-        block,
-        measured.height,
-        blocks,
-        index,
-        width,
-        geometry,
-        input.measurer,
-      )
-      const needed = Math.min(required, geometry.contentHeight)
-      if (heights[column] === 0 || heights[column] + needed <= geometry.contentHeight) break
-      advance()
-      guard += 1
-      if (guard > 4) break
-    }
-
-    const start = heights[column]
-    place(block, page, column, geometry.offsets[column], start, geometry.widths[column], measured, placed)
-    addHeight(column, start + measured.height)
-    if (measured.height > geometry.contentHeight) {
-      overflows.push({ blockId: block.id, pageIndex: page, reason: 'block-taller-than-column' })
+    if (block.placement.mode !== 'flow') continue
+    if (block.placement.columnSpan === 2) {
+      placeSpanBlock(input, geometry, cursor, block, placed, overflows)
+    } else {
+      placeColumnBlock(input, geometry, cursor, block, index, blocks, placed, overflows)
     }
   }
+}
+
+/** A spanning block starts below both columns and resets them below itself. */
+function placeSpanBlock(
+  input: LayoutInput,
+  geometry: Geometry,
+  cursor: FlowCursor,
+  block: LayoutBlock,
+  placed: LaidOutBlock[],
+  overflows: OverflowReport[],
+): void {
+  const measured = measureBlock(block, geometry.spanWidth, input.measurer)
+  const start = Math.max(cursor.heights[1], cursor.heights[2])
+  if (start > 0 && start + measured.height > geometry.contentHeight) {
+    resetPage(cursor)
+  }
+  const y = Math.max(cursor.heights[1], cursor.heights[2])
+  place(block, cursor.page, 1, 0, y, geometry.spanWidth, measured, placed)
+  if (measured.height > geometry.contentHeight) {
+    overflows.push({ blockId: block.id, pageIndex: cursor.page, reason: 'block-taller-than-column' })
+  }
+  // The block consumed the full width: both columns continue below it.
+  cursor.heights = { 1: y + measured.height, 2: y + measured.height }
+  cursor.column = 1
+}
+
+/** Places one single-column block, honouring its explicit column when it has one. */
+function placeColumnBlock(
+  input: LayoutInput,
+  geometry: Geometry,
+  cursor: FlowCursor,
+  block: LayoutBlock,
+  index: number,
+  blocks: readonly LayoutBlock[],
+  placed: LaidOutBlock[],
+  overflows: OverflowReport[],
+): void {
+  const placement = block.placement
+  // An explicit column ends the current column when it targets an earlier one,
+  // and jumps forward when it targets a later one (spec section 11.3). Once the
+  // block no longer fits and a page break is needed, the same target column is
+  // used again: placing a body block in the sidebar column of the next page
+  // would be a layout the template never asked for.
+  const explicitColumn =
+    placement.mode !== 'flow' || placement.column === 'auto' || geometry.columns !== TWO_COLUMNS
+      ? null
+      : placement.column
+  if (explicitColumn !== null) {
+    if (explicitColumn < cursor.column) {
+      resetPage(cursor)
+      cursor.column = explicitColumn
+    } else {
+      cursor.column = explicitColumn
+    }
+  }
+  if (geometry.columns === SINGLE_COLUMN) cursor.column = 1
+
+  const advance = (): void => advanceColumn(cursor, geometry, explicitColumn)
+  const measured = fitBlock(input, geometry, cursor, block, index, blocks, advance)
+  const start = cursor.heights[cursor.column]
+  place(
+    block,
+    cursor.page,
+    cursor.column,
+    geometry.offsets[cursor.column],
+    start,
+    geometry.widths[cursor.column],
+    measured,
+    placed,
+  )
+  addHeight(cursor, cursor.column, start + measured.height)
+  if (measured.height > geometry.contentHeight) {
+    overflows.push({ blockId: block.id, pageIndex: cursor.page, reason: 'block-taller-than-column' })
+  }
+}
+
+/**
+ * Measures the block for the current column and advances until it fits. A block
+ * taller than a column is drawn from the top of a fresh column instead, and the
+ * caller reports it once.
+ */
+function fitBlock(
+  input: LayoutInput,
+  geometry: Geometry,
+  cursor: FlowCursor,
+  block: LayoutBlock,
+  index: number,
+  blocks: readonly LayoutBlock[],
+  advance: () => void,
+): MeasuredBlock {
+  let measured = measureBlock(block, geometry.widths[cursor.column], input.measurer)
+  let guard = 0
+  for (;;) {
+    if (guard > 0) {
+      measured = measureBlock(block, geometry.widths[cursor.column], input.measurer)
+    }
+    if (measured.height > geometry.contentHeight) {
+      // A block taller than a column is drawn from the top of a fresh column;
+      // advancing further would leave empty pages ahead of it.
+      while (cursor.heights[cursor.column] > 0 && guard <= 4) {
+        advance()
+        guard += 1
+      }
+      return measureBlock(block, geometry.widths[cursor.column], input.measurer)
+    }
+    if (hasRoom(input, geometry, cursor, block, index, blocks, measured.height)) return measured
+    advance()
+    guard += 1
+    if (guard > 4) return measured
+  }
+}
+
+/** Whether the block (and the next block, for a heading) fits in the column. */
+function hasRoom(
+  input: LayoutInput,
+  geometry: Geometry,
+  cursor: FlowCursor,
+  block: LayoutBlock,
+  index: number,
+  blocks: readonly LayoutBlock[],
+  ownHeight: number,
+): boolean {
+  if (cursor.heights[cursor.column] === 0) return true
+  const required = keepWithNextRequirement(
+    block,
+    ownHeight,
+    blocks,
+    index,
+    geometry.widths[cursor.column],
+    geometry,
+    input.measurer,
+  )
+  return cursor.heights[cursor.column] + Math.min(required, geometry.contentHeight) <= geometry.contentHeight
+}
+
+/** The next column, or a new page when the last column was used. */
+function advanceColumn(
+  cursor: FlowCursor,
+  geometry: Geometry,
+  explicitColumn: 1 | 2 | null,
+): void {
+  if (explicitColumn !== null) {
+    resetPage(cursor)
+    cursor.column = explicitColumn
+    return
+  }
+  if (geometry.columns === SINGLE_COLUMN || cursor.column === TWO_COLUMNS) {
+    resetPage(cursor)
+    return
+  }
+  cursor.column = 2
+}
+
+function resetPage(cursor: FlowCursor): void {
+  cursor.page += 1
+  cursor.column = 1
+  cursor.heights = { 1: 0, 2: 0 }
+}
+
+function addHeight(cursor: FlowCursor, placedColumn: 1 | 2, height: number): void {
+  cursor.heights =
+    placedColumn === 1
+      ? { 1: height, 2: cursor.heights[2] }
+      : { 1: cursor.heights[1], 2: height }
 }
 
 /**
