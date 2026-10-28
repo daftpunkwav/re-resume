@@ -27,6 +27,7 @@ import { Button } from './components/Button'
 import { Notice } from './components/Notice'
 import { Spinner } from './components/Spinner'
 import { TextField } from './components/TextField'
+import { describeBootFailure } from './errorMessages'
 import { useSettingsStore } from './stores/settingsStore'
 import { useShellStore } from './stores/shellStore'
 
@@ -107,7 +108,7 @@ export function ApplicationServicesProvider({
         setBoot({ status: 'ready', root, rebuildError: null })
       } catch (thrown) {
         if (cancelled) return
-        const reason = thrown instanceof Error ? thrown.message : '未知原因'
+        const reason = describeBootFailure(thrown)
         const running = serving.current
         if (running === null) {
           setBoot({ status: 'failed', reason })
