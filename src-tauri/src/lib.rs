@@ -34,14 +34,16 @@ const DATABASE_URL: &str = "sqlite:re-resume.db";
 /// than copied, so editing one is a build error rather than a migration that
 /// silently does not apply.
 ///
-/// Version numbers are allocated once and never reused. A version whose file
-/// holds no statements yet is registered as well: the plugin's ledger records
-/// it as applied, and replacing the file's body later needs no change here.
+/// Version numbers are allocated once and never reused. An applied version's
+/// body is immutable: the plugin's ledger validates the checksum of every
+/// version a database recorded, so a new schema is a new version rather than an
+/// edit of an existing one. Version 3 was registered empty and stays empty; the
+/// information library schema is version 7.
 const MIGRATION_001_INIT: &str =
     include_str!("../../src/infrastructure/persistence/migrations/001_init.sql");
 const MIGRATION_002_SETTINGS: &str =
     include_str!("../../src/infrastructure/persistence/migrations/002_settings.sql");
-const MIGRATION_003_INFO: &str =
+const MIGRATION_003_INFO_RESERVED: &str =
     include_str!("../../src/infrastructure/persistence/migrations/003_info.sql");
 const MIGRATION_004_CONVERSATION: &str =
     include_str!("../../src/infrastructure/persistence/migrations/004_conversation.sql");
@@ -49,6 +51,8 @@ const MIGRATION_005_RESUME: &str =
     include_str!("../../src/infrastructure/persistence/migrations/005_resume.sql");
 const MIGRATION_006_DROP_LEGACY: &str =
     include_str!("../../src/infrastructure/persistence/migrations/006_drop_legacy.sql");
+const MIGRATION_007_INFO: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/007_info.sql");
 
 /// Name of the file holding the Stronghold key-derivation salt. The salt is not
 /// a secret — it is the Argon2 parameter that makes a password produce the same
@@ -65,9 +69,10 @@ const STRONGHOLD_SALT_FILE: &str = "stronghold-salt.bin";
 /// `src/infrastructure/persistence/migrations/` and an entry here with the next
 /// version number.
 ///
-/// The versions above 1 are registered while their files still hold a comment
-/// only. The plugin records them as applied, so replacing a file's body later
-/// changes what a fresh install creates without touching this list.
+/// Versions 3 to 6 were registered while their files held a comment only, and
+/// those bodies are immutable once a database records them. Feature schemas
+/// therefore arrive as new versions: version 7 creates the information library
+/// tables without changing any applied body.
 fn migrations() -> Vec<Migration> {
     vec![
         Migration {
@@ -85,7 +90,7 @@ fn migrations() -> Vec<Migration> {
         Migration {
             version: 3,
             description: "information library",
-            sql: MIGRATION_003_INFO,
+            sql: MIGRATION_003_INFO_RESERVED,
             kind: MigrationKind::Up,
         },
         Migration {
@@ -104,6 +109,12 @@ fn migrations() -> Vec<Migration> {
             version: 6,
             description: "drop superseded tables",
             sql: MIGRATION_006_DROP_LEGACY,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "information library",
+            sql: MIGRATION_007_INFO,
             kind: MigrationKind::Up,
         },
     ]

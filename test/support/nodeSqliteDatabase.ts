@@ -145,5 +145,7 @@ export function applyMigrationFile(database: TestDatabase, fileName: string): vo
 
 /** Applies the information library migration to an empty database. */
 export function applyInfoSchema(database: TestDatabase): void {
-  applyMigrationFile(database, '003_info.sql')
+  // The schema lives at version 7: version 3 was recorded empty before this
+  // feature existed, and an applied migration body is immutable.
+  applyMigrationFile(database, '007_info.sql')
 }
