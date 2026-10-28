@@ -27,6 +27,8 @@ import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import { createLibraryChangesService } from './wiring/changes'
 import { createProviderService } from './wiring/providers'
+import { createBackupService } from './wiring/appSettings'
+import { createSeedDataService } from './wiring/seed'
 import type { ProviderService } from './capabilities'
 import type { AppSettingsRepository } from '../domain/settings/ports/AppSettingsRepository'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
@@ -170,6 +172,7 @@ interface PreviewState {
   readonly resume: CompositionRoot['resume']
   readonly libraryChanges: CompositionRoot['libraryChanges']
   readonly providers: ProviderService
+  readonly seed: CompositionRoot['seed']
 }
 
 let windowState: PreviewState | null = null
@@ -180,14 +183,23 @@ function createPreviewState(): PreviewState {
     PREVIEW_PROVIDERS.map((config) => [config.secretRef, PREVIEW_PROVIDER_CREDENTIAL] as const),
   )
   const library = createPreviewLibrary()
+  const conversation = createPreviewConversationService(readReplay())
   return {
     settings,
     secrets,
-    conversation: createPreviewConversationService(readReplay()).service,
+    conversation: conversation.service,
     info: library.info,
     resume: library.resume,
     libraryChanges: library.libraryChanges,
     providers: createPreviewProviders({ settings, secrets }),
+    seed: createSeedDataService({
+      settings,
+      info: library.info,
+      resume: library.resume,
+      conversation: conversation.service,
+      messages: conversation.repositories.messages,
+      clock: new FakeClock(),
+    }),
   }
 }
 
@@ -206,6 +218,30 @@ export function createPreviewRoot(options: PreviewRootOptions = {}): Composition
   return {
     appInfo: describeAppInfo({ runtime: 'browser', databaseFile: null }),
     settings: createAppSettingsService({ repository: state.settings }),
+    // Memory data has no file to export and nothing to clear on disk. The
+    // settings surface reads this flag and states the limitation instead of
+    // showing an export button that cannot produce a backup.
+    backup: createBackupService({
+      canManageData: false,
+      secrets: state.secrets,
+      backup: {
+        dumpTables: async () => ({}),
+        replaceAll: async () => undefined,
+        clearAll: async () => undefined,
+        listOrphanAttachments: async () => [],
+        deleteAttachments: async () => undefined,
+        listAttachmentStorageNames: async () => [],
+        listProviderSecretRefs: async () => [],
+      },
+      files: {
+        write: async () => undefined,
+        read: async () => new Uint8Array(),
+        delete: async () => undefined,
+        list: async () => [],
+      },
+      clock: new FakeClock(),
+    }),
+    seed: state.seed,
     info: state.info,
     resume: state.resume,
     conversation: state.conversation,

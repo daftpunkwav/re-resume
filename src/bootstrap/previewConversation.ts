@@ -39,7 +39,7 @@ import { ScriptedModelProvider } from '../infrastructure/preview/ScriptedModelPr
 import type { ScriptedFailure } from '../infrastructure/preview/ScriptedModelProvider'
 import type { ModelChunk } from '../domain/generation/ports/ModelProvider'
 import { createConversationService } from './wiring/conversation'
-import type { ConversationService } from './wiring/conversation'
+import type { ConversationRepositories, ConversationService } from './wiring/conversation'
 
 export interface PreviewConversationOptions {
   /** Chunks the scripted model replays for every request. */
@@ -53,6 +53,11 @@ export interface PreviewConversationOptions {
 export interface PreviewConversationAssembly {
   readonly service: ConversationService
   readonly activeRuns: ActiveRunRegistry
+  /**
+   * The repositories behind the service, so the sample-data seed can append to
+   * the same conversation the window shows.
+   */
+  readonly repositories: ConversationRepositories
 }
 
 export function createPreviewConversationService(
@@ -67,6 +72,19 @@ export function createPreviewConversationService(
     runs: runs.rows,
   })
   const activeRuns = new ActiveRunRegistry()
+  const repositories: ConversationRepositories = {
+    conversations,
+    messages,
+    messageContexts: new InMemoryMessageContextRepository(PREVIEW_MESSAGE_CONTEXTS),
+    attachments: new InMemoryAttachmentRepository(),
+    jobPostings: new InMemoryJobPostingRepository(),
+    runs,
+    invocations: new InMemoryToolInvocationRepository([
+      PREVIEW_TOOL_INVOCATION,
+      PREVIEW_WRITE_TOOL_INVOCATION,
+    ]),
+    fileStore: new InMemoryFileStore(),
+  }
   const model = new ScriptedModelProvider({
     id: 'preview',
     modelId: 'preview-scripted',
@@ -76,19 +94,7 @@ export function createPreviewConversationService(
     failure: options.failure,
   })
   const service = createConversationService({
-    repositories: {
-      conversations,
-      messages,
-      messageContexts: new InMemoryMessageContextRepository(PREVIEW_MESSAGE_CONTEXTS),
-      attachments: new InMemoryAttachmentRepository(),
-      jobPostings: new InMemoryJobPostingRepository(),
-      runs,
-      invocations: new InMemoryToolInvocationRepository([
-        PREVIEW_TOOL_INVOCATION,
-        PREVIEW_WRITE_TOOL_INVOCATION,
-      ]),
-      fileStore: new InMemoryFileStore(),
-    },
+    repositories,
     clock,
     ids,
     model,
@@ -100,5 +106,5 @@ export function createPreviewConversationService(
       console.warn(`[preview] ${message}`, warning)
     },
   })
-  return { service, activeRuns }
+  return { service, activeRuns, repositories }
 }

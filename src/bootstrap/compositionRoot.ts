@@ -24,7 +24,8 @@ import type { IdGenerator } from '../domain/shared/IdGenerator'
 import type { FileStore } from '../domain/conversation/ports/FileStore'
 import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
-import { createAppSettingsService } from './wiring/appSettings'
+import { createAppSettingsService, createBackupService } from './wiring/appSettings'
+import { createSeedDataService } from './wiring/seed'
 import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import {
@@ -45,6 +46,7 @@ import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
 import type { ManagedSqlDatabase } from '../infrastructure/persistence/sqlite'
 import { SqliteAppSettingsRepository } from '../infrastructure/persistence/settings/SqliteAppSettingsRepository'
 import { SqliteProviderConfigRepository } from '../infrastructure/persistence/settings/SqliteProviderConfigRepository'
+import { SqliteBackupStore } from '../infrastructure/persistence/backup/SqliteBackupStore'
 import { SqliteCustomModuleRepository } from '../infrastructure/persistence/info/SqliteCustomModuleRepository'
 import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/SqliteInfoEntryRepository'
 import { SqliteResumeRepository } from '../infrastructure/persistence/resume/SqliteResumeRepository'
@@ -182,7 +184,7 @@ async function createCanonicalMeasurer(): Promise<TextMeasurer> {
  * the recovery pass for runs a previous process left behind.
  */
 async function createConversationRuntime(input: {
-  readonly database: ManagedSqlDatabase
+  readonly repositories: ConversationRepositories
   readonly providerConfigs: SqliteProviderConfigRepository
   readonly secrets: StrongholdSecretStore
   readonly clock: Clock
@@ -200,10 +202,7 @@ async function createConversationRuntime(input: {
     secrets: input.secrets,
   })
   const conversation = createConversationService({
-    repositories: createConversationRepositories(
-      input.database,
-      new UnavailableAttachmentStore(),
-    ),
+    repositories: input.repositories,
     clock: input.clock,
     ids: input.ids,
     model,
@@ -349,13 +348,13 @@ function createLibraryRuntime(input: {
 
 /** The conversation capability and the provider settings that select its model. */
 async function createAgentRuntime(input: {
-  readonly database: ManagedSqlDatabase
+  readonly conversationRepositories: ConversationRepositories
   readonly repositories: RootRepositories
   readonly clock: Clock
   readonly ids: IdGenerator
 }): Promise<Pick<CompositionRoot, 'conversation' | 'providers'>> {
   const conversation = await createConversationRuntime({
-    database: input.database,
+    repositories: input.conversationRepositories,
     providerConfigs: input.repositories.providerConfigs,
     secrets: input.repositories.secrets,
     clock: input.clock,
@@ -389,11 +388,35 @@ export async function createCompositionRoot(
       ids,
       stronghold: options.stronghold,
     })
-    const agent = await createAgentRuntime({ database, repositories, clock, ids })
+    const fileStore = new UnavailableAttachmentStore()
+    const conversationRepositories = createConversationRepositories(database, fileStore)
+    const agent = await createAgentRuntime({
+      conversationRepositories,
+      repositories,
+      clock,
+      ids,
+    })
     const library = createLibraryRuntime({ database, repositories, measurer, clock, ids })
+    const seed = createSeedDataService({
+      settings: repositories.settings,
+      info: library.info,
+      resume: library.resume,
+      conversation: agent.conversation,
+      messages: conversationRepositories.messages,
+      clock,
+    })
+    const backup = createBackupService({
+      canManageData: true,
+      backup: new SqliteBackupStore(database),
+      files: fileStore,
+      secrets: repositories.secrets,
+      clock,
+    })
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile: await resolveDatabaseFile() }),
       settings: createAppSettingsService({ repository: repositories.settings }),
+      backup,
+      seed,
       ...library,
       ...agent,
       secrets: repositories.secrets,
