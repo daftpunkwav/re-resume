@@ -17,6 +17,8 @@ import type { ChangeLogRepository } from '../../../domain/changes/ports/ChangeLo
 import type { InfoEntryReferenceQuery } from '../../../domain/info/ports/InfoEntryReferenceQuery'
 import type { CustomModuleRepository } from '../../../domain/info/ports/CustomModuleRepository'
 import type { InfoEntryRepository } from '../../../domain/info/ports/InfoEntryRepository'
+import type { PdfFileSaver } from '../../../domain/resume/ports/PdfFileSaver'
+import type { ResumePdfExporter } from '../../../domain/resume/ports/ResumePdfExporter'
 import type { ResumeRepository } from '../../../domain/resume/ports/ResumeRepository'
 import type { TextMeasurer } from '../../../domain/resume/ports/TextMeasurer'
 import type { AgentRunRepository } from '../../../domain/generation/ports/AgentRunRepository'
@@ -24,6 +26,7 @@ import type { JobPostingRepository } from '../../../domain/generation/ports/JobP
 import type { ModelProvider } from '../../../domain/generation/ports/ModelProvider'
 import type { Clock } from '../../../domain/shared/Clock'
 import type { IdGenerator } from '../../../domain/shared/IdGenerator'
+import type { PdfExportDeps } from '../../export/exportPdf'
 import type { InfoLibraryDeps } from '../../info/library'
 import type { ResumeContentDeps } from '../../resume/resumeSource'
 
@@ -41,6 +44,10 @@ export interface ToolPackDeps {
   readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
+  /** The renderer the export tool calls; the root owns the font registry behind it. */
+  readonly pdfExporter: ResumePdfExporter
+  /** The saver that opens the system dialog; a tool never writes a file silently. */
+  readonly pdfSaver: PdfFileSaver
 }
 
 /** The dependency record the library use cases take. */
@@ -61,5 +68,16 @@ export function resumeContentDeps(deps: ToolPackDeps): ResumeContentDeps {
     entries: deps.entries,
     customModules: deps.customModules,
     measurer: deps.measurer,
+  }
+}
+
+/** The dependency record the PDF export use cases take. */
+export function pdfExportDeps(deps: ToolPackDeps): PdfExportDeps {
+  return {
+    ...resumeContentDeps(deps),
+    exporter: deps.pdfExporter,
+    saver: deps.pdfSaver,
+    attachments: deps.attachments,
+    fileStore: deps.fileStore,
   }
 }

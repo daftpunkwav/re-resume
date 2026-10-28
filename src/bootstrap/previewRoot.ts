@@ -27,6 +27,7 @@ import { createAppSettingsService, createBackupService } from './wiring/appSetti
 import { createSeedDataService } from './wiring/seed'
 import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
+import { createExportService } from './wiring/export'
 import { createLibraryChangesService } from './wiring/changes'
 import { createProviderService } from './wiring/providers'
 import {
@@ -83,6 +84,7 @@ function createPreviewLibraryServices(state: PreviewConversationState): {
   readonly info: CompositionRoot['info']
   readonly resume: CompositionRoot['resume']
   readonly libraryChanges: CompositionRoot['libraryChanges']
+  readonly export: CompositionRoot['export']
 } {
   const info = createInfoService({
     entries: state.entries,
@@ -110,6 +112,18 @@ function createPreviewLibraryServices(state: PreviewConversationState): {
       customModules: state.customModules,
       resumes: state.resumes,
       clock: state.clock,
+    }),
+    // The preview renders with the real bundled fonts (loaded on first use) and
+    // saves through the browser's download list instead of a native dialog.
+    export: createExportService({
+      resumes: state.resumes,
+      entries: state.entries,
+      customModules: state.customModules,
+      measurer: state.measurer,
+      exporter: state.pdfExporter,
+      saver: state.pdfSaver,
+      attachments: state.attachments,
+      fileStore: state.fileStore,
     }),
   }
 }
@@ -143,6 +157,7 @@ interface PreviewState {
   readonly info: CompositionRoot['info']
   readonly resume: CompositionRoot['resume']
   readonly libraryChanges: CompositionRoot['libraryChanges']
+  readonly export: CompositionRoot['export']
   readonly providers: ProviderService
   readonly seed: CompositionRoot['seed']
 }
@@ -163,6 +178,7 @@ function createPreviewState(): PreviewState {
     info: library.info,
     resume: library.resume,
     libraryChanges: library.libraryChanges,
+    export: library.export,
     providers: createPreviewProviders({ settings, secrets }),
     seed: createSeedDataService({
       settings,
@@ -219,6 +235,7 @@ export function createPreviewRoot(options: PreviewRootOptions = {}): Composition
     conversation: state.conversation,
     providers: state.providers,
     libraryChanges: state.libraryChanges,
+    export: state.export,
     secrets: state.secrets,
     shutdown: async (): Promise<void> => undefined,
   }

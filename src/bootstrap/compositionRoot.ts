@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file compositionRoot
  * @description The one module allowed to construct infrastructure and hand it
  * to the interface as ready-to-call services. Everything below
@@ -28,6 +28,7 @@ import { createAppSettingsService, createBackupService } from './wiring/appSetti
 import { createSeedDataService } from './wiring/seed'
 import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
+import { createExportService } from './wiring/export'
 import {
   createConversationService,
   createProviderFromConfig,
@@ -55,6 +56,10 @@ import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFo
 import { registerCanvasFonts } from '../infrastructure/measurement/CanvasFontRegistration'
 import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
+import type { ResumePdfExporter } from '../domain/resume/ports/ResumePdfExporter'
+import type { PdfFileSaver } from '../domain/resume/ports/PdfFileSaver'
+import { createPdfExporter } from '../infrastructure/exporter/react-pdf/BundledFontPdfExporter'
+import { TauriPdfFileSaver } from '../infrastructure/filesystem/TauriPdfFileSaver'
 import { SqliteChangeRecordRepository } from '../infrastructure/persistence/info/SqliteChangeRecordRepository'
 import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
@@ -155,15 +160,19 @@ function createConversationRepositories(
 
 /**
  * Loads the bundled font bytes, registers them with the document's FontFaceSet
- * and builds the canonical measurer. Registration is what lets the canvas paint
- * the faces the measurer measured; a failure is fatal because without the
- * bundled faces every line break would move, so a window that cannot measure
- * must not pretend it can.
+ * and builds the canonical measurer, returning the registry as well: the PDF
+ * exporter draws with exactly the faces the measurer resolved line breaks
+ * against. Registration is what lets the canvas paint the faces the measurer
+ * measured; a failure is fatal because without the bundled faces every line
+ * break would move, so a window that cannot measure must not pretend it can.
  */
-async function createCanvasMeasurement(): Promise<TextMeasurer> {
+async function createCanvasMeasurement(): Promise<{
+  readonly measurer: TextMeasurer
+  readonly fonts: Awaited<ReturnType<typeof loadBundledFontRegistry>>
+}> {
   const fonts = await loadBundledFontRegistry()
   await registerCanvasFonts(fonts)
-  return createFontkitTextMeasurer(fonts)
+  return { measurer: createFontkitTextMeasurer(fonts), fonts }
 }
 
 /**
@@ -178,6 +187,8 @@ async function createConversationRuntime(input: {
   readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
+  readonly pdfExporter: ResumePdfExporter
+  readonly pdfSaver: PdfFileSaver
 }): Promise<ReturnType<typeof createConversationService>> {
   const http = createTauriHttpClient()
   const model = await resolveActiveProvider({
@@ -199,6 +210,8 @@ async function createConversationRuntime(input: {
     titleModel: model,
     activeRuns: new ActiveRunRegistry(),
     secrets: providerSecrets,
+    pdfExporter: input.pdfExporter,
+    pdfSaver: input.pdfSaver,
     maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     onWarning: (message, warning) => {
       console.warn(`[conversation] ${message}`, warning)
@@ -344,6 +357,8 @@ async function createAgentRuntime(input: {
   readonly measurer: TextMeasurer
   readonly clock: Clock
   readonly ids: IdGenerator
+  readonly pdfExporter: ResumePdfExporter
+  readonly pdfSaver: PdfFileSaver
 }): Promise<Pick<CompositionRoot, 'conversation' | 'providers'>> {
   const conversation = await createConversationRuntime({
     repositories: input.conversationRepositories,
@@ -353,6 +368,8 @@ async function createAgentRuntime(input: {
     measurer: input.measurer,
     clock: input.clock,
     ids: input.ids,
+    pdfExporter: input.pdfExporter,
+    pdfSaver: input.pdfSaver,
   })
   const providers = createProviderRuntime({
     providers: input.repositories.providerConfigs,
@@ -368,7 +385,11 @@ export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
   const clock: Clock = new SystemClock()
-  const measurer = await createCanvasMeasurement()
+  const { measurer, fonts } = await createCanvasMeasurement()
+  // The renderer package is imported on the first export rather than here, so
+  // starting the window does not download the PDF chunk.
+  const pdfExporter: ResumePdfExporter = createPdfExporter(fonts)
+  const pdfSaver: PdfFileSaver = new TauriPdfFileSaver()
   const database = await startLocalDatabase({
     backupBeforeMigration: recordPreMigrationBackup,
     openDatabase: () => openSqliteDatabase(options.databaseConnectionString),
@@ -398,8 +419,20 @@ export async function createCompositionRoot(
       measurer,
       clock,
       ids,
+      pdfExporter,
+      pdfSaver,
     })
     const library = createLibraryRuntime({ database, repositories, measurer, clock, ids })
+    const pdfExport = createExportService({
+      resumes: repositories.resumes,
+      entries: repositories.entries,
+      customModules: repositories.customModules,
+      measurer,
+      exporter: pdfExporter,
+      saver: pdfSaver,
+      attachments: conversationRepositories.attachments,
+      fileStore,
+    })
     const seed = createSeedDataService({
       settings: repositories.settings,
       info: library.info,
@@ -422,6 +455,7 @@ export async function createCompositionRoot(
       seed,
       ...library,
       ...agent,
+      export: pdfExport,
       secrets: repositories.secrets,
       shutdown: async (): Promise<void> => {
         await database.close()

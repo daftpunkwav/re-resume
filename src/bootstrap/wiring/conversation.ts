@@ -37,6 +37,8 @@ import type { InfoEntryReferenceQuery } from '../../domain/info/ports/InfoEntryR
 import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepository'
 import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
+import type { ResumePdfExporter } from '../../domain/resume/ports/ResumePdfExporter'
+import type { PdfFileSaver } from '../../domain/resume/ports/PdfFileSaver'
 import type { ModelProvider } from '../../domain/generation/ports/ModelProvider'
 import type { ProviderConfig } from '../../domain/settings/ProviderConfig'
 import type { ProviderConfigRepository } from '../../domain/settings/ports/ProviderConfigRepository'
@@ -111,6 +113,9 @@ export interface ConversationWiringOptions {
   readonly activeRuns: ActiveRunRegistry
   /** Credential values currently loaded; every persisted string is scrubbed. */
   readonly secrets: readonly string[]
+  /** The renderer and saver the `exportPdf` tool calls. */
+  readonly pdfExporter: ResumePdfExporter
+  readonly pdfSaver: PdfFileSaver
   readonly maxOutputTokens?: number
   readonly onWarning?: (message: string, error: unknown) => void
 }
@@ -171,6 +176,8 @@ export function createConversationService(input: ConversationServiceInput): Conv
     secrets,
     maxOutputTokens,
     onWarning,
+    pdfExporter,
+    pdfSaver,
   } = input
   const registry = buildToolRegistry({
     model,
@@ -186,6 +193,8 @@ export function createConversationService(input: ConversationServiceInput): Conv
     measurer: library.measurer,
     clock,
     ids,
+    pdfExporter,
+    pdfSaver,
   })
   const turnDeps = (signal: AbortSignal, emit: (event: AgentEvent) => void) => ({
     model,

@@ -38,6 +38,7 @@ export const TOOL_LABELS: Readonly<Record<string, string>> = {
   writeEntryOverride: '改写条目文案',
   addCanvasBlock: '添加画布元素',
   moveCanvasBlock: '移动画布元素',
+  exportPdf: '导出 PDF',
   undoLastChange: '撤销上一步修改',
 }
 

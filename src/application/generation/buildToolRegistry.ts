@@ -1,19 +1,16 @@
 /**
  * @file buildToolRegistry
- * @description The production tool registry: the 25 tools of the agent pack,
+ * @description The production tool registry: the 26 tools of the agent pack,
  * their model-visible JSON schemas and their card labels. The registry is built
  * once per composition root from the dependency bundle the tool pack declares.
  *
  * Responsibilities:
- * - Assemble the read, library, resume, draft, canvas and undo tools
+ * - Assemble the read, library, resume, draft, canvas, export and undo tools
  * - Render each tool's strict Zod schema into the JSON schema the model reads
  * - Enforce the four construction guards: no destructive tool name, the exact
  *   tool count, a label for every write/draft tool, and a renderable schema
  *
  * Constraints:
- * - `exportPdf` is deliberately not registered here: the export change registers
- *   it when the exporter exists, which is why the expected count is 25 rather
- *   than the contract's 26.
  * - A guard failure is a build error, not a runtime refusal: a registry that
  *   cannot describe itself must not reach a model.
  * - A registered tool's `parse` is the only argument validator; this module
@@ -31,10 +28,11 @@ import { createInfoTools } from './tools/infoTools'
 import { createResumeTools } from './tools/resumeTools'
 import { createDraftTools } from './tools/draftTools'
 import { createCanvasTools } from './tools/canvasTools'
+import { createExportTools } from './tools/exportTools'
 import { createUndoTools } from './tools/undoTools'
 
-/** Tools this pack registers. The export tool raises this to 26 when it lands. */
-export const EXPECTED_TOOL_COUNT = 25
+/** Tools this pack registers. */
+export const EXPECTED_TOOL_COUNT = 26
 
 /** Tool names that imply deleting data; the product does not allow any. */
 export const FORBIDDEN_TOOL_NAME_PATTERN = /(delete|remove|destroy|drop|clear|purge)/i
@@ -63,6 +61,7 @@ function collectDefinitions(deps: ToolPackDeps): readonly ToolDefinition<unknown
     ...createResumeTools(deps),
     ...createDraftTools(deps),
     ...createCanvasTools(deps),
+    ...createExportTools(deps),
     ...createUndoTools(deps),
   ]
 }
