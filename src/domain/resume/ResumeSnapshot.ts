@@ -1,65 +1,49 @@
 /**
  * @file ResumeSnapshot
- * @description The frozen form of a resume. Every reference is resolved to
- * inline text at freeze time, so a snapshot never changes afterwards and
- * survives deletion of the rows it was built from.
+ * @description The frozen form of a resume: the document state it was frozen at
+ * plus the materialized blocks an export renders. Every library reference is
+ * resolved into text at freeze time, so a snapshot never changes afterwards and
+ * survives deletion of the entries it was built from.
+ *
+ * Responsibilities:
+ * - Declare the frozen payload and the materialized document it stores
+ * - Number snapshots per resume
+ *
+ * Constraints:
+ * - The snapshot stores materialized blocks, not their geometry: layout is a
+ *   pure function of blocks, so an export recomputes the same pages and a
+ *   improvement to the layout engine improves existing snapshots.
+ * - Cross-context types (`LayoutBlock`, `MissingReference`) stay domain types.
  */
 
-import type { DateTime, IsoDate } from '../shared/DateTime'
-import type { AssetId, BlockId, ClaimId, ResumeId, SnapshotId } from '../shared/branded-id'
-import type { ProfileFields } from '../catalog/Profile'
-import type { ClaimKind } from '../catalog/ClaimKind'
-import type { BlockLayout } from './Layout'
-import type { PageSetup } from './PageSetup'
-import type { TextStyle } from './TextStyle'
+import type { DateTime } from '../shared/DateTime'
+import type { ResumeId, SnapshotId } from '../shared/branded-id'
+import type { LayoutBlock } from './Layout'
+import type { MissingReference } from './MissingReference'
+import type { ResumeDocumentState } from './DocumentState'
+
+/** What the materializer reports next to the blocks it produced. */
+export type MaterializedWarning = 'entry-missing' | 'image-missing' | 'text-truncated'
+
+/** The content a resume renders, independent of geometry. */
+export interface MaterializedDocument {
+  readonly blocks: readonly LayoutBlock[]
+  readonly missingReferences: readonly MissingReference[]
+  readonly warnings: readonly MaterializedWarning[]
+}
 
 export interface ResumeSnapshot {
   readonly id: SnapshotId
   readonly resumeId: ResumeId
   readonly seq: number
-  /** Experience and variant content copied inline; no live references remain. */
-  readonly materializedBlocks: readonly MaterializedBlock[]
-  readonly pageSetup: PageSetup
+  /** The document state the snapshot was taken from; supports duplication. */
+  readonly frozenState: ResumeDocumentState
+  /** The materialized blocks an export lays out. */
+  readonly materialized: MaterializedDocument
   readonly createdAt: DateTime
 }
 
-/** Claim text inlined at freeze time; the claim row may later be deleted. */
-export interface MaterializedClaim {
-  readonly claimId: ClaimId
-  readonly kind: ClaimKind
-  readonly statement: string
-  readonly sourceField: string | null
-}
-
-/** BlockContent with every reference resolved to inline text: the storage
- *  shape of materialized_json and the common input of both exporters. */
-export type MaterializedContent =
-  | { readonly type: 'text'; readonly text: string }
-  | (ProfileFields & { readonly type: 'profile' })
-  | {
-      readonly type: 'experience'
-      readonly title: string
-      readonly organization: string | null
-      readonly startDate: IsoDate | null
-      readonly endDate: IsoDate | null
-      readonly variantContent: string
-    }
-  | { readonly type: 'divider' }
-  // The one deliberate live reference: image bytes are not inlined into
-  // JSON. Assets referenced by any snapshot must not be deleted.
-  | { readonly type: 'graphic'; readonly assetId: AssetId }
-
-export interface MaterializedBlock {
-  readonly id: BlockId
-  /** Fact fields and the selected variant content, inlined as text. */
-  readonly content: MaterializedContent
-  readonly layout: BlockLayout
-  /** Inlined with the block so the snapshot renders without any theme. */
-  readonly textStyle: TextStyle | null
-  /** Inline text, not a live reference: survives claim/experience deletion. */
-  readonly claims: readonly MaterializedClaim[]
-}
-
+/** New snapshots continue the sequence; a resume numbers them from 1. */
 export function nextSnapshotSeq(existing: readonly ResumeSnapshot[]): number {
   let highest = 0
   for (const snapshot of existing) {
