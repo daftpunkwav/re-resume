@@ -61,6 +61,91 @@ function StreamingAnswer() {
   )
 }
 
+function StreamingStatus() {
+  return (
+    <p className="message-status">
+      <span className="message-status-dot" aria-hidden="true" />
+      正在生成回答
+    </p>
+  )
+}
+
+interface AssistantStatusProps {
+  readonly message: Message
+  readonly canRetry: boolean
+  readonly onRetry: (messageId: Message['id']) => void
+}
+
+/** The failed / cancelled line, with the inline retry entry when one is possible. */
+function AssistantStatus({ message, canRetry, onRetry }: AssistantStatusProps) {
+  const failed = message.status === 'failed'
+  return (
+    <div className="message-status message-status-bad" role="status">
+      <FeatureIcon name="alert-circle" size={14} />
+      <span>{failed ? '生成失败' : '已取消'}</span>
+      {message.errorText === null ? null : (
+        <span className="message-status-detail">{message.errorText}</span>
+      )}
+      {canRetry ? (
+        <button
+          type="button"
+          className="message-inline-action"
+          onClick={() => onRetry(message.id)}
+        >
+          <FeatureIcon name="refresh" size={13} />
+          重试
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+interface AssistantMetaProps {
+  readonly message: Message
+  readonly usage?: TokenUsage
+  readonly canRetry: boolean
+  readonly retryable: boolean
+  readonly onRetry: (messageId: Message['id']) => void
+}
+
+function AssistantMeta({ message, usage, canRetry, retryable, onRetry }: AssistantMetaProps) {
+  return (
+    <div className="message-meta">
+      <span className="message-meta-text">
+        {usage === undefined ? '' : `${formatTokenTotal(usage)} token`}
+      </span>
+      <span className="message-actions">
+        {message.markdown === '' ? null : (
+          <Tooltip label="复制" placement="top">
+            <button
+              type="button"
+              className="message-action"
+              aria-label="复制这条消息"
+              onClick={() => {
+                void copyMessage(message.markdown)
+              }}
+            >
+              <FeatureIcon name="copy" size={14} />
+            </button>
+          </Tooltip>
+        )}
+        {canRetry && retryable ? (
+          <Tooltip label="重新生成" placement="top">
+            <button
+              type="button"
+              className="message-action"
+              aria-label="重新生成这条回答"
+              onClick={() => onRetry(message.id)}
+            >
+              <FeatureIcon name="refresh" size={14} />
+            </button>
+          </Tooltip>
+        ) : null}
+      </span>
+    </div>
+  )
+}
+
 function AssistantMessage({
   message,
   usage,
@@ -95,65 +180,18 @@ function AssistantMessage({
             <Markdown markdown={message.markdown} />
           </div>
         )}
-        {streaming ? (
-          <p className="message-status">
-            <span className="message-status-dot" aria-hidden="true" />
-            正在生成回答
-          </p>
-        ) : null}
-        {failed || cancelled ? (
-          <div className="message-status message-status-bad" role="status">
-            <FeatureIcon name="alert-circle" size={14} />
-            <span>{failed ? '生成失败' : '已取消'}</span>
-            {message.errorText === null ? null : (
-              <span className="message-status-detail">{message.errorText}</span>
-            )}
-            {canRetry ? (
-              <button
-                type="button"
-                className="message-inline-action"
-                onClick={() => onRetry(message.id)}
-              >
-                <FeatureIcon name="refresh" size={13} />
-                重试
-              </button>
-            ) : null}
-          </div>
+        {streaming ? <StreamingStatus /> : null}
+        {streaming ? null : failed || cancelled ? (
+          <AssistantStatus message={message} canRetry={canRetry} onRetry={onRetry} />
         ) : null}
         {streaming ? null : (
-          <div className="message-meta">
-            <span className="message-meta-text">
-              {usage === undefined ? '' : `${formatTokenTotal(usage)} token`}
-            </span>
-            <span className="message-actions">
-              {message.markdown === '' ? null : (
-                <Tooltip label="复制" placement="top">
-                  <button
-                    type="button"
-                    className="message-action"
-                    aria-label="复制这条消息"
-                    onClick={() => {
-                      void copyMessage(message.markdown)
-                    }}
-                  >
-                    <FeatureIcon name="copy" size={14} />
-                  </button>
-                </Tooltip>
-              )}
-              {canRetry && (failed || cancelled) ? (
-                <Tooltip label="重新生成" placement="top">
-                  <button
-                    type="button"
-                    className="message-action"
-                    aria-label="重新生成这条回答"
-                    onClick={() => onRetry(message.id)}
-                  >
-                    <FeatureIcon name="refresh" size={14} />
-                  </button>
-                </Tooltip>
-              ) : null}
-            </span>
-          </div>
+          <AssistantMeta
+            message={message}
+            usage={usage}
+            canRetry={canRetry}
+            retryable={failed || cancelled}
+            onRetry={onRetry}
+          />
         )}
       </div>
     </div>
@@ -171,6 +209,25 @@ export interface UserBubbleProps {
   readonly enter: boolean
   readonly messageId?: string
   readonly pending?: boolean
+}
+
+interface MessageContextChipsProps {
+  readonly contexts: readonly MessageContext[]
+  readonly contextEntries: Readonly<Record<string, string>>
+}
+
+function MessageContextChips({ contexts, contextEntries }: MessageContextChipsProps) {
+  return (
+    <div className="message-contexts">
+      {contexts.map((context) => (
+        <ContextChip
+          key={`${context.kind}:${context.refId}`}
+          kind={context.kind}
+          label={labelForContext(context, contextEntries)}
+        />
+      ))}
+    </div>
+  )
 }
 
 /** The user bubble, shared by a stored turn and by the optimistic pending turn. */
@@ -197,15 +254,7 @@ export function UserBubble({
       <div className="message-user-body">
         <p className="message-user-text">{text}</p>
         {contexts.length === 0 ? null : (
-          <div className="message-contexts">
-            {contexts.map((context) => (
-              <ContextChip
-                key={`${context.kind}:${context.refId}`}
-                kind={context.kind}
-                label={labelForContext(context, contextEntries)}
-              />
-            ))}
-          </div>
+          <MessageContextChips contexts={contexts} contextEntries={contextEntries} />
         )}
       </div>
     </div>

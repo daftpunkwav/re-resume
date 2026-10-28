@@ -20,7 +20,72 @@ import { Popover } from '../../app/components/Popover'
 import { Spinner } from '../../app/components/Spinner'
 import { useShellStore } from '../../app/stores/shellStore'
 import { useProviderStore } from './stores/providerStore'
+import type { ProviderListItem } from '../../../application/settings/providerConfiguration'
+import type { ProviderConnectionTestResult } from '../../../application/settings/testProviderConnection'
 import { FeatureIcon } from './icons'
+
+interface ProviderOptionProps {
+  readonly entry: ProviderListItem
+  readonly selected: boolean
+  readonly onSelect: () => void
+}
+
+function ProviderOption({ entry, selected, onSelect }: ProviderOptionProps) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className={selected ? 'provider-option provider-option-selected' : 'provider-option'}
+      onClick={onSelect}
+    >
+      <span className="provider-option-main">
+        <span className="provider-option-name">{entry.config.name}</span>
+        <span className="provider-option-model">{entry.config.modelId}</span>
+      </span>
+      {entry.hasCredential ? null : <Badge tone="warning">缺少密钥</Badge>}
+      {selected ? (
+        <span className="provider-option-mark" aria-hidden="true">
+          <FeatureIcon name="check-circle" size={15} />
+        </span>
+      ) : null}
+    </button>
+  )
+}
+
+interface ProviderProbeProps {
+  readonly active: ProviderListItem
+  readonly probe: ProviderConnectionTestResult | undefined
+  readonly testing: boolean
+  readonly onTest: () => void
+}
+
+function ProviderProbe({ active, probe, testing, onTest }: ProviderProbeProps) {
+  return (
+    <div className="provider-probe">
+      <Button
+        size="small"
+        variant="secondary"
+        onClick={onTest}
+        disabled={testing || !active.hasCredential}
+        loading={testing}
+      >
+        测试连接
+      </Button>
+      {testing ? <Spinner label="正在测试连接" /> : null}
+      {probe === undefined ? null : (
+        <span
+          className={probe.ok ? 'provider-probe-ok' : 'provider-probe-failed'}
+          role="status"
+        >
+          {probe.ok
+            ? `连接正常 · ${probe.latencyMs.toString()} ms`
+            : (probe.detail ?? '连接失败')}
+        </span>
+      )}
+    </div>
+  )
+}
 
 export function ModelPicker() {
   const rebuild = useApplicationRebuild()
@@ -82,13 +147,11 @@ export function ModelPicker() {
           {providers.map((entry) => {
             const selected = entry.config.id === activeProviderId
             return (
-              <button
+              <ProviderOption
                 key={entry.config.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                className={selected ? 'provider-option provider-option-selected' : 'provider-option'}
-                onClick={() => {
+                entry={entry}
+                selected={selected}
+                onSelect={() => {
                   if (selected) {
                     setOpen(false)
                     return
@@ -99,46 +162,19 @@ export function ModelPicker() {
                     rebuild()
                   })
                 }}
-              >
-                <span className="provider-option-main">
-                  <span className="provider-option-name">{entry.config.name}</span>
-                  <span className="provider-option-model">{entry.config.modelId}</span>
-                </span>
-                {entry.hasCredential ? null : <Badge tone="warning">缺少密钥</Badge>}
-                {selected ? (
-                  <span className="provider-option-mark" aria-hidden="true">
-                    <FeatureIcon name="check-circle" size={15} />
-                  </span>
-                ) : null}
-              </button>
+              />
             )
           })}
         </div>
         {active === null ? null : (
-          <div className="provider-probe">
-            <Button
-              size="small"
-              variant="secondary"
-              onClick={() => {
-                void testConnection(active.config.id)
-              }}
-              disabled={testing.has(active.config.id) || !active.hasCredential}
-              loading={testing.has(active.config.id)}
-            >
-              测试连接
-            </Button>
-            {testing.has(active.config.id) ? <Spinner label="正在测试连接" /> : null}
-            {probe === undefined ? null : (
-              <span
-                className={probe.ok ? 'provider-probe-ok' : 'provider-probe-failed'}
-                role="status"
-              >
-                {probe.ok
-                  ? `连接正常 · ${probe.latencyMs.toString()} ms`
-                  : (probe.detail ?? '连接失败')}
-              </span>
-            )}
-          </div>
+          <ProviderProbe
+            active={active}
+            probe={probe}
+            testing={testing.has(active.config.id)}
+            onTest={() => {
+              void testConnection(active.config.id)
+            }}
+          />
         )}
         {error === null ? null : <p className="provider-error">{error.message}</p>}
         <Button
