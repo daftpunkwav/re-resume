@@ -22,7 +22,7 @@
 
 import { create } from 'zustand'
 
-import type { InfoService, ResumeService } from '../../../bootstrap/capabilities'
+import type { InfoService, ResumeRender, ResumeService } from '../../../bootstrap/capabilities'
 import type {
   AppearanceSettings,
 } from '../../../domain/resume/AppearanceSettings'
@@ -367,6 +367,134 @@ function summaryTextOf(block: LayoutOutput['blocks'][number] | null): string {
     .join('\n')
 }
 
+/** Everything one refresh reads, so the reload can apply it in one state write. */
+interface ResumeView {
+  readonly list: readonly Resume[]
+  readonly render: ResumeRender
+  readonly revisions: readonly Revision[]
+  readonly entries: readonly InfoEntry[]
+  readonly customModules: readonly CustomModuleDefinition[]
+}
+
+/** Keeps a selection only while the block or chapter it named still renders. */
+function selectionIfStillRendered(
+  selection: StudioSelection,
+  render: ResumeRender,
+): StudioSelection {
+  if (
+    selection.kind === 'section' &&
+    render.resume.document.sections.every((section) => section.id !== selection.sectionId)
+  ) {
+    return { kind: 'document' }
+  }
+  if (
+    selection.kind === 'block' &&
+    render.layout.blocks.every((block) => block.blockId !== selection.blockId)
+  ) {
+    return { kind: 'document' }
+  }
+  return selection
+}
+
+/** The state a successful reload applies, derived from the read bundle. */
+function loadedResumeState(
+  targetId: ResumeId,
+  view: ResumeView,
+  selection: StudioSelection,
+  currentPage: number,
+): Partial<ResumeStudioState> {
+  return {
+    list: sortedList(view.list),
+    listStatus: 'ready',
+    listError: null,
+    selectedId: targetId,
+    loadStatus: 'ready',
+    loadError: null,
+    resume: view.render.resume,
+    materialized: view.render.materialized,
+    layout: view.render.layout,
+    revisions: view.revisions,
+    entries: view.entries,
+    customModules: view.customModules,
+    styles: stylesOf(view.render.resume),
+    entryUpdates: entryUpdatesOf(view.render.resume, view.entries),
+    selection: selectionIfStillRendered(selection, view.render),
+    editorTarget: null,
+    currentPage: Math.min(currentPage, Math.max(0, view.render.layout.pages.length - 1)),
+  }
+}
+
+function summaryOverrideOf(resume: Resume): ResumeOverride | undefined {
+  return resume.document.overrides.find((override) => override.target.kind === 'summary')
+}
+
+function entryOverrideOf(resume: Resume, entryId: InfoEntryId): ResumeOverride | undefined {
+  return resume.document.overrides.find(
+    (override) => override.target.kind === 'entry' && override.target.entryId === entryId,
+  )
+}
+
+function freeTextTarget(
+  resume: Resume,
+  layoutBlockId: LayoutBlockId,
+  blockId: CanvasBlockId,
+): StudioEditorTarget | null {
+  const canvasBlock = resume.document.canvas.freeBlocks.find((candidate) => candidate.id === blockId)
+  if (canvasBlock === undefined || canvasBlock.kind !== 'text') return null
+  return {
+    kind: 'freeText',
+    layoutBlockId,
+    blockId,
+    text: canvasBlock.text ?? '',
+  }
+}
+
+function summaryTarget(
+  resume: Resume,
+  layoutBlockId: LayoutBlockId,
+  block: LayoutOutput['blocks'][number] | null,
+): StudioEditorTarget {
+  return {
+    kind: 'summary',
+    layoutBlockId,
+    text: summaryOverrideOf(resume)?.text ?? summaryTextOf(block),
+  }
+}
+
+function headerTarget(resume: Resume, layoutBlockId: LayoutBlockId): StudioEditorTarget | null {
+  const personal = resume.document.sections.find((section) => section.moduleKind === 'personal')
+  const entryId = personal?.entryIds[0]
+  if (personal === undefined || entryId === undefined) return null
+  // The header's own lines are the name and contact details; an override
+  // writes the body paragraph below them, so a fresh editor starts empty.
+  return {
+    kind: 'entryOverride',
+    layoutBlockId,
+    entryId,
+    sectionId: personal.id,
+    text: entryOverrideOf(resume, entryId)?.text ?? '',
+  }
+}
+
+function entryTarget(
+  resume: Resume,
+  layoutBlockId: LayoutBlockId,
+  block: LayoutOutput['blocks'][number] | null,
+  styles: ResolvedStyles | null,
+): StudioEditorTarget | null {
+  const entryId = entryIdOfBlock(layoutBlockId)
+  if (entryId === null) return null
+  const section = sectionOfEntry(resume.document.sections, entryId)
+  if (section === null) return null
+  return {
+    kind: 'entryOverride',
+    layoutBlockId,
+    entryId,
+    sectionId: section.id,
+    text: entryOverrideOf(resume, entryId)?.text ?? bodyTextOf(block, styles),
+  }
+}
+
 function targetForBlock(
   state: ResumeStudioState,
   blockId: LayoutBlockId,
@@ -374,52 +502,12 @@ function targetForBlock(
   const { resume, materialized, layout, styles } = state
   if (resume === null || materialized === null || layout === null) return null
   if (resume.status === 'frozen') return null
-  const block = blockById(layout, blockId)
   const freeId = freeCanvasIdOf(blockId)
-  if (freeId !== null) {
-    const canvasBlock = resume.document.canvas.freeBlocks.find((candidate) => candidate.id === freeId)
-    if (canvasBlock === undefined || canvasBlock.kind !== 'text') return null
-    return { kind: 'freeText', layoutBlockId: blockId, blockId: freeId, text: canvasBlock.text ?? '' }
-  }
-  const summary = resume.document.overrides.find((override) => override.target.kind === 'summary')
-  if (blockId === 'summary') {
-    return {
-      kind: 'summary',
-      layoutBlockId: blockId,
-      text: summary?.text ?? summaryTextOf(block),
-    }
-  }
-  if (blockId === 'header') {
-    const personal = resume.document.sections.find((section) => section.moduleKind === 'personal')
-    const entryId = personal?.entryIds[0]
-    if (personal === undefined || entryId === undefined) return null
-    const override = resume.document.overrides.find(
-      (candidate) => candidate.target.kind === 'entry' && candidate.target.entryId === entryId,
-    )
-    // The header's own lines are the name and contact details; an override
-    // writes the body paragraph below them, so a fresh editor starts empty.
-    return {
-      kind: 'entryOverride',
-      layoutBlockId: blockId,
-      entryId,
-      sectionId: personal.id,
-      text: override?.text ?? '',
-    }
-  }
-  const entryId = entryIdOfBlock(blockId)
-  if (entryId === null) return null
-  const section = sectionOfEntry(resume.document.sections, entryId)
-  if (section === null) return null
-  const override = resume.document.overrides.find(
-    (candidate) => candidate.target.kind === 'entry' && candidate.target.entryId === entryId,
-  )
-  return {
-    kind: 'entryOverride',
-    layoutBlockId: blockId,
-    entryId,
-    sectionId: section.id,
-    text: override?.text ?? bodyTextOf(block, styles),
-  }
+  if (freeId !== null) return freeTextTarget(resume, blockId, freeId)
+  const block = blockById(layout, blockId)
+  if (blockId === 'summary') return summaryTarget(resume, blockId, block)
+  if (blockId === 'header') return headerTarget(resume, blockId)
+  return entryTarget(resume, blockId, block, styles)
 }
 
 function bindServices(services: ResumeStudioServices): ResumeStudioServices {
@@ -466,6 +554,58 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
       }
     } finally {
       release()
+    }
+  }
+
+  /** Reads the resume list only; the state writes are guarded by the epoch. */
+  const refreshList = async (
+    services: ResumeStudioServices,
+    epoch: number,
+    silent: boolean,
+  ): Promise<void> => {
+    if (!silent) set({ listStatus: 'loading', listError: null })
+    try {
+      const list = await services.resume.listResumes()
+      if (get().epoch !== epoch) return
+      set({ list: sortedList(list), listStatus: 'ready', listError: null })
+    } catch (thrown) {
+      if (get().epoch === epoch) {
+        set({ listStatus: 'error', listError: describeError(thrown) })
+      }
+    }
+  }
+
+  /** Reads the list, document, revisions and library, then applies them as one state. */
+  const loadResumeView = async (
+    services: ResumeStudioServices,
+    targetId: ResumeId,
+    epoch: number,
+    silent: boolean,
+  ): Promise<void> => {
+    if (!silent) {
+      set({ listStatus: 'loading', loadStatus: 'loading', listError: null, loadError: null })
+    } else {
+      set({ listError: null, loadError: null })
+    }
+    try {
+      const [list, render, revisions, library] = await Promise.all([
+        services.resume.listResumes(),
+        services.resume.renderResume(targetId),
+        services.resume.listRevisions(targetId),
+        services.info.listEntries(),
+      ])
+      if (get().epoch !== epoch) return
+      const view: ResumeView = {
+        list,
+        render,
+        revisions,
+        entries: library.entries,
+        customModules: library.customModules,
+      }
+      set(loadedResumeState(targetId, view, get().selection, get().currentPage))
+    } catch (thrown) {
+      if (get().epoch !== epoch) return
+      set({ loadStatus: 'error', loadError: describeError(thrown), selectedId: targetId })
     }
   }
 
@@ -532,67 +672,10 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
       const targetId = id ?? get().selectedId
       const silent = targetId !== null && targetId === get().selectedId && get().resume !== null
       if (targetId === null) {
-        if (!silent) set({ listStatus: 'loading', listError: null })
-        try {
-          const list = await services.resume.listResumes()
-          if (get().epoch !== epoch) return
-          const sorted = sortedList(list)
-          set({ list: sorted, listStatus: 'ready', listError: null })
-        } catch (thrown) {
-          if (get().epoch === epoch) {
-            set({ listStatus: 'error', listError: describeError(thrown) })
-          }
-        }
+        await refreshList(services, epoch, silent)
         return
       }
-      if (!silent) {
-        set({ listStatus: 'loading', loadStatus: 'loading', listError: null, loadError: null })
-      } else {
-        set({ listError: null, loadError: null })
-      }
-      try {
-        const [list, render, revisions, library] = await Promise.all([
-          services.resume.listResumes(),
-          services.resume.renderResume(targetId),
-          services.resume.listRevisions(targetId),
-          services.info.listEntries(),
-        ])
-        if (get().epoch !== epoch) return
-        const selection = get().selection
-        const sectionStillExists =
-          selection.kind !== 'section' ||
-          render.resume.document.sections.some((section) => section.id === selection.sectionId)
-        const blockStillExists =
-          selection.kind !== 'block' ||
-          render.layout.blocks.some((block) => block.blockId === selection.blockId)
-        set({
-          list: sortedList(list),
-          listStatus: 'ready',
-          listError: null,
-          selectedId: targetId,
-          loadStatus: 'ready',
-          loadError: null,
-          resume: render.resume,
-          materialized: render.materialized,
-          layout: render.layout,
-          revisions,
-          entries: library.entries,
-          customModules: library.customModules,
-          styles: stylesOf(render.resume),
-          entryUpdates: entryUpdatesOf(render.resume, library.entries),
-          selection:
-            sectionStillExists && blockStillExists ? selection : { kind: 'document' },
-          editorTarget: null,
-          currentPage: Math.min(get().currentPage, Math.max(0, render.layout.pages.length - 1)),
-        })
-      } catch (thrown) {
-        if (get().epoch !== epoch) return
-        set({
-          loadStatus: 'error',
-          loadError: describeError(thrown),
-          selectedId: targetId,
-        })
-      }
+      await loadResumeView(services, targetId, epoch, silent)
     },
 
     async select(id) {
@@ -893,35 +976,45 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
   }
 })
 
+function summaryOverrideIn(resume: Resume): ResumeOverride | undefined {
+  return resume.document.overrides.find((override) => override.target.kind === 'summary')
+}
+
+function entryOverrideIn(resume: Resume, entryId: InfoEntryId): ResumeOverride | undefined {
+  return resume.document.overrides.find(
+    (override) => override.target.kind === 'entry' && override.target.entryId === entryId,
+  )
+}
+
+/** An empty submit deletes the rewrite it edits; a missing one is already clean. */
+async function saveOverrideText(
+  text: string,
+  existing: ResumeOverride | undefined,
+  write: (text: string) => Promise<boolean>,
+): Promise<boolean> {
+  if (text.trim() === '') {
+    if (existing === undefined) return true
+    return useResumeStore.getState().deleteOverride(existing.id)
+  }
+  return write(text)
+}
+
 /** Save the inline editor's value through the path its target names. */
 export async function saveEditorText(text: string): Promise<boolean> {
-  const { editorTarget, resume, writeSummaryOverride, writeEntryOverride, updateCanvasBlockText } =
-    useResumeStore.getState()
+  const { editorTarget, resume } = useResumeStore.getState()
   if (editorTarget === null || resume === null) return false
-  const trimmed = text.trim()
   switch (editorTarget.kind) {
     case 'freeText':
-      if (trimmed === '') return false
-      return updateCanvasBlockText(editorTarget.blockId, text)
-    case 'summary': {
-      const existing = resume.document.overrides.find((override) => override.target.kind === 'summary')
-      if (trimmed === '') {
-        if (existing === undefined) return true
-        return useResumeStore.getState().deleteOverride(existing.id)
-      }
-      return writeSummaryOverride(text)
-    }
-    case 'entryOverride': {
-      const existing = resume.document.overrides.find(
-        (override) =>
-          override.target.kind === 'entry' && override.target.entryId === editorTarget.entryId,
+      if (text.trim() === '') return false
+      return useResumeStore.getState().updateCanvasBlockText(editorTarget.blockId, text)
+    case 'summary':
+      return saveOverrideText(text, summaryOverrideIn(resume), (next) =>
+        useResumeStore.getState().writeSummaryOverride(next),
       )
-      if (trimmed === '') {
-        if (existing === undefined) return true
-        return useResumeStore.getState().deleteOverride(existing.id)
-      }
-      return writeEntryOverride(editorTarget.entryId, text)
-    }
+    case 'entryOverride':
+      return saveOverrideText(text, entryOverrideIn(resume, editorTarget.entryId), (next) =>
+        useResumeStore.getState().writeEntryOverride(editorTarget.entryId, next),
+      )
   }
 }
 
