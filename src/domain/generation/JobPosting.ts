@@ -1,12 +1,22 @@
 /**
  * @file JobPosting
- * @description A pasted job description plus, once parsed, the extracted
- * requirements. The parse keeps its provenance so the result never appears
- * without a source.
+ * @description A job description the user supplied, plus the structured
+ * requirements a model extracted from it. The parse keeps its provenance: a
+ * parsed record never appears without the run that produced it.
+ *
+ * Constraints:
+ * - A posting has text or images, never neither. The table CHECK says the same.
+ * - `parsed` non-null implies `parsedByRunId` and `parsedAt` are non-null.
  */
 
 import type { DateTime } from '../shared/DateTime'
-import type { AgentRunId, JobPostingId } from '../shared/branded-id'
+import type {
+  AgentRunId,
+  AttachmentId,
+  ConversationId,
+  JobPostingId,
+  ResumeId,
+} from '../shared/branded-id'
 
 export interface ParsedJobPosting {
   readonly title: string | null
@@ -18,13 +28,22 @@ export interface ParsedJobPosting {
 
 export interface JobPosting {
   readonly id: JobPostingId
+  /** The pasted description; for an image input, the model transcription. */
   readonly rawText: string
+  /** 'paste' | 'image' | 'manual', or null when the origin was not recorded. */
   readonly source: string | null
+  readonly imageAttachmentIds: readonly AttachmentId[]
+  readonly conversationId: ConversationId | null
+  readonly resumeId: ResumeId | null
   readonly parsed: ParsedJobPosting | null
-  /** Provenance of the parse: which agent run produced it, and when. */
   readonly parsedByRunId: AgentRunId | null
   readonly parsedAt: DateTime | null
   readonly createdAt: DateTime
+}
+
+/** True when the posting carries something a parse can read. */
+export function hasJobPostingContent(posting: JobPosting): boolean {
+  return posting.rawText !== '' || posting.imageAttachmentIds.length > 0
 }
 
 export function attachParse(

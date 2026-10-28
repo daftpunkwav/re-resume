@@ -18,6 +18,7 @@ import type { CompositionRoot } from '../../../src/bootstrap/capabilities'
 import type { createCompositionRoot } from '../../../src/bootstrap/compositionRoot'
 import { DEFAULT_APP_SETTINGS } from '../../../src/domain/settings/AppSettings'
 import { InMemorySecretStore } from '../../../src/infrastructure/preview/inMemoryRepositories'
+import { createPreviewConversationService } from '../../../src/bootstrap/previewConversation'
 import { useSettingsStore } from '../../../src/presentation/app/stores/settingsStore'
 import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
 import { stubCompositionRoot } from '../../support/stubCompositionRoot'
@@ -36,6 +37,7 @@ function stubRoot(): CompositionRoot {
       save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
     },
     info: stubCompositionRoot().info,
+    conversation: createPreviewConversationService().service,
     secrets: new InMemorySecretStore(),
     shutdown: vi.fn(async () => undefined),
   }

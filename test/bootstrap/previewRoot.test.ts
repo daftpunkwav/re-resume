@@ -55,6 +55,15 @@ describe('createPreviewRoot', () => {
     await expect(root.secrets.load('provider:one')).resolves.toBeNull()
   })
 
+  it('serves the conversation area from memory', async () => {
+    const root = createPreviewRoot()
+
+    const listed = await root.conversation.listConversations()
+    expect(listed.conversations).toHaveLength(1)
+    const messages = await root.conversation.listMessages(listed.conversations[0]!.id, 10)
+    expect(messages.length).toBeGreaterThan(0)
+  })
+
   it('shuts down without a native container', async () => {
     const root = createPreviewRoot()
     await expect(root.shutdown()).resolves.toBeUndefined()

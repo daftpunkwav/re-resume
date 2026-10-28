@@ -34,6 +34,7 @@ import {
   PREVIEW_INFO_CUSTOM_MODULES,
   PREVIEW_INFO_ENTRIES,
 } from '../infrastructure/preview/fixtures.info'
+import { createPreviewConversationService } from './previewConversation'
 
 /**
  * The preview library: fixtures seeded into memory repositories, with a
@@ -57,10 +58,12 @@ function createPreviewInfoService(): CompositionRoot['info'] {
 
 export function createPreviewRoot(): CompositionRoot {
   const settingsRepository = new InMemoryAppSettingsRepository(PREVIEW_SETTINGS)
+  const { service: conversation } = createPreviewConversationService()
   return {
     appInfo: describeAppInfo({ runtime: 'browser', databaseFile: null }),
     settings: createAppSettingsService({ repository: settingsRepository }),
     info: createPreviewInfoService(),
+    conversation,
     secrets: new InMemorySecretStore(),
     shutdown: async (): Promise<void> => undefined,
   }

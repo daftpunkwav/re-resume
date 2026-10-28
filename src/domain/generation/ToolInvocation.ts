@@ -1,33 +1,44 @@
 /**
  * @file ToolInvocation
- * @description Audit record for one agent tool call. Kept even for read-only
- * tools so a run can be explained after the fact.
+ * @description The audit row for one tool call the run loop executed. The row
+ * outlives the message card it belongs to; `messageId` is cleared when the
+ * conversation is deleted while the invocation itself stays with its run.
+ *
+ * Constraints:
+ * - `argsJson` and `resultSummaryJson` are stored already redacted; a secret
+ *   that reached a tool argument never reaches this table.
  */
 
 import type { DateTime } from '../shared/DateTime'
-import type { AgentRunId, ToolInvocationId } from '../shared/branded-id'
+import type {
+  AgentRunId,
+  ChangeRecordId,
+  MessageId,
+  RevisionId,
+  ToolInvocationId,
+} from '../shared/branded-id'
 import type { ToolRisk } from './ToolRisk'
 
-/**
- * read/write/propose calls are created as approved and become executed after
- * the call returns. destructive calls start at pending. v1 registers no
- * destructive tools, so pending is reserved and unreachable by design.
- */
-export const APPROVAL_STATES = ['pending', 'approved', 'rejected', 'executed'] as const
+export const TOOL_INVOCATION_STATUSES = ['ok', 'failed'] as const
 
-export type ApprovalState = (typeof APPROVAL_STATES)[number]
+export type ToolInvocationStatus = (typeof TOOL_INVOCATION_STATUSES)[number]
 
 export interface ToolInvocation {
   readonly id: ToolInvocationId
   readonly runId: AgentRunId
+  readonly messageId: MessageId | null
   readonly toolName: string
   readonly risk: ToolRisk
+  /** Redacted arguments as the model sent them. */
   readonly argsJson: string
-  readonly resultJson: string | null
-  readonly approvalState: ApprovalState
+  /** Redacted, truncated summary of what the tool returned. */
+  readonly resultSummaryJson: string | null
+  readonly changeIds: readonly ChangeRecordId[]
+  readonly revisionId: RevisionId | null
+  readonly status: ToolInvocationStatus
   readonly createdAt: DateTime
 }
 
-export function initialApprovalState(risk: ToolRisk): ApprovalState {
-  return risk === 'destructive' ? 'pending' : 'approved'
+export function isToolInvocationStatus(value: unknown): value is ToolInvocationStatus {
+  return typeof value === 'string' && (TOOL_INVOCATION_STATUSES as readonly string[]).includes(value)
 }

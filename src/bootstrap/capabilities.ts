@@ -57,6 +57,7 @@ import type {
 } from '../application/info/updateInfoEntry'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
+import type { ConversationService } from './wiring/conversation'
 
 /** Build information shown in the about section. Every field is a fact about the running build. */
 export interface AppInfo {
@@ -105,6 +106,8 @@ export interface InfoService {
 export interface CompositionRoot {
   readonly appInfo: AppInfo
   readonly settings: AppSettingsService
+  /** Conversations, messages, attachments and the agent run of one turn. */
+  readonly conversation: ConversationService
   readonly info: InfoService
   /**
    * The encrypted credential store. The interface reaches it through the

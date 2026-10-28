@@ -7,7 +7,8 @@
  *
  * Responsibilities:
  * - Run the startup sequence in order: backup, open the database, verify it
- * - Construct the port implementations and wire the settings use cases to them
+ * - Construct the port implementations and wire each area's use cases to them
+ * - Repair the agent runs a previous process left running
  * - Report the build facts the about section shows
  * - Release the claim on the shared database on shutdown
  *
@@ -19,21 +20,40 @@
  */
 
 import type { Clock } from '../domain/shared/Clock'
+import type { FileStore } from '../domain/conversation/ports/FileStore'
 import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService } from './wiring/appSettings'
 import { createInfoService } from './wiring/info'
+import {
+  createConversationService,
+  readActiveProviderSecret,
+  resolveActiveProvider,
+} from './wiring/conversation'
+import type { ConversationRepositories } from './wiring/conversation'
+import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
+import { buildToolRegistry } from '../application/generation/buildToolRegistry'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
+import type { ManagedSqlDatabase } from '../infrastructure/persistence/sqlite'
 import { SqliteAppSettingsRepository } from '../infrastructure/persistence/settings/SqliteAppSettingsRepository'
+import { SqliteProviderConfigRepository } from '../infrastructure/persistence/settings/SqliteProviderConfigRepository'
 import { SqliteCustomModuleRepository } from '../infrastructure/persistence/info/SqliteCustomModuleRepository'
 import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/SqliteInfoEntryRepository'
 import { NoResumeEntryReferences } from '../infrastructure/persistence/info/NoResumeEntryReferences'
+import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
+import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
+import { SqliteConversationRepository } from '../infrastructure/persistence/conversation/SqliteConversationRepository'
+import { SqliteJobPostingRepository } from '../infrastructure/persistence/conversation/SqliteJobPostingRepository'
+import { SqliteMessageContextRepository } from '../infrastructure/persistence/conversation/SqliteMessageContextRepository'
+import { SqliteMessageRepository } from '../infrastructure/persistence/conversation/SqliteMessageRepository'
+import { SqliteToolInvocationRepository } from '../infrastructure/persistence/conversation/SqliteToolInvocationRepository'
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { SystemClock } from '../infrastructure/platform/systemClock'
 import { RandomIdGenerator } from '../infrastructure/platform/randomIdGenerator'
+import { createTauriHttpClient } from '../infrastructure/http/TauriHttpClient'
 
 /**
  * Connection string of the application database. Must match the one the native
@@ -45,13 +65,16 @@ export const DATABASE_CONNECTION_STRING = 'sqlite:re-resume.db'
 /** The database file name inside the application config directory. */
 const DATABASE_FILE_NAME = 're-resume.db'
 
+/** Output ceiling handed to the provider adapters when the request does not set one. */
+const DEFAULT_MAX_OUTPUT_TOKENS = 4096
+
 export interface CompositionRootOptions {
   /** Connection string handed to the SQL plugin verbatim. */
   readonly databaseConnectionString: string
   /**
    * Stronghold snapshot path and unlock password; the password is never
-   * persisted. Provider configuration is what opens the snapshot, and the
-   * provider settings are not part of the services this root exposes yet.
+   * persisted. The active provider's credential is read through this store when
+   * the root is built.
    */
   readonly stronghold: StrongholdSecretStoreOptions
 }
@@ -94,6 +117,46 @@ async function resolveDatabaseFile(): Promise<string | null> {
   }
 }
 
+/**
+ * Attachment storage in the native build. The Tauri-backed store belongs to the
+ * attachment work; until a root provides one, ingesting an attachment fails
+ * with this reason instead of writing bytes somewhere that is not the
+ * application's attachment directory.
+ */
+class UnavailableAttachmentStore implements FileStore {
+  async write(_storageName: string, _bytes: Uint8Array): Promise<void> {
+    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
+  }
+
+  async read(_storageName: string): Promise<Uint8Array> {
+    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
+  }
+
+  async delete(_storageName: string): Promise<void> {
+    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
+  }
+
+  async list(): Promise<readonly string[]> {
+    return []
+  }
+}
+
+function createConversationRepositories(
+  database: ManagedSqlDatabase,
+  fileStore: FileStore,
+): ConversationRepositories {
+  return {
+    conversations: new SqliteConversationRepository(database),
+    messages: new SqliteMessageRepository(database),
+    messageContexts: new SqliteMessageContextRepository(database),
+    attachments: new SqliteAttachmentRepository(database),
+    jobPostings: new SqliteJobPostingRepository(database),
+    runs: new SqliteAgentRunRepository(database),
+    invocations: new SqliteToolInvocationRepository(database),
+    fileStore,
+  }
+}
+
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
@@ -108,6 +171,42 @@ export async function createCompositionRoot(
     const customModuleRepository = new SqliteCustomModuleRepository(database)
     const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
     const ids = new RandomIdGenerator()
+    const providerConfigs = new SqliteProviderConfigRepository(database)
+    const secrets = new StrongholdSecretStore(options.stronghold)
+    const http = createTauriHttpClient()
+    const model = await resolveActiveProvider({
+      providerConfigs,
+      secrets,
+      http,
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    })
+    const providerSecrets = await readActiveProviderSecret({ providerConfigs, secrets })
+    const conversation = createConversationService({
+      repositories: createConversationRepositories(database, new UnavailableAttachmentStore()),
+      clock,
+      ids,
+      model,
+      titleModel: model,
+      activeRuns: new ActiveRunRegistry(),
+      secrets: providerSecrets,
+      registry: buildToolRegistry(),
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      onWarning: (message, warning) => {
+        console.warn(`[conversation] ${message}`, warning)
+      },
+    })
+    try {
+      const recovery = await conversation.recoverInterruptedRuns()
+      if (recovery.failedRuns > 0 || recovery.repairedMessages > 0) {
+        console.info(
+          `[startup] interrupted run recovery: ${recovery.failedRuns} run(s), ${recovery.repairedMessages} message(s)`,
+        )
+      }
+    } catch (failure) {
+      // A stale run row is untidy, not fatal: the window still opens and the
+      // next send is gated by the same database rule.
+      console.warn('[startup] interrupted run recovery failed; continuing.', failure)
+    }
     const databaseFile = await resolveDatabaseFile()
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
@@ -119,7 +218,8 @@ export async function createCompositionRoot(
         clock,
         ids,
       }),
-      secrets: new StrongholdSecretStore(options.stronghold),
+      conversation,
+      secrets,
       shutdown: async (): Promise<void> => {
         await database.close()
       },

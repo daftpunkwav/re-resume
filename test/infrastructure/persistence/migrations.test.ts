@@ -57,9 +57,48 @@ describe('migrations', () => {
     expect(info).toContain('CREATE INDEX idx_change_entity')
   })
 
+  it('creates the conversation tables at version 8', () => {
+    const conversation = readMigration('008_conversation.sql')
+    for (const table of [
+      'conversation',
+      'message',
+      'message_attachment',
+      'message_context',
+      'attachment',
+      'job_posting',
+      'agent_run',
+      'tool_invocation',
+    ]) {
+      expect(conversation).toContain(`CREATE TABLE ${table} `)
+    }
+    // The v1 tables this version replaces must be dropped before any CREATE:
+    // their foreign keys point at agent_run with RESTRICT, so an upgrade would
+    // otherwise abort on a table that already exists or a violated reference.
+    const firstCreate = conversation.indexOf('CREATE TABLE')
+    for (const legacy of [
+      'tool_invocation',
+      'variant',
+      'claim',
+      'document_revision',
+      'job_posting',
+      'agent_run',
+    ]) {
+      const drop = conversation.indexOf(`DROP TABLE IF EXISTS ${legacy};`)
+      expect(drop, `${legacy} must be dropped`).toBeGreaterThan(-1)
+      expect(drop, `${legacy} must be dropped before the first CREATE`).toBeLessThan(firstCreate)
+    }
+    // One run per conversation is a database invariant, not a convention.
+    expect(conversation).toContain(
+      "CREATE UNIQUE INDEX idx_run_one_running ON agent_run (conversation_id) WHERE status = 'running'",
+    )
+    // A tool card exists exactly for a tool message.
+    expect(conversation).toContain("CHECK ((kind = 'tool') = (tool_json IS NOT NULL))")
+  })
+
   it('keeps versions 3 to 6 comment-only', () => {
-    // An applied migration's body is immutable: version 3 was recorded empty, so
-    // the library schema ships as version 7 and these versions stay no-ops.
+    // An applied migration's body is immutable: these versions were recorded as
+    // empty placeholders, so later schemas ship as new versions (7 and 8) and
+    // these stay no-ops.
     for (const name of [
       '003_info.sql',
       '004_conversation.sql',

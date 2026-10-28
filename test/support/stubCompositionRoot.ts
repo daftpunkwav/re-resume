@@ -10,6 +10,7 @@ import { createInfoService } from '../../src/bootstrap/wiring/info'
 import { DEFAULT_APP_SETTINGS } from '../../src/domain/settings/AppSettings'
 import type { AppSettings } from '../../src/domain/settings/AppSettings'
 import { InMemorySecretStore } from '../../src/infrastructure/preview/inMemoryRepositories'
+import { createPreviewConversationService } from '../../src/bootstrap/previewConversation'
 import {
   InMemoryChangeLogRepository,
   InMemoryCustomModuleRepository,
@@ -20,6 +21,7 @@ import { FixedClock, SequentialIdGenerator } from './fakeEnvironment'
 
 export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): CompositionRoot {
   const settings: AppSettings = DEFAULT_APP_SETTINGS
+  const { service: conversation } = createPreviewConversationService()
   const changes = new InMemoryChangeLogRepository()
   const entries = new InMemoryInfoEntryRepository(changes)
   const customModules = new InMemoryCustomModuleRepository(entries, changes)
@@ -42,6 +44,7 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
       clock: new FixedClock(),
       ids: new SequentialIdGenerator('stub'),
     }),
+    conversation,
     secrets: new InMemorySecretStore(),
     shutdown: async () => undefined,
     ...overrides,

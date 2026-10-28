@@ -2,35 +2,53 @@
  * @file OpenAiCompatibleProvider
  * @description ModelProvider adapter for the OpenAI chat-completions wire
  * format, which serves OpenAI itself and the vendors that reproduce it. The
- * port speaks whole chunks of text and tool calls; this file is the only place
- * that knows about `choices[].delta`, `finish_reason` and the `[DONE]`
+ * port speaks structured content parts; this file is the only place that knows
+ * about `choices[].delta`, `image_url`, the usage-only frame and the `[DONE]`
  * sentinel.
+ *
+ * Responsibilities:
+ * - Map ChatRequest parts (text, image, tool result) to the vendor payload
+ * - Accumulate streamed tool-call fragments and emit them as whole calls
+ * - Translate usage frames into ModelChunk.usage
+ * - Surface failures as ModelCallError with the retry classification
  *
  * Constraints:
  * - A streamed tool call arrives as argument fragments keyed by index, and the
- *   name arrives only on the first fragment. Fragments are therefore
- *   accumulated per index and emitted as one ModelChunk when the call
- *   completes — emitting a partial argsJson would hand the tool registry
- *   unparsable arguments.
- * - Stream payloads are read defensively: a frame that is not JSON, or that
- *   lacks the fields it is supposed to carry, is reported rather than skipped,
- *   because a silently dropped tool call looks exactly like a model that chose
- *   not to call a tool.
+ *   name arrives only on the first fragment. Fragments are accumulated per
+ *   index and emitted when the call completes, so the registry never receives
+ *   half-parsed arguments.
+ * - A frame that is not JSON, or that lacks the fields it is supposed to carry,
+ *   is reported rather than skipped: a silently dropped tool call looks exactly
+ *   like a model that chose not to call one.
  * - The API key is supplied by the composition root from the SecretStore. It
  *   travels in the Authorization header and never appears in an error message.
  */
 
-import type { ChatRequest, ModelChunk, ModelProvider, ToolSchema } from '../../../domain/generation/ports/ModelProvider'
+import type {
+  ChatRequest,
+  ContentPart,
+  ModelChunk,
+  ModelProvider,
+  ToolSchema,
+} from '../../../domain/generation/ports/ModelProvider'
+import { DomainError } from '../../../domain/shared/DomainError'
 import { drainChunksAsText } from '../TauriHttpClient'
 import type { HttpClient, OutboundStream } from '../TauriHttpClient'
+import {
+  ERROR_BODY_CHAR_LIMIT,
+  ModelCallError,
+  modelCallErrorForStatus,
+  modelCallErrorForThrown,
+  readRetryAfterSeconds,
+} from './errors'
+import { MAX_REQUEST_BODY_CHARACTER_LENGTH } from './httpTypes'
 
 const COMPLETIONS_PATH = '/chat/completions'
 const STREAM_SENTINEL = '[DONE]'
-/** An error body is diagnostic, not documentation; a long page helps nobody. */
-const ERROR_BODY_CHAR_LIMIT = 600
+const ENDPOINT_LABEL = 'OpenAI-compatible endpoint'
 
 export interface OpenAiCompatibleProviderConfig {
-  /** Provider identity used by the tool run records. */
+  /** Provider identity used by the run records. */
   readonly id: string
   readonly modelId: string
   /** Endpoint root, for example https://api.openai.com/v1. */
@@ -38,6 +56,8 @@ export interface OpenAiCompatibleProviderConfig {
   /** Loaded from the SecretStore by the composition root. */
   readonly apiKey: string
   readonly http: HttpClient
+  readonly supportsImages: boolean
+  readonly maxOutputTokens?: number
   readonly connectTimeoutMs?: number
 }
 
@@ -46,15 +66,24 @@ interface PendingToolCall {
   argsJson: string
 }
 
+interface StreamFrame {
+  readonly text: string
+  readonly toolCallFragments: readonly unknown[]
+  readonly finishReason: unknown
+  readonly usage: { readonly promptTokens: number; readonly completionTokens: number } | null
+}
+
 export class OpenAiCompatibleProvider implements ModelProvider {
   readonly id: string
   readonly modelId: string
+  readonly supportsImages: boolean
   readonly #config: OpenAiCompatibleProviderConfig
 
   constructor(config: OpenAiCompatibleProviderConfig) {
     this.#config = config
     this.id = config.id
     this.modelId = config.modelId
+    this.supportsImages = config.supportsImages
   }
 
   stream(
@@ -72,73 +101,166 @@ async function* streamChatCompletion(
   tools: readonly ToolSchema[],
   signal?: AbortSignal,
 ): AsyncIterable<ModelChunk> {
-  const response = await config.http.openStream({
-    method: 'POST',
-    url: `${config.baseUrl.replace(/\/+$/, '')}${COMPLETIONS_PATH}`,
-    headers: {
-      'content-type': 'application/json',
-      accept: 'text/event-stream',
-      authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify(buildRequestBody(config.modelId, request, tools)),
-    connectTimeoutMs: config.connectTimeoutMs,
-    signal,
-  })
-  await refuseUnsuccessfulResponse('OpenAI-compatible endpoint', response)
+  const body = buildRequestBody(config, request, tools)
+  let response: OutboundStream
+  try {
+    response = await config.http.openStream({
+      method: 'POST',
+      url: `${config.baseUrl.replace(/\/+$/, '')}${COMPLETIONS_PATH}`,
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body,
+      connectTimeoutMs: config.connectTimeoutMs,
+      signal,
+    })
+  } catch (failure) {
+    if (signal?.aborted === true) return
+    throw modelCallErrorForThrown(ENDPOINT_LABEL, failure)
+  }
+  if (response.status < 200 || response.status >= 300) {
+    throw modelCallErrorForStatus(
+      ENDPOINT_LABEL,
+      response.status,
+      await readErrorBody(response),
+      readRetryAfterSeconds(response.headers),
+    )
+  }
 
   const pendingToolCalls = new Map<number, PendingToolCall>()
-  for await (const data of response.serverSentEvents()) {
-    if (data === STREAM_SENTINEL) break
-    const delta = readDelta(data)
-    const content = delta.content
-    if (typeof content === 'string' && content.length > 0) {
-      yield { type: 'text', textDelta: content }
+  try {
+    for await (const data of response.serverSentEvents()) {
+      if (signal?.aborted === true) return
+      if (data === STREAM_SENTINEL) break
+      const frame = readFrame(data)
+      if (frame.usage !== null) {
+        yield { type: 'usage', promptTokens: frame.usage.promptTokens, completionTokens: frame.usage.completionTokens }
+      }
+      if (frame.text !== '') yield { type: 'text', textDelta: frame.text }
+      accumulateToolCallFragments(pendingToolCalls, frame.toolCallFragments)
+      if (frame.finishReason === 'tool_calls') yield* emitPendingToolCalls(pendingToolCalls)
     }
-    accumulateToolCallFragments(pendingToolCalls, delta.toolCalls)
-    if (delta.finishReason === 'tool_calls') {
-      yield* emitPendingToolCalls(pendingToolCalls)
-    }
+    if (signal?.aborted !== true) yield* emitPendingToolCalls(pendingToolCalls)
+  } catch (failure) {
+    if (signal?.aborted === true) return
+    if (failure instanceof ModelCallError) throw failure
+    throw modelCallErrorForThrown(ENDPOINT_LABEL, failure)
   }
-  // A stream that ends without a tool_calls finish reason still has to hand
-  // over whatever it assembled.
-  yield* emitPendingToolCalls(pendingToolCalls)
 }
 
-interface StreamDelta {
-  readonly content?: unknown
-  readonly finishReason?: unknown
-  readonly toolCalls: readonly unknown[]
+function buildRequestBody(
+  config: OpenAiCompatibleProviderConfig,
+  request: ChatRequest,
+  tools: readonly ToolSchema[],
+): string {
+  const messages: Record<string, unknown>[] = []
+  if (request.system !== null && request.system !== '') {
+    messages.push({ role: 'system', content: request.system })
+  }
+  for (const message of request.messages) {
+    messages.push({ role: message.role, content: renderContent(config, message.parts) })
+  }
+  const body: Record<string, unknown> = {
+    model: config.modelId,
+    messages,
+    stream: true,
+  }
+  const maxOutputTokens = request.maxOutputTokens ?? config.maxOutputTokens
+  if (maxOutputTokens !== undefined) body.max_tokens = maxOutputTokens
+  if (request.temperature !== undefined) body.temperature = request.temperature
+  if (tools.length > 0) {
+    body.tools = tools.map((tool) => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parametersJsonSchema,
+      },
+    }))
+  }
+  const json = JSON.stringify(body)
+  if (json.length > MAX_REQUEST_BODY_CHARACTER_LENGTH) {
+    throw new DomainError(
+      'attachmentTooLarge',
+      '本次请求体超过模型服务的 20 MiB 上限，请减少图片或文字后重试。',
+    )
+  }
+  return json
 }
 
-function readDelta(data: string): StreamDelta {
+/** Plain text stays a string; anything with an image or a tool result becomes a part list. */
+function renderContent(
+  config: OpenAiCompatibleProviderConfig,
+  parts: readonly ContentPart[],
+): string | readonly Record<string, unknown>[] {
+  const first = parts[0]
+  if (parts.length === 1 && first !== undefined && first.kind === 'text') return first.text
+  const content: Record<string, unknown>[] = []
+  for (const part of parts) {
+    if (part.kind === 'text') {
+      content.push({ type: 'text', text: part.text })
+      continue
+    }
+    if (part.kind === 'image') {
+      if (!config.supportsImages) {
+        throw new DomainError(
+          'unsupportedImageType',
+          '当前模型服务不支持图片输入，请在设置中切换支持图片的模型。',
+        )
+      }
+      content.push({
+        type: 'image_url',
+        image_url: { url: `data:${part.mimeType};base64,${part.base64}` },
+      })
+      continue
+    }
+    content.push({ type: 'text', text: `Result of ${part.toolName}:\n${part.content}` })
+  }
+  return content
+}
+
+function readFrame(data: string): StreamFrame {
   const payload = requireRecord(parseJsonFrame(data), 'stream frame')
   // An error is reported inside a 200 response, and it carries no choices.
   // Falling through to the empty-delta branch would turn a provider failure
   // into a turn that simply said nothing, which the loop reports as completed.
   if (payload.error !== undefined && payload.error !== null) {
-    throw new Error(
-      `The stream reported an error: ${JSON.stringify(payload.error)}`,
-    )
+    throw new ModelCallError(`模型服务在流中报告错误：${JSON.stringify(payload.error)}`, {
+      retryable: false,
+      status: null,
+    })
   }
+  const usage = readUsage(payload.usage)
   const choices = payload.choices
-  // An empty choices array is how a usage-only frame arrives; that is not an
-  // error, and the frame is simply skipped.
-  if (!Array.isArray(choices)) return { toolCalls: [] }
+  if (!Array.isArray(choices)) return { text: '', toolCallFragments: [], finishReason: null, usage }
   const choice = choices[0]
   if (choice === null || typeof choice !== 'object' || Array.isArray(choice)) {
-    return { toolCalls: [] }
+    return { text: '', toolCallFragments: [], finishReason: null, usage }
   }
   const choiceRecord = choice as Record<string, unknown>
   const delta = choiceRecord.delta
   const deltaRecord =
-    delta === null || typeof delta !== 'object' || Array.isArray(delta)
-      ? {}
-      : (delta as Record<string, unknown>)
+    delta !== null && typeof delta === 'object' && !Array.isArray(delta)
+      ? (delta as Record<string, unknown>)
+      : {}
+  const content = deltaRecord.content
   return {
-    content: deltaRecord.content,
+    text: typeof content === 'string' ? content : '',
+    toolCallFragments: Array.isArray(deltaRecord.tool_calls) ? deltaRecord.tool_calls : [],
     finishReason: choiceRecord.finish_reason,
-    toolCalls: Array.isArray(deltaRecord.tool_calls) ? deltaRecord.tool_calls : [],
+    usage,
   }
+}
+
+function readUsage(value: unknown): StreamFrame['usage'] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const promptTokens = record.prompt_tokens
+  const completionTokens = record.completion_tokens
+  if (typeof promptTokens !== 'number' || typeof completionTokens !== 'number') return null
+  return { promptTokens, completionTokens }
 }
 
 function accumulateToolCallFragments(
@@ -176,59 +298,46 @@ async function* emitPendingToolCalls(
     if (call === undefined) continue
     pending.delete(index)
     if (call.name === '') {
-      throw new Error(
-        `The model streamed a tool call at index ${index} without ever naming it, so it cannot be dispatched. ` +
-          `Its arguments were ${JSON.stringify(call.argsJson)}.`,
+      throw new ModelCallError(
+        `模型流在第 ${index} 个工具调用上从未给出工具名，无法执行。`,
+        { retryable: false, status: null },
       )
     }
     yield { type: 'toolCall', name: call.name, argsJson: call.argsJson }
   }
 }
 
-function buildRequestBody(
-  modelId: string,
-  request: ChatRequest,
-  tools: readonly ToolSchema[],
-): Record<string, unknown> {
-  const messages: Record<string, string>[] = []
-  if (request.system !== null) messages.push({ role: 'system', content: request.system })
-  for (const message of request.messages) {
-    messages.push({ role: message.role, content: message.text })
+async function readErrorBody(response: OutboundStream): Promise<string> {
+  try {
+    return await drainChunksAsText(response.chunks(), ERROR_BODY_CHAR_LIMIT)
+  } catch {
+    // The status is the diagnostic that matters; an unreadable body is not
+    // allowed to replace it with a transport failure.
+    return ''
   }
-  const body: Record<string, unknown> = { model: modelId, messages, stream: true }
-  if (tools.length > 0) {
-    body.tools = tools.map((tool) => ({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parametersJsonSchema,
-      },
-    }))
-  }
-  return body
-}
-
-async function refuseUnsuccessfulResponse(
-  endpoint: string,
-  response: OutboundStream,
-): Promise<void> {
-  if (response.status >= 200 && response.status < 300) return
-  const body = await drainChunksAsText(response.chunks(), ERROR_BODY_CHAR_LIMIT)
-  throw new Error(`${endpoint} responded ${response.status}: ${body}`)
 }
 
 function parseJsonFrame(data: string): unknown {
   try {
     return JSON.parse(data)
-  } catch (error) {
-    throw new Error(`The stream carried a frame that is not valid JSON: ${data}`, { cause: error })
+  } catch (failure) {
+    throw new ModelCallError(
+      `模型流返回了不是合法 JSON 的帧：${describeThrown(failure)}`,
+      { retryable: false, status: null },
+    )
   }
 }
 
 function requireRecord(value: unknown, what: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Expected the ${what} to be a JSON object.`)
+    throw new ModelCallError(`模型流返回的 ${what} 不是 JSON 对象。`, {
+      retryable: false,
+      status: null,
+    })
   }
   return value as Record<string, unknown>
+}
+
+function describeThrown(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }

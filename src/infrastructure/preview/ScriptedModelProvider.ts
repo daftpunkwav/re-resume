@@ -25,17 +25,21 @@ export interface ScriptedModelProviderOptions {
   readonly script: readonly ModelChunk[]
   /** Yields control between chunks so the consumer sees a real async stream. */
   readonly pause?: () => Promise<void>
+  /** Whether the scripted model accepts image parts; false unless a script needs them. */
+  readonly supportsImages?: boolean
 }
 
 export class ScriptedModelProvider implements ModelProvider {
   readonly id: string
   readonly modelId: string
+  readonly supportsImages: boolean
   readonly #script: readonly ModelChunk[]
   readonly #pause: () => Promise<void>
 
   constructor(options: ScriptedModelProviderOptions) {
     this.id = options.id ?? 'preview'
     this.modelId = options.modelId ?? 'preview-scripted'
+    this.supportsImages = options.supportsImages ?? false
     this.#script = options.script
     this.#pause = options.pause ?? (async () => undefined)
   }

@@ -1,9 +1,8 @@
 /**
  * @file JobPostingRepository
- * @description Persistence port for job postings. It lives here rather than in
- * the application layer because an implementation in infrastructure must not
- * import from the layer above it, and a port belongs to the context whose data
- * it serves.
+ * @description Persistence port for job postings. `insert` and `save` are
+ * separate because a posting is created once and parsed later; the parse
+ * updates the existing row instead of creating a second one.
  */
 
 import type { JobPosting } from '../JobPosting'
@@ -11,6 +10,7 @@ import type { JobPostingId } from '../../shared/branded-id'
 
 export interface JobPostingRepository {
   findById(id: JobPostingId): Promise<JobPosting | null>
-  listAll(): Promise<readonly JobPosting[]>
-  save(jobPosting: JobPosting): Promise<void>
+  listRecent(limit: number): Promise<readonly JobPosting[]>
+  insert(posting: JobPosting): Promise<void>
+  save(posting: JobPosting): Promise<void>
 }
