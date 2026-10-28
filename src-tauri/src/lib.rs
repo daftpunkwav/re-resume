@@ -12,6 +12,7 @@
 //! - The webview's reach is bounded by `capabilities/default.json5`, not by
 //!   what is registered here. Registering a plugin grants nothing on its own.
 
+mod attachments;
 mod backup;
 mod connection;
 mod export;
@@ -159,6 +160,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            attachments::write_attachment_file,
+            attachments::read_attachment_file,
+            attachments::delete_attachment_file,
+            attachments::list_attachment_files,
             backup::backup_database_once,
             connection::pin_sqlite_connection,
             export::publish_export

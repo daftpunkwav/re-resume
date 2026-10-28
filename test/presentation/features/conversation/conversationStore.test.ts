@@ -36,6 +36,7 @@ import { useSettingsStore } from '../../../../src/presentation/app/stores/settin
 import { createConversationBed } from '../../../support/conversationBed'
 import type { ConversationBed } from '../../../support/conversationBed'
 import { FixedClock, SequentialIdGenerator } from '../../../support/fakeEnvironment'
+import { MESSAGE_WINDOW } from '../../../../src/presentation/features/conversation/stores/conversationStore'
 
 interface Harness {
   readonly bed: ConversationBed
@@ -366,5 +367,179 @@ describe('conversationStore undo', () => {
     expect(useConversationStore.getState().error?.message).toContain('当前版本')
     expect(useConversationStore.getState().undone.has('revision-1')).toBe(false)
     expect(useConversationStore.getState().undoBusy.has('revision-1')).toBe(false)
+  })
+})
+
+
+describe('conversationStore attachments', () => {
+  function imageFile(name: string, marker: number, type = 'image/png'): File {
+    const bytes = new Uint8Array(64)
+    bytes[0] = marker
+    return new File([bytes], name, { type })
+  }
+
+  it('ingests an attached image and sends it as an image part', async () => {
+    const harness = createHarness()
+    harness.bed.model.supportsImages = true
+    await connect(harness)
+    await flush()
+
+    await useConversationStore.getState().attachFiles([imageFile('职位截图.png', 1)])
+    const attached = useConversationStore.getState().composer.attachments
+    expect(attached).toHaveLength(1)
+    expect(useConversationStore.getState().attachmentIngesting).toBe(0)
+    expect(useConversationStore.getState().attachmentError).toBeNull()
+
+    useConversationStore.getState().setComposerText('帮我针对这个岗位做简历')
+    await useConversationStore.getState().send()
+    await flush()
+    await flush()
+
+    const userParts = harness.bed.model.requests[0]?.messages[0]?.parts ?? []
+    expect(userParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'text', text: '帮我针对这个岗位做简历' }),
+        expect.objectContaining({ kind: 'image', mimeType: 'image/png' }),
+      ]),
+    )
+    const imagePart = userParts.find((part) => part.kind === 'image')
+    expect(imagePart?.kind === 'image' ? imagePart.base64.length : 0).toBeGreaterThan(0)
+
+    const conversationId = useConversationStore.getState().activeId
+    expect(conversationId).not.toBeNull()
+    const stored = await harness.services.conversation.listMessages(
+      conversationId as never,
+      MESSAGE_WINDOW,
+    )
+    const user = stored.find((message) => message.kind === 'user')
+    expect(user?.attachmentIds).toEqual([attached[0]?.attachment.id])
+    expect(useConversationStore.getState().composer.attachments).toEqual([])
+  })
+
+  it('reuses one row for the same image bytes', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    await useConversationStore
+      .getState()
+      .attachFiles([imageFile('a.png', 2), imageFile('b.png', 2)])
+
+    const attachments = useConversationStore.getState().composer.attachments
+    expect(attachments).toHaveLength(1)
+    expect(useConversationStore.getState().attachmentError).toBeNull()
+  })
+
+  it('refuses a file that is not an image and keeps the valid ones', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    await useConversationStore
+      .getState()
+      .attachFiles([
+        imageFile('ok.png', 3),
+        new File([new Uint8Array([1, 2, 3])], '说明.txt', { type: 'text/plain' }),
+      ])
+
+    expect(useConversationStore.getState().composer.attachments).toHaveLength(1)
+    expect(useConversationStore.getState().attachmentError?.message).toContain('不是支持的图片格式')
+  })
+
+  it('refuses more than four images and names the ceiling', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    await useConversationStore
+      .getState()
+      .attachFiles([
+        imageFile('1.png', 11),
+        imageFile('2.png', 12),
+        imageFile('3.png', 13),
+        imageFile('4.png', 14),
+        imageFile('5.png', 15),
+      ])
+
+    expect(useConversationStore.getState().composer.attachments).toHaveLength(4)
+    expect(useConversationStore.getState().attachmentError?.message).toContain('最多携带 4 个附件')
+  })
+
+  it('refuses a single image above the per-file ceiling', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    const oversized = new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'huge.png', {
+      type: 'image/png',
+    })
+    await useConversationStore.getState().attachFiles([oversized])
+
+    expect(useConversationStore.getState().composer.attachments).toEqual([])
+    expect(useConversationStore.getState().attachmentError?.message).toContain('单个附件不能超过')
+  })
+
+  it('loads the rows a transcript names into the cache', async () => {
+    const harness = createHarness()
+    await connect(harness)
+    await flush()
+
+    const attachment = await harness.services.conversation.ingestAttachment({
+      kind: 'image',
+      mimeType: 'image/png',
+      bytes: new Uint8Array([9, 8, 7]),
+    })
+    await useConversationStore.getState().ensureAttachments([attachment.id])
+
+    expect(useConversationStore.getState().attachmentsById[attachment.id]).toMatchObject({
+      id: attachment.id,
+      mimeType: 'image/png',
+    })
+    expect(useConversationStore.getState().attachmentLoad[attachment.id]).toBe('ready')
+  })
+
+  it('sends a one-off screenshot message without touching the composer', async () => {
+    const harness = createHarness()
+    harness.bed.model.supportsImages = true
+    await connect(harness)
+    await flush()
+
+    const sent = await useConversationStore
+      .getState()
+      .sendWithFiles('帮我针对这个岗位做简历', [imageFile('jd.png', 4)])
+
+    expect(sent).toBe(true)
+    expect(useConversationStore.getState().composer.attachments).toEqual([])
+    const conversationId = useConversationStore.getState().activeId
+    const stored = await harness.services.conversation.listMessages(
+      conversationId as never,
+      MESSAGE_WINDOW,
+    )
+    const user = stored.find((message) => message.kind === 'user')
+    expect(user?.markdown).toBe('帮我针对这个岗位做简历')
+    expect(user?.attachmentIds).toHaveLength(1)
+  })
+
+  it('reports the image refusal the run loop records for a text-only model', async () => {
+    const harness = createHarness()
+    harness.bed.model.supportsImages = false
+    await connect(harness)
+    await flush()
+
+    await useConversationStore.getState().attachFiles([imageFile('shot.png', 5)])
+    useConversationStore.getState().setComposerText('看这张图')
+    await useConversationStore.getState().send()
+    await flush()
+    await flush()
+
+    const conversationId = useConversationStore.getState().activeId
+    const stored = await harness.services.conversation.listMessages(
+      conversationId as never,
+      MESSAGE_WINDOW,
+    )
+    const assistant = stored.find((message) => message.kind === 'assistant')
+    expect(assistant?.status).toBe('failed')
+    expect(assistant?.errorText).toContain('不支持图片')
+    expect(useConversationStore.getState().messages.some((message) => message.kind === 'assistant')).toBe(true)
   })
 })

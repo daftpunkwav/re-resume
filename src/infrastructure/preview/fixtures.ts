@@ -36,7 +36,9 @@ export const PREVIEW_PROVIDERS: readonly ProviderConfig[] = [
     baseUrl: 'https://preview.example.com/v1',
     modelId: 'preview-scripted',
     secretRef: providerSecretRef(PREVIEW_PROVIDER_ID),
-    supportsImages: false,
+    // The scripted preview model accepts image parts, so the screenshot flow is
+    // demonstrable without a network endpoint.
+    supportsImages: true,
     isActive: true,
     createdAt: FIXTURE_TIME,
     updatedAt: FIXTURE_TIME,

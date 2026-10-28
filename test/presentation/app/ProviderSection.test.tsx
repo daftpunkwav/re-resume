@@ -40,7 +40,7 @@ function config(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
 }
 
 function providerListItem(overrides: Partial<ProviderConfig> = {}, hasCredential = true): ProviderListItem {
-  return { config: config(overrides), hasCredential }
+  return { config: config(overrides), hasCredential, supportsImages: true }
 }
 
 function renderSection(providers: ReturnType<typeof createProviderDouble>) {

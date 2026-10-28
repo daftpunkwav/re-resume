@@ -56,6 +56,12 @@ export interface ProviderListItem {
   readonly config: ProviderConfig
   /** True when the secure store holds a credential for this provider. */
   readonly hasCredential: boolean
+  /**
+   * Whether this service accepts image parts: the saved override when it has
+   * one, otherwise the model-name heuristic the adapter factory also uses. The
+   * composer reads it to warn before an image is sent, not to infer it again.
+   */
+  readonly supportsImages: boolean
 }
 
 export interface ListProvidersOutput {

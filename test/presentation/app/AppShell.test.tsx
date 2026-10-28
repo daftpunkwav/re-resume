@@ -74,7 +74,7 @@ function resetStores(): void {
     listStatus: 'idle',
     error: null,
     pendingUser: null,
-    composer: { text: '', contexts: [] },
+    composer: { text: '', contexts: [], attachments: [] },
     contextsByMessage: {},
     contextEntries: {},
     enterIds: new Set<string>(),
