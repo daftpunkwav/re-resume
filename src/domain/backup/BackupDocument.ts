@@ -569,9 +569,8 @@ export function validateBackupTables(tables: BackupTables): BackupTables {
 
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u
 
-/** Reads an unknown JSON value into a backup document of this version, or refuses it. */
-export function parseBackupDocument(raw: unknown): BackupDocument {
-  if (!isRecord(raw)) throw reject('document', 'the file does not hold a JSON object')
+/** Checks the document marker and version fields and returns the export time. */
+function readEnvelope(raw: Readonly<Record<string, unknown>>): DateTime {
   if (raw.v !== BACKUP_DOCUMENT_VERSION) {
     throw reject('v', `this build imports document version ${BACKUP_DOCUMENT_VERSION.toString()}`)
   }
@@ -587,28 +586,42 @@ export function parseBackupDocument(raw: unknown): BackupDocument {
   if (typeof raw.exportedAt !== 'string') throw reject('exportedAt', 'the field must be a timestamp')
   const exportedAt = parseDateTime(raw.exportedAt)
   if (exportedAt === null) throw reject('exportedAt', 'the field must be an ISO timestamp')
+  return exportedAt
+}
+
+/** Reads the table map, or refuses the file that carries it. */
+function readTables(raw: Readonly<Record<string, unknown>>): BackupTables {
   if (!isRecord(raw.tables)) throw reject('tables', 'the field must be an object of tables')
-  const tables = validateBackupTables(raw.tables as BackupTables)
-  if (!Array.isArray(raw.attachments)) throw reject('attachments', 'the field must be an array')
-  const attachments: BackupAttachment[] = []
-  for (const [index, entry] of raw.attachments.entries()) {
-    if (!isRecord(entry)) throw reject(`attachments[${index.toString()}]`, 'the entry is not an object')
-    const row = validateRow('attachment', index, entry.row)
-    if (typeof entry.bytesBase64 !== 'string' || !BASE64_PATTERN.test(entry.bytesBase64)) {
-      throw reject(`attachments[${index.toString()}].bytesBase64`, 'the bytes are not valid base64')
-    }
-    const declaredSize = row.byte_size
-    if (typeof declaredSize === 'number' && base64ByteLength(entry.bytesBase64) !== declaredSize) {
-      throw reject(
-        `attachments[${index.toString()}].bytesBase64`,
-        'the payload size does not match the byte_size column',
-      )
-    }
-    attachments.push({ row, bytesBase64: entry.bytesBase64 })
+  return validateBackupTables(raw.tables as BackupTables)
+}
+
+/** Reads one attachment entry: its row, its base64 payload and the size they agree on. */
+function readAttachment(value: unknown, index: number): BackupAttachment {
+  const path = `attachments[${index.toString()}]`
+  if (!isRecord(value)) throw reject(path, 'the entry is not an object')
+  const row = validateRow('attachment', index, value.row)
+  if (typeof value.bytesBase64 !== 'string' || !BASE64_PATTERN.test(value.bytesBase64)) {
+    throw reject(`${path}.bytesBase64`, 'the bytes are not valid base64')
   }
-  // One row in the attachment table, one byte payload, keyed by storage name.
-  const attachmentRows = tables.attachment ?? []
-  const names = new Set(attachmentRows.map((row) => row.storage_name))
+  const declaredSize = row.byte_size
+  if (typeof declaredSize === 'number' && base64ByteLength(value.bytesBase64) !== declaredSize) {
+    throw reject(`${path}.bytesBase64`, 'the payload size does not match the byte_size column')
+  }
+  return { row, bytesBase64: value.bytesBase64 }
+}
+
+/** Reads the attachment array, or refuses the file that carries it. */
+function readAttachments(value: unknown): readonly BackupAttachment[] {
+  if (!Array.isArray(value)) throw reject('attachments', 'the field must be an array')
+  return value.map((entry, index) => readAttachment(entry, index))
+}
+
+/** One row in the attachment table, one byte payload, keyed by storage name. */
+function assertAttachmentCorrespondence(
+  tables: BackupTables,
+  attachments: readonly BackupAttachment[],
+): void {
+  const names = new Set((tables.attachment ?? []).map((row) => row.storage_name))
   const payloadNames = new Set(attachments.map((entry) => entry.row.storage_name))
   if (names.size !== payloadNames.size) {
     throw reject('attachments', 'every attachment row must carry its bytes and vice versa')
@@ -618,6 +631,15 @@ export function parseBackupDocument(raw: unknown): BackupDocument {
       throw reject('attachments', `the bytes of "${String(name)}" are missing`)
     }
   }
+}
+
+/** Reads an unknown JSON value into a backup document of this version, or refuses it. */
+export function parseBackupDocument(raw: unknown): BackupDocument {
+  if (!isRecord(raw)) throw reject('document', 'the file does not hold a JSON object')
+  const exportedAt = readEnvelope(raw)
+  const tables = readTables(raw)
+  const attachments = readAttachments(raw.attachments)
+  assertAttachmentCorrespondence(tables, attachments)
   return {
     v: BACKUP_DOCUMENT_VERSION,
     app: BACKUP_APP_MARKER,
