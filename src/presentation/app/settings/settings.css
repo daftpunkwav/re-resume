@@ -248,7 +248,7 @@
 }
 
 .theme-option-selected {
-  border-color: var(--accent);
+  border-color: var(--accent-text);
   box-shadow: 0 0 0 1px var(--accent);
 }
 

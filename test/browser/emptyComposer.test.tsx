@@ -5,6 +5,9 @@
  * conversation instead of staying on the welcome screen.
  *
  * jsdom cannot answer this: the failure mode is layout, and jsdom has no layout.
+ * The second case is the regression found in the merge window: with no model
+ * service configured the welcome carries an extra warning block, and the taller
+ * state must keep the composer inside the window too.
  */
 
 import { render, screen, waitFor } from '@testing-library/react'
@@ -19,6 +22,7 @@ import { stubCompositionRoot } from '../support/stubCompositionRoot'
 import '../../src/presentation/styles'
 import '../../src/presentation/features/conversation/conversation.css'
 
+/** The stub root has no configured model provider, which is the taller state. */
 function renderShell() {
   return render(
     <ApplicationServicesProvider
@@ -49,6 +53,9 @@ describe('the empty conversation in a browser', () => {
     await screen.findByRole('button', { name: '新建对话' })
     await user.click(screen.getByRole('button', { name: '新建对话' }))
 
+    // The no-provider state renders its warning; the composer must stay inside
+    // the window for this taller welcome as well.
+    expect(await screen.findByText('还没有可用的模型服务')).toBeInTheDocument()
     const input = (await screen.findByRole('textbox', { name: '输入消息' })) as HTMLTextAreaElement
     expect(inWindow(input)).toBe(true)
     expect(inWindow(input.closest('.composer') as Element)).toBe(true)

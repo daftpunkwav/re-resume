@@ -12,6 +12,7 @@
   position: relative;
   display: flex;
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
   background: var(--surface-app);
 }
@@ -19,7 +20,9 @@
 .shell-body {
   display: flex;
   flex: 1;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 /* Sidebar ---------------------------------------------------------------- */
@@ -167,9 +170,7 @@
   white-space: nowrap;
 }
 
-.sidebar-settings .shortcut-keys {
-  opacity: 0.65;
-}
+
 
 /* A tooltip wrapper is a span; inside these stacks it has to take the row. */
 .sidebar-nav .tooltip,
@@ -272,6 +273,8 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface-conversation);
 }
 

@@ -55,16 +55,16 @@
 }
 
 .button-primary {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--text-on-accent);
 }
 
 .button-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
 }
 
 .button-primary:active:not(:disabled) {
-  background: var(--accent-active);
+  background: var(--accent-fill-active);
 }
 
 .button-secondary {
@@ -84,6 +84,13 @@
 .button-ghost {
   background: transparent;
   color: var(--text-secondary);
+}
+
+/* A ghost button on a tinted notice needs the primary text colour: the muted
+   secondary tone does not reach 4.5:1 on the warning surface. */
+.notice .button-ghost,
+.studio-reference-list .button-ghost {
+  color: var(--text-primary);
 }
 
 .button-ghost:hover:not(:disabled) {
@@ -173,7 +180,7 @@
 
 .icon-button[aria-pressed='true'] {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .icon-button[aria-pressed='true']:hover:not(:disabled) {
@@ -260,7 +267,7 @@
 
 .field-control:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-text);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
@@ -334,7 +341,7 @@
 
 .badge-accent {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .badge-success {
@@ -490,7 +497,6 @@
 .notice-warning .notice-body,
 .notice-danger .notice-body {
   color: inherit;
-  opacity: 0.9;
 }
 
 .notice-body code {
@@ -513,7 +519,7 @@
   width: 14px;
   height: 14px;
   border: 2px solid var(--border-default);
-  border-top-color: var(--accent);
+  border-top-color: var(--accent-text);
   border-radius: 50%;
   animation: spin 720ms linear infinite;
 }
@@ -555,7 +561,7 @@
 .tab-active {
   color: var(--text-primary);
   font-weight: 500;
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--accent-text);
 }
 
 .tabs-panel {
@@ -843,7 +849,7 @@
 }
 
 .slider:hover::-webkit-slider-thumb {
-  border-color: var(--accent);
+  border-color: var(--accent-text);
 }
 
 .slider:focus {
