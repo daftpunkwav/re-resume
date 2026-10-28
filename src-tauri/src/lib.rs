@@ -53,6 +53,8 @@ const MIGRATION_006_DROP_LEGACY: &str =
     include_str!("../../src/infrastructure/persistence/migrations/006_drop_legacy.sql");
 const MIGRATION_007_INFO: &str =
     include_str!("../../src/infrastructure/persistence/migrations/007_info.sql");
+const MIGRATION_008_CONVERSATION: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/008_conversation.sql");
 
 /// Name of the file holding the Stronghold key-derivation salt. The salt is not
 /// a secret — it is the Argon2 parameter that makes a password produce the same
@@ -72,7 +74,8 @@ const STRONGHOLD_SALT_FILE: &str = "stronghold-salt.bin";
 /// Versions 3 to 6 were registered while their files held a comment only, and
 /// those bodies are immutable once a database records them. Feature schemas
 /// therefore arrive as new versions: version 7 creates the information library
-/// tables without changing any applied body.
+/// tables and version 8 the conversation schema, without changing any applied
+/// body.
 fn migrations() -> Vec<Migration> {
     vec![
         Migration {
@@ -115,6 +118,12 @@ fn migrations() -> Vec<Migration> {
             version: 7,
             description: "information library",
             sql: MIGRATION_007_INFO,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 8,
+            description: "conversation, messages and agent runs",
+            sql: MIGRATION_008_CONVERSATION,
             kind: MigrationKind::Up,
         },
     ]

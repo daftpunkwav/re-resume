@@ -11,8 +11,9 @@
  * plugin: the files are the input and SQLite is the judge.
  *
  * The version map is forward-only. Versions 3 to 6 were registered while their
- * files were empty placeholders; their bodies stay empty, and the information
- * library schema ships as version 7.
+ * files were empty placeholders; their bodies stay byte-identical, and later
+ * schemas ship as new versions: the information library at 7 and the
+ * conversation runtime at 8.
  *
  * Constraints:
  * - Each test opens a temporary file, because the plugin migrates a file on
@@ -41,7 +42,17 @@ const MIGRATION_FILES = [
   '005_resume.sql',
   '006_drop_legacy.sql',
   '007_info.sql',
+  '008_conversation.sql',
 ] as const
+
+/**
+ * Tables version 8 replaces with v2 shapes. Their v1 rows do not survive: the
+ * pre-migration database copy is what keeps the v1 data.
+ */
+const RECREATED_RUN_TABLES = ['job_posting', 'agent_run', 'tool_invocation'] as const
+
+/** v1-only tables version 8 removes outright. */
+const REMOVED_V1_TABLES = ['variant', 'claim', 'document_revision'] as const
 
 const scratchDirectories: string[] = []
 const openDatabases: DatabaseSync[] = []
@@ -83,6 +94,13 @@ function columnNames(database: DatabaseSync, table: string): string[] {
   return columns.map((column) => column.name)
 }
 
+function tableNames(database: DatabaseSync): string[] {
+  const rows = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as { name: string }[]
+  return rows.map((row) => row.name)
+}
+
 /**
  * Rows the v1 application could have written, using the v1 columns: an
  * experience, a resume document with its revision, and the legacy provider row
@@ -120,6 +138,49 @@ INSERT INTO provider_config (
 ) VALUES (
   'legacy-provider', 'openai', 'gpt-4o-mini', NULL,
   'provider:legacy-provider', 0, '2024-02-01T00:00:00.000Z'
+);
+`)
+
+  // The v1 run/provenance chain the conversation schema replaces: a posting,
+  // the run that parsed it, the variant and claim rows that referenced the run
+  // with RESTRICT, and the invocation the v1 approval path wrote.
+  database.exec(`
+INSERT INTO job_posting (
+  id, raw_text, source, parsed_json, parsed_by_run_id, parsed_at, created_at
+) VALUES (
+  'legacy-posting', 'Legacy job description', 'paste', NULL, NULL,
+  NULL, '2024-02-01T00:00:00.000Z'
+);
+
+INSERT INTO agent_run (
+  id, resume_id, job_posting_id, status, error_text, started_at, ended_at
+) VALUES (
+  'legacy-run', 'legacy-resume', 'legacy-posting', 'completed', NULL,
+  '2024-02-01T00:00:00.000Z', '2024-02-01T00:00:01.000Z'
+);
+
+UPDATE job_posting SET parsed_by_run_id = 'legacy-run' WHERE id = 'legacy-posting';
+
+INSERT INTO variant (
+  id, experience_id, label, content, emphasis, drafted_by_run_id,
+  confirmed_at, created_at, updated_at
+) VALUES (
+  'legacy-variant', 'legacy-experience', 'Draft', 'Drafted copy', NULL,
+  'legacy-run', NULL, '2024-02-01T00:00:00.000Z', '2024-02-01T00:00:00.000Z'
+);
+
+INSERT INTO claim (
+  id, experience_id, kind, statement, source_field, status, created_at, updated_at
+) VALUES (
+  'legacy-claim', 'legacy-experience', 'responsibility', 'Did the work', NULL,
+  'pending', '2024-02-01T00:00:00.000Z', '2024-02-01T00:00:00.000Z'
+);
+
+INSERT INTO tool_invocation (
+  id, run_id, tool_name, risk, args_json, result_json, approval_state, created_at
+) VALUES (
+  'legacy-invocation', 'legacy-run', 'searchExperiences', 'read',
+  '{"v":1,"data":"{}"}', NULL, 'executed', '2024-02-01T00:00:00.000Z'
 );
 `)
 }
@@ -217,6 +278,102 @@ function expectInformationLibrarySchema(database: DatabaseSync): void {
   expect(countRows(database, 'change_record')).toBe(0)
 }
 
+/**
+ * The conversation schema added at version 8: the columns the row mappers read,
+ * the message/tool-card invariant and the one-running-run index.
+ */
+function expectConversationSchema(database: DatabaseSync): void {
+  expect(columnNames(database, 'conversation')).toEqual([
+    'id',
+    'title',
+    'provider_id',
+    'model_id',
+    'pinned',
+    'active_resume_id',
+    'summary',
+    'summary_through_seq',
+    'created_at',
+    'updated_at',
+  ])
+  expect(columnNames(database, 'message')).toEqual([
+    'id',
+    'conversation_id',
+    'seq',
+    'kind',
+    'status',
+    'markdown',
+    'tool_json',
+    'run_id',
+    'error_text',
+    'created_at',
+    'updated_at',
+  ])
+  expect(columnNames(database, 'agent_run')).toEqual([
+    'id',
+    'conversation_id',
+    'resume_id',
+    'job_posting_id',
+    'status',
+    'error_text',
+    'prompt_tokens',
+    'completion_tokens',
+    'started_at',
+    'ended_at',
+  ])
+  expect(columnNames(database, 'tool_invocation')).toEqual([
+    'id',
+    'run_id',
+    'message_id',
+    'tool_name',
+    'risk',
+    'args_json',
+    'result_summary_json',
+    'change_ids_json',
+    'revision_id',
+    'status',
+    'created_at',
+  ])
+
+  database.prepare(
+    `INSERT INTO conversation (id, title, created_at, updated_at)
+     VALUES ('conversation-1', '新对话', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+  ).run()
+  expect(() =>
+    database
+      .prepare(
+        `INSERT INTO message (id, conversation_id, seq, kind, status, markdown, created_at, updated_at)
+         VALUES ('message-1', 'conversation-1', 1, 'user', 'complete', '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(),
+  ).not.toThrow()
+  // Two messages cannot share a sequence number within one conversation.
+  expect(() =>
+    database
+      .prepare(
+        `INSERT INTO message (id, conversation_id, seq, kind, status, markdown, created_at, updated_at)
+         VALUES ('message-2', 'conversation-1', 1, 'user', 'complete', '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(),
+  ).toThrow()
+  // A tool card exists exactly for tool messages.
+  expect(() =>
+    database
+      .prepare(
+        `INSERT INTO message (id, conversation_id, seq, kind, status, markdown, created_at, updated_at)
+         VALUES ('message-3', 'conversation-1', 2, 'tool', 'running', '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(),
+  ).toThrow()
+
+  const insertRun = database.prepare(
+    `INSERT INTO agent_run (id, conversation_id, status, started_at)
+     VALUES (?, 'conversation-1', 'running', '2026-01-01T00:00:00.000Z')`,
+  )
+  insertRun.run('run-1')
+  // One run per conversation: the partial unique index rejects a second one.
+  expect(() => insertRun.run('run-2')).toThrow()
+}
+
 describe('migrations applied in order', () => {
   it('upgrades a database that already holds the v1 schema', () => {
     const database = openScratchDatabase()
@@ -226,14 +383,25 @@ describe('migrations applied in order', () => {
 
     const applied = applyMigrations(database, MIGRATION_FILES.slice(1))
 
-    expect(applied).toEqual([2, 3, 4, 5, 6, 7])
+    expect(applied).toEqual([2, 3, 4, 5, 6, 7, 8])
     // The v2 provider table replaces the legacy one rather than living beside
     // it: the old row has no fields the v2 shape could carry over.
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
     expectInformationLibrarySchema(database)
-    // Replacing one table must not take the rest of the v1 data with it; the
-    // removal of the legacy tables is version 6's work, not version 2's.
+    // Version 8 replaces the v1 run/provenance chain with the v2 one. The v1
+    // rows are not carried over; the pre-migration copy holds them.
+    const tables = tableNames(database)
+    for (const recreated of RECREATED_RUN_TABLES) {
+      expect(tables, `${recreated} must be recreated by version 8`).toContain(recreated)
+      expect(countRows(database, recreated), `${recreated} must not carry v1 rows`).toBe(0)
+    }
+    for (const removed of REMOVED_V1_TABLES) {
+      expect(tables, `${removed} must not survive version 8`).not.toContain(removed)
+    }
+    expectConversationSchema(database)
+    // Replacing those tables must not take the rest of the v1 data with it; the
+    // removal of the remaining legacy tables is version 6's work.
     expect(countRows(database, 'experience')).toBe(1)
     expect(countRows(database, 'resume')).toBe(1)
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
@@ -242,10 +410,14 @@ describe('migrations applied in order', () => {
   it('creates the v2 schema on a fresh database', () => {
     const database = openScratchDatabase()
 
-    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
     expectInformationLibrarySchema(database)
+    expectConversationSchema(database)
+    for (const removed of REMOVED_V1_TABLES) {
+      expect(tableNames(database), `${removed} must not exist`).not.toContain(removed)
+    }
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 })

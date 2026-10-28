@@ -13,7 +13,7 @@
  *   not need concurrency, only the same call shape as production.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -148,4 +148,79 @@ export function applyInfoSchema(database: TestDatabase): void {
   // The schema lives at version 7: version 3 was recorded empty before this
   // feature existed, and an applied migration body is immutable.
   applyMigrationFile(database, '007_info.sql')
+}
+
+
+/**
+ * Every migration file on disk, in version order. The list is read rather than
+ * declared so a version owned by another change is applied as soon as its file
+ * exists; the plugin's ledger applies each version exactly once.
+ */
+export function listMigrationFiles(): readonly string[] {
+  return readdirSync(MIGRATIONS_DIRECTORY)
+    .filter((name) => /^\d{3}_.*\.sql$/u.test(name))
+    .sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10))
+}
+
+/**
+ * In-memory database with the same async seam the repositories use in
+ * production, for contract tests that only need the schema and the SQL. Every
+ * migration file present is applied, exactly as a fresh install would.
+ */
+export class NodeSqliteDatabase implements SqlDatabase {
+  readonly #database: DatabaseSync
+
+  constructor(path = ':memory:') {
+    this.#database = new DatabaseSync(path)
+    this.#database.exec('PRAGMA foreign_keys = ON')
+  }
+
+  execScript(sql: string): void {
+    this.#database.exec(sql)
+  }
+
+  close(): void {
+    this.#database.close()
+  }
+
+  async execute(query: string, bindValues: readonly SqlValue[] = []): Promise<SqlQueryResult> {
+    const translated = translatePlaceholders(query, bindValues)
+    const result = this.#database.prepare(translated.sql).run(...translated.values)
+    return { rowsAffected: Number(result.changes) }
+  }
+
+  async select<T>(query: string, bindValues: readonly SqlValue[] = []): Promise<readonly T[]> {
+    const translated = translatePlaceholders(query, bindValues)
+    return this.#database
+      .prepare(translated.sql)
+      .all(...translated.values) as unknown as readonly T[]
+  }
+
+  async transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T> {
+    this.#database.exec('BEGIN IMMEDIATE')
+    try {
+      const result = await work(this)
+      this.#database.exec('COMMIT')
+      return result
+    } catch (failure) {
+      this.#database.exec('ROLLBACK')
+      throw failure
+    }
+  }
+}
+
+/** A fresh in-memory database with every migration file applied. */
+export function createMigratedDatabase(): NodeSqliteDatabase {
+  const database = new NodeSqliteDatabase()
+  for (const file of listMigrationFiles()) {
+    database.execScript(readFileSync(join(MIGRATIONS_DIRECTORY, file), 'utf8'))
+  }
+  return database
+}
+
+/** Rows that break a foreign key, for an integrity check after a migration or fixture. */
+export async function foreignKeyViolations(
+  database: SqlDatabase,
+): Promise<readonly unknown[]> {
+  return database.select('PRAGMA foreign_key_check')
 }
