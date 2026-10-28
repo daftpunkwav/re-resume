@@ -46,6 +46,7 @@ import {
   failRun,
   recordRunUsage,
 } from '../../domain/generation/AgentRun'
+import type { Conversation } from '../../domain/conversation/Conversation'
 import type { Message, ToolMessagePayload } from '../../domain/conversation/Message'
 import { DEFAULT_CONVERSATION_TITLE } from '../../domain/conversation/Conversation'
 import { truncateToolDetail } from '../../domain/conversation/Message'
@@ -174,12 +175,29 @@ export interface RunAgentTurnInput {
   readonly activeResumeId: ResumeId | null
 }
 
-export async function runAgentTurn(
+interface TurnState {
+  run: AgentRun
+  assistantMarkdown: string
+  lastPersistedAtMs: number
+  readonly openToolMessages: Message[]
+}
+
+type PreparedPrompt =
+  | {
+      readonly ok: true
+      readonly chatMessages: readonly ChatMessage[]
+      readonly systemPrompt: string
+    }
+  | { readonly ok: false; readonly errorText: string }
+
+/**
+ * Applies the model the user picked for this turn to the conversation before
+ * the run starts, so a later turn starts from the same selection.
+ */
+async function syncSelectedModel(
   deps: RunAgentTurnDeps,
   input: RunAgentTurnInput,
-): Promise<AgentRun> {
-  const limits: RunLimits = { ...DEFAULT_RUN_LIMITS, ...deps.limits }
-  const wait = deps.wait ?? sleep
+): Promise<Conversation> {
   let conversation = await findConversation(deps, input.conversationId)
   if (
     input.model !== null &&
@@ -193,7 +211,199 @@ export async function runAgentTurn(
     }
     await deps.conversations.update(conversation)
   }
+  return conversation
+}
 
+/** Renames the conversation from its first turn when the title is still default. */
+async function attemptAutoTitle(
+  deps: RunAgentTurnDeps,
+  input: RunAgentTurnInput,
+  userMessage: Message,
+): Promise<void> {
+  try {
+    await autoTitleConversation(
+      { conversations: deps.conversations, model: deps.titleModel, clock: deps.clock },
+      { conversationId: input.conversationId, firstUserMessage: userMessage.markdown },
+    )
+  } catch (failure) {
+    deps.onWarning?.('会话自动命名失败。', failure)
+  }
+}
+
+/** Builds the first model request: the user parts and the system prompt. */
+async function preparePrompt(
+  deps: RunAgentTurnDeps,
+  input: RunAgentTurnInput,
+  userMessage: Message,
+): Promise<PreparedPrompt> {
+  try {
+    const userParts = await buildUserParts(deps, userMessage.markdown, userMessage.attachmentIds)
+    const context = await readContext(deps, input)
+    if (!context.ok) return { ok: false, errorText: context.errorText }
+    return {
+      ok: true,
+      chatMessages: [{ role: 'user', parts: userParts }],
+      systemPrompt: buildSystemPrompt(context.value),
+    }
+  } catch (failure) {
+    return { ok: false, errorText: describeFailure(failure) }
+  }
+}
+
+interface StreamedTurnResult {
+  readonly kind: 'cancelled' | 'failed' | 'streamed'
+  readonly failure: StreamFailure | null
+  readonly turnText: string
+  readonly toolCalls: readonly PendingToolCall[]
+}
+
+interface StreamTurnWithRetriesOptions {
+  readonly deps: RunAgentTurnDeps
+  readonly limits: RunLimits
+  readonly wait: (milliseconds: number) => Promise<void>
+  readonly request: ChatRequest
+  readonly onTextDelta: (delta: string) => Promise<void>
+  readonly onUsage: (usage: {
+    readonly promptTokens: number
+    readonly completionTokens: number
+  }) => void
+}
+
+/**
+ * Streams one turn, retrying at most once while the failure is transient and
+ * nothing has been written yet: a retry after visible text would duplicate the
+ * answer.
+ */
+async function streamTurnWithRetries(
+  options: StreamTurnWithRetriesOptions,
+): Promise<StreamedTurnResult> {
+  let retriesUsed = 0
+  for (;;) {
+    let turnText = ''
+    const result = await streamTurn({
+      model: options.deps.model,
+      request: options.request,
+      tools: options.deps.registry.schemas(),
+      parentSignal: options.deps.signal,
+      idleTimeoutMs: options.limits.streamIdleTimeoutMs,
+      turnTimeoutMs: options.limits.modelTurnTimeoutMs,
+      onTextDelta: async (delta: string) => {
+        turnText += delta
+        await options.onTextDelta(delta)
+      },
+      onUsage: options.onUsage,
+    })
+    if (result.cancelled) {
+      return { kind: 'cancelled', failure: null, turnText, toolCalls: [] }
+    }
+    if (result.failure === null) {
+      return { kind: 'streamed', failure: null, turnText, toolCalls: result.toolCalls }
+    }
+    const mayRetry =
+      retriesUsed < options.limits.retryMax &&
+      result.failure.retryable &&
+      !result.emittedText
+    if (!mayRetry) {
+      return { kind: 'failed', failure: result.failure, turnText, toolCalls: [] }
+    }
+    retriesUsed += 1
+    await options.wait(options.limits.retryBackoffMs)
+  }
+}
+
+type ToolTurnResult =
+  | { readonly kind: 'cancelled' }
+  | { readonly kind: 'failed'; readonly errorText: string }
+  | { readonly kind: 'continue'; readonly results: readonly ContentPart[] }
+
+interface ExecuteTurnToolsOptions {
+  readonly deps: RunAgentTurnDeps
+  readonly limits: RunLimits
+  readonly state: TurnState
+  readonly conversationId: ConversationId
+  readonly calls: readonly PendingToolCall[]
+  readonly toolContext: ToolContext
+}
+
+/** Runs the tool calls of one turn and returns their results in call order. */
+async function executeTurnTools(options: ExecuteTurnToolsOptions): Promise<ToolTurnResult> {
+  const results: ContentPart[] = []
+  for (const call of options.calls) {
+    if (options.deps.signal.aborted) return { kind: 'cancelled' }
+    const tool = options.deps.registry.get(call.name)
+    const label = options.deps.registry.labelFor(call.name)
+    const risk = tool?.risk ?? 'read'
+    const toolMessage = await appendMessage(options.deps, {
+      conversationId: options.conversationId,
+      kind: 'tool',
+      runId: options.state.run.id,
+      tool: {
+        toolName: call.name,
+        invocationId: null,
+        risk,
+        label,
+        detail: '',
+        changeIds: [],
+        revisionId: null,
+        resumeId: null,
+      },
+    })
+    options.state.openToolMessages.push(toolMessage)
+    const outcome = await executeToolCall(
+      {
+        registry: options.deps.registry,
+        invocations: options.deps.invocations,
+        clock: options.deps.clock,
+        ids: options.deps.ids,
+        emit: options.deps.emit,
+        secrets: options.deps.secrets,
+        toolTimeoutMs: options.limits.toolTimeoutMs,
+      },
+      {
+        runId: options.state.run.id,
+        message: toolMessage,
+        toolName: call.name,
+        argsJson: call.argsJson,
+        context: options.toolContext,
+      },
+    )
+    const detail = truncateToolDetail(redactSecret(outcome.content, options.deps.secrets))
+    const payload: ToolMessagePayload = {
+      toolName: call.name,
+      invocationId: outcome.invocationId,
+      risk,
+      label,
+      detail,
+      changeIds: outcome.metadata.changeIds,
+      revisionId: outcome.metadata.revisionId,
+      resumeId: outcome.metadata.resumeId,
+    }
+    const finishedTool: Message = {
+      ...toolMessage,
+      status: outcome.status === 'ok' ? 'complete' : 'failed',
+      tool: payload,
+      errorText: outcome.status === 'failed' ? detail : null,
+      updatedAt: options.deps.clock.now(),
+    }
+    await options.deps.messages.update(finishedTool)
+    options.state.openToolMessages[options.state.openToolMessages.length - 1] = finishedTool
+    results.push({
+      kind: 'toolResult',
+      toolName: call.name,
+      content: truncateToolResult(outcome.content),
+    })
+    if (outcome.fault !== undefined) return { kind: 'failed', errorText: outcome.fault }
+  }
+  return { kind: 'continue', results }
+}
+
+export async function runAgentTurn(
+  deps: RunAgentTurnDeps,
+  input: RunAgentTurnInput,
+): Promise<AgentRun> {
+  const limits: RunLimits = { ...DEFAULT_RUN_LIMITS, ...deps.limits }
+  const wait = deps.wait ?? sleep
+  const conversation = await syncSelectedModel(deps, input)
   const userMessage =
     input.existingUserMessageId === undefined
       ? await appendMessage(deps, input.userMessage)
@@ -216,253 +426,153 @@ export async function runAgentTurn(
     // returned its run; this call does not start a second stream.
     return claimed
   }
-  let run = claimed
+  const state: TurnState = {
+    run: claimed,
+    assistantMarkdown: '',
+    lastPersistedAtMs: Date.parse(deps.clock.now()),
+    openToolMessages: [],
+  }
 
   if (userMessage.seq === 1 && conversation.title === DEFAULT_CONVERSATION_TITLE) {
-    try {
-      await autoTitleConversation(
-        { conversations: deps.conversations, model: deps.titleModel, clock: deps.clock },
-        { conversationId: input.conversationId, firstUserMessage: userMessage.markdown },
-      )
-    } catch (failure) {
-      deps.onWarning?.('会话自动命名失败。', failure)
-    }
+    await attemptAutoTitle(deps, input, userMessage)
   }
 
   const assistant = await appendMessage(deps, {
     conversationId: input.conversationId,
     kind: 'assistant',
     markdown: '',
-    runId: run.id,
+    runId: state.run.id,
   })
   deps.emit({
     type: 'runStarted',
-    runId: run.id,
+    runId: state.run.id,
     conversationId: input.conversationId,
     userMessageId: userMessage.id,
     assistantMessageId: assistant.id,
   })
 
-  let assistantMarkdown = ''
-  let lastPersistedAtMs = Date.parse(deps.clock.now())
-  const openToolMessages: Message[] = []
-  const toolContext = buildToolContext(deps, run.id, input.conversationId)
-
-  const updateAssistant = async (
-    status: Message['status'],
-    errorText: string | null,
-  ): Promise<void> => {
+  const persistAssistant = async (): Promise<void> => {
     await deps.messages.update({
       ...assistant,
-      markdown: assistantMarkdown,
-      status,
-      errorText,
+      markdown: state.assistantMarkdown,
+      status: 'streaming',
+      errorText: null,
       updatedAt: deps.clock.now(),
     })
-    lastPersistedAtMs = Date.parse(deps.clock.now())
+    state.lastPersistedAtMs = Date.parse(deps.clock.now())
   }
 
-  let chatMessages: ChatMessage[] = []
-  let systemPrompt = ''
-  try {
-    const userParts = await buildUserParts(deps, userMessage.markdown, userMessage.attachmentIds)
-    chatMessages = [{ role: 'user', parts: userParts }]
-    const context = await readContext(deps, input)
-    if (!context.ok) {
-      return await finishFailed(
-        deps,
-        run,
-        assistant,
-        assistantMarkdown,
-        openToolMessages,
-        context.errorText,
-        false,
-      )
-    }
-    systemPrompt = buildSystemPrompt(context.value)
-  } catch (failure) {
-    return await finishFailed(
+  const prepared = await preparePrompt(deps, input, userMessage)
+  if (!prepared.ok) {
+    return finishFailed(
       deps,
-      run,
+      state.run,
       assistant,
-      assistantMarkdown,
-      openToolMessages,
-      describeFailure(failure),
+      state.assistantMarkdown,
+      state.openToolMessages,
+      prepared.errorText,
       false,
     )
   }
+  const chatMessages: ChatMessage[] = [...prepared.chatMessages]
+  const request: ChatRequest = {
+    system: prepared.systemPrompt,
+    messages: chatMessages,
+    maxOutputTokens: deps.maxOutputTokens,
+  }
+  const toolContext = buildToolContext(deps, state.run.id, input.conversationId)
 
-  let retriesUsed = 0
   for (let turn = 1; turn <= limits.maxTurns; turn += 1) {
     if (deps.signal.aborted) {
-      return await finishCancelled(deps, run, assistant, assistantMarkdown, openToolMessages)
+      return finishCancelled(
+        deps,
+        state.run,
+        assistant,
+        state.assistantMarkdown,
+        state.openToolMessages,
+      )
     }
     deps.emit({ type: 'turnStarted', turn })
-    let turnText = ''
-    let executedToolsThisTurn = false
-    let turnToolCalls: readonly PendingToolCall[] = []
-    for (;;) {
-      if (deps.signal.aborted) {
-        return await finishCancelled(deps, run, assistant, assistantMarkdown, openToolMessages)
-      }
-      const result = await streamTurn({
-        model: deps.model,
-        request: {
-          system: systemPrompt,
-          messages: chatMessages,
-          maxOutputTokens: deps.maxOutputTokens,
-        },
-        tools: deps.registry.schemas(),
-        parentSignal: deps.signal,
-        idleTimeoutMs: limits.streamIdleTimeoutMs,
-        turnTimeoutMs: limits.modelTurnTimeoutMs,
-        onTextDelta: async (delta: string) => {
-          turnText += delta
-          assistantMarkdown += delta
-          deps.emit({ type: 'textDelta', messageId: assistant.id, delta })
-          if (Date.parse(deps.clock.now()) - lastPersistedAtMs >= limits.streamPersistIntervalMs) {
-            await deps.messages.update({
-              ...assistant,
-              markdown: assistantMarkdown,
-              updatedAt: deps.clock.now(),
-            })
-            lastPersistedAtMs = Date.parse(deps.clock.now())
-          }
-        },
-        onUsage: (usage) => {
-          run = recordRunUsage(run, usage)
-          deps.emit({ type: 'usage', ...usage })
-        },
-      })
-      if (result.cancelled) {
-        return await finishCancelled(deps, run, assistant, assistantMarkdown, openToolMessages)
-      }
-      if (result.failure !== null) {
-        const mayRetry =
-          retriesUsed < limits.retryMax &&
-          result.failure.retryable &&
-          !result.emittedText &&
-          !executedToolsThisTurn
-        if (mayRetry) {
-          retriesUsed += 1
-          await wait(limits.retryBackoffMs)
-          continue
-        }
-        return await finishFailed(
-          deps,
-          run,
-          assistant,
-          assistantMarkdown,
-          openToolMessages,
-          result.failure.message,
-          result.failure.retryable,
-        )
-      }
-      turnToolCalls = result.toolCalls
-      break
-    }
-
-    await updateAssistant('streaming', null)
-
-    if (turnToolCalls.length === 0) {
-      return await finishCompleted(deps, run, assistant, assistantMarkdown)
-    }
-
-    const toolResults: ContentPart[] = []
-    for (const call of turnToolCalls) {
-      if (deps.signal.aborted) {
-        return await finishCancelled(deps, run, assistant, assistantMarkdown, openToolMessages)
-      }
-      executedToolsThisTurn = true
-      const tool = deps.registry.get(call.name)
-      const label = deps.registry.labelFor(call.name)
-      const risk = tool?.risk ?? 'read'
-      const toolMessage = await appendMessage(deps, {
-        conversationId: input.conversationId,
-        kind: 'tool',
-        runId: run.id,
-        tool: {
-          toolName: call.name,
-          invocationId: null,
-          risk,
-          label,
-          detail: '',
-          changeIds: [],
-          revisionId: null,
-          resumeId: null,
-        },
-      })
-      openToolMessages.push(toolMessage)
-      const outcome = await executeToolCall(
-        {
-          registry: deps.registry,
-          invocations: deps.invocations,
-          clock: deps.clock,
-          ids: deps.ids,
-          emit: deps.emit,
-          secrets: deps.secrets,
-          toolTimeoutMs: limits.toolTimeoutMs,
-        },
-        {
-          runId: run.id,
-          message: toolMessage,
-          toolName: call.name,
-          argsJson: call.argsJson,
-          context: toolContext,
-        },
+    const streamed = await streamTurnWithRetries({
+      deps,
+      limits,
+      wait,
+      request,
+      onTextDelta: async (delta: string) => {
+        state.assistantMarkdown += delta
+        deps.emit({ type: 'textDelta', messageId: assistant.id, delta })
+        const elapsed = Date.parse(deps.clock.now()) - state.lastPersistedAtMs
+        if (elapsed >= limits.streamPersistIntervalMs) await persistAssistant()
+      },
+      onUsage: (usage) => {
+        state.run = recordRunUsage(state.run, usage)
+        deps.emit({ type: 'usage', ...usage })
+      },
+    })
+    if (streamed.kind === 'cancelled') {
+      return finishCancelled(
+        deps,
+        state.run,
+        assistant,
+        state.assistantMarkdown,
+        state.openToolMessages,
       )
-      const detail = truncateToolDetail(redactSecret(outcome.content, deps.secrets))
-      const payload: ToolMessagePayload = {
-        toolName: call.name,
-        invocationId: outcome.invocationId,
-        risk,
-        label,
-        detail,
-        changeIds: outcome.metadata.changeIds,
-        revisionId: outcome.metadata.revisionId,
-        resumeId: outcome.metadata.resumeId,
-      }
-      const finishedTool: Message = {
-        ...toolMessage,
-        status: outcome.status === 'ok' ? 'complete' : 'failed',
-        tool: payload,
-        errorText: outcome.status === 'failed' ? detail : null,
-        updatedAt: deps.clock.now(),
-      }
-      await deps.messages.update(finishedTool)
-      openToolMessages[openToolMessages.length - 1] = finishedTool
-      toolResults.push({
-        kind: 'toolResult',
-        toolName: call.name,
-        content: truncateToolResult(outcome.content),
-      })
-      if (outcome.fault !== undefined) {
-        return await finishFailed(
-          deps,
-          run,
-          assistant,
-          assistantMarkdown,
-          openToolMessages,
-          outcome.fault,
-          false,
-        )
-      }
     }
-    if (deps.signal.aborted) {
-      return await finishCancelled(deps, run, assistant, assistantMarkdown, openToolMessages)
+    if (streamed.kind === 'failed' && streamed.failure !== null) {
+      return finishFailed(
+        deps,
+        state.run,
+        assistant,
+        state.assistantMarkdown,
+        state.openToolMessages,
+        streamed.failure.message,
+        streamed.failure.retryable,
+      )
     }
-    if (turnText !== '') {
-      chatMessages.push({ role: 'assistant', parts: [{ kind: 'text', text: turnText }] })
+    await persistAssistant()
+    if (streamed.toolCalls.length === 0) {
+      return finishCompleted(deps, state.run, assistant, state.assistantMarkdown)
     }
-    chatMessages.push({ role: 'user', parts: toolResults })
+    const toolTurn = await executeTurnTools({
+      deps,
+      limits,
+      state,
+      conversationId: input.conversationId,
+      calls: streamed.toolCalls,
+      toolContext,
+    })
+    if (toolTurn.kind === 'cancelled') {
+      return finishCancelled(
+        deps,
+        state.run,
+        assistant,
+        state.assistantMarkdown,
+        state.openToolMessages,
+      )
+    }
+    if (toolTurn.kind === 'failed') {
+      return finishFailed(
+        deps,
+        state.run,
+        assistant,
+        state.assistantMarkdown,
+        state.openToolMessages,
+        toolTurn.errorText,
+        false,
+      )
+    }
+    if (streamed.turnText !== '') {
+      chatMessages.push({ role: 'assistant', parts: [{ kind: 'text', text: streamed.turnText }] })
+    }
+    chatMessages.push({ role: 'user', parts: toolTurn.results })
   }
 
-  return await finishFailed(
+  return finishFailed(
     deps,
-    run,
+    state.run,
     assistant,
-    assistantMarkdown,
-    openToolMessages,
+    state.assistantMarkdown,
+    state.openToolMessages,
     `本轮已达到最大轮次（${limits.maxTurns}），未能完成。`,
     false,
   )

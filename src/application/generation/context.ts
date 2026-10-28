@@ -223,50 +223,47 @@ interface ReducedBlocks extends Blocks {
  * then the library overview. The preamble, resume summary and chips are
  * structural and survive.
  */
+/** Blocks are given up in this order when the whole prompt is too long. */
+const TOTAL_BUDGET_REDUCTIONS = [
+  { block: 'history', note: '历史消息因总长度限制被裁剪。' },
+  { block: 'jobPosting', note: '岗位描述因总长度限制被裁剪。' },
+  { block: 'libraryOverview', note: '信息库概览因总长度限制被裁剪。' },
+] as const
+
+type ReducibleBlock = (typeof TOTAL_BUDGET_REDUCTIONS)[number]['block']
+
+function totalTokensOf(blocks: Blocks): number {
+  return (
+    blocks.preambleTokens +
+    tokensOf(blocks.resumeSummary) +
+    tokensOf(blocks.libraryOverview) +
+    tokensOf(blocks.userContext) +
+    tokensOf(blocks.jobPosting) +
+    tokensOf(blocks.history)
+  )
+}
+
+/** Cuts a block by the tokens the prompt is over, or null when nothing is left. */
+function shrinkBlock(block: string, over: number): string | null {
+  const keep = Math.max(0, tokensOf(block) - over)
+  const truncated = truncateToTokens(block, keep)
+  return truncated.text === '' ? null : truncated.text
+}
+
 function applyTotalBudget(blocks: Blocks, notes: string[]): ReducedBlocks {
-  const totalOf = (candidate: Blocks): number =>
-    candidate.preambleTokens +
-    tokensOf(candidate.resumeSummary) +
-    tokensOf(candidate.libraryOverview) +
-    tokensOf(candidate.userContext) +
-    tokensOf(candidate.jobPosting) +
-    tokensOf(candidate.history)
-
   let current = blocks
-  const shrink = (block: string | null, budget: number): string | null => {
-    if (block === null) return null
-    const available = Math.max(0, tokensOf(block) - budget)
-    if (available <= 0) return block
-    const truncated = truncateToTokens(block, Math.max(0, tokensOf(block) - available))
-    return truncated.text === '' ? null : truncated.text
+  let over = totalTokensOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
+  for (const reduction of TOTAL_BUDGET_REDUCTIONS) {
+    if (over <= 0) break
+    const block = current[reduction.block as ReducibleBlock]
+    if (block === null) continue
+    const next = shrinkBlock(block, over)
+    if (next === block) continue
+    notes.push(reduction.note)
+    current = { ...current, [reduction.block]: next }
+    over = totalTokensOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
   }
-
-  let over = totalOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
-  if (over > 0) {
-    const nextHistory = shrink(current.history, over)
-    if (nextHistory !== current.history) {
-      notes.push('历史消息因总长度限制被裁剪。')
-      current = { ...current, history: nextHistory }
-      over = totalOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
-    }
-  }
-  if (over > 0) {
-    const nextJob = shrink(current.jobPosting, over)
-    if (nextJob !== current.jobPosting) {
-      notes.push('岗位描述因总长度限制被裁剪。')
-      current = { ...current, jobPosting: nextJob }
-      over = totalOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
-    }
-  }
-  if (over > 0) {
-    const nextLibrary = shrink(current.libraryOverview, over)
-    if (nextLibrary !== current.libraryOverview) {
-      notes.push('信息库概览因总长度限制被裁剪。')
-      current = { ...current, libraryOverview: nextLibrary }
-      over = totalOf(current) - AGENT_CONTEXT_TOKEN_BUDGET
-    }
-  }
-  return { ...current, overBudget: over > 0, estimatedTokens: totalOf(current) }
+  return { ...current, overBudget: over > 0, estimatedTokens: totalTokensOf(current) }
 }
 
 function fitBlock(
