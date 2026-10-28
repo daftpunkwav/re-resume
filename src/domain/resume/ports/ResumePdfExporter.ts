@@ -29,6 +29,12 @@ export interface PdfExportInput {
   readonly template: TemplateDefinition
   /** Name drawn in the page header when the template splits the header. */
   readonly headerName: string | null
+  /**
+   * Image data URLs by attachment id, for the canvas image blocks the export
+   * resolved. An id missing here draws the missing-image placeholder; the
+   * renderer never reads storage itself.
+   */
+  readonly images: ReadonlyMap<string, string>
 }
 
 export interface ResumePdfExporter {
