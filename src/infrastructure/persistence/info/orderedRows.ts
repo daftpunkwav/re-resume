@@ -100,19 +100,46 @@ async function applyDenseOrder(
   const current = await currentIdentifiers(database, target, scope)
   assertSameIdentifiers('the ordered rows', current, orderedIds)
   if (orderedIds.length === 0) return
+  await parkRows(database, target, orderedIds, scope)
+  await writeDensePositions(database, target, orderedIds, scope)
+}
+
+/** First pass: move every row above the highest stored order. */
+async function parkRows(
+  database: SqlDatabase,
+  target: OrderTarget,
+  orderedIds: readonly string[],
+  scope: readonly string[],
+): Promise<void> {
   let parked = (await highestSortOrder(database, target, scope)) + 1
   for (const id of orderedIds) {
-    const result = await database.execute(target.updateSql, [parked, id, ...scope])
-    if (result.rowsAffected !== 1) {
-      throw new Error(`Cannot rewrite the sort order: "${id}" was not updated.`)
-    }
+    await updateSingleOrder(database, target, id, parked, scope)
     parked += 1
   }
+}
+
+/** Second pass: apply the target positions. */
+async function writeDensePositions(
+  database: SqlDatabase,
+  target: OrderTarget,
+  orderedIds: readonly string[],
+  scope: readonly string[],
+): Promise<void> {
   for (const [index, id] of orderedIds.entries()) {
-    const result = await database.execute(target.updateSql, [index + 1, id, ...scope])
-    if (result.rowsAffected !== 1) {
-      throw new Error(`Cannot rewrite the sort order: "${id}" was not updated.`)
-    }
+    await updateSingleOrder(database, target, id, index + 1, scope)
+  }
+}
+
+async function updateSingleOrder(
+  database: SqlDatabase,
+  target: OrderTarget,
+  id: string,
+  sortOrder: number,
+  scope: readonly string[],
+): Promise<void> {
+  const result = await database.execute(target.updateSql, [sortOrder, id, ...scope])
+  if (result.rowsAffected !== 1) {
+    throw new Error(`Cannot rewrite the sort order: "${id}" was not updated.`)
   }
 }
 

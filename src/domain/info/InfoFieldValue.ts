@@ -303,7 +303,9 @@ function isKnownKind(moduleKind: string): moduleKind is InfoModuleKind {
  * dates canonicalised and flags defaulted to false.
  *
  * The error precedence is the contract's: unknown keys first, then required
- * values, then lengths, then per-type formats, then the start/end order.
+ * values, then lengths, then per-type formats, then the start/end order. Each
+ * step runs over the whole record before the next one starts, which is what
+ * makes that precedence hold.
  *
  * @throws DomainError with a code from the field-validation group.
  */
@@ -321,181 +323,268 @@ export function validateFieldValues(
     )
   }
   const descriptors = fieldDescriptors(moduleKind, custom)
-  const byKey = new Map(descriptors.map((descriptor) => [descriptor.key, descriptor]))
+  assertNoUnknownKeys(moduleKind, descriptors, raw)
+  assertRequiredValues(moduleKind, descriptors, raw)
+  const values = normalizeScalarValues(moduleKind, descriptors, raw)
+  applyFieldFormats(moduleKind, descriptors, raw, values)
+  assertRangeOrder(moduleKind, values)
+  return collectNormalizedValues(descriptors, values)
+}
 
-  // 1. Unknown keys.
+/** A value that satisfies "required" only when it is present and not blank. */
+function isBlank(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  return typeof value === 'string' && value.trim() === ''
+}
+
+function assertNoUnknownKeys(
+  moduleKind: InfoModuleKind,
+  descriptors: readonly FieldDescriptor[],
+  raw: Readonly<Record<string, unknown>>,
+): void {
+  const knownKeys = new Set(descriptors.map((descriptor) => descriptor.key))
   for (const key of Object.keys(raw)) {
-    if (!byKey.has(key)) {
-      throw fieldError(
-        'unknownField',
-        moduleKind,
-        key,
-        `"${key}" is not a field of module "${moduleKind}".`,
-      )
-    }
+    if (knownKeys.has(key)) continue
+    throw fieldError(
+      'unknownField',
+      moduleKind,
+      key,
+      `"${key}" is not a field of module "${moduleKind}".`,
+    )
   }
+}
 
-  // 2. Required values, before any length or format check.
+function assertRequiredValues(
+  moduleKind: InfoModuleKind,
+  descriptors: readonly FieldDescriptor[],
+  raw: Readonly<Record<string, unknown>>,
+): void {
   for (const descriptor of descriptors) {
     if (!descriptor.required) continue
-    const value = raw[descriptor.key]
-    if (value === undefined || value === null) {
-      throw fieldError(
-        'blankRequiredField',
-        moduleKind,
-        descriptor.key,
-        `The field "${descriptor.key}" is required.`,
-      )
-    }
-    if (typeof value === 'string' && value.trim() === '') {
-      throw fieldError(
-        'blankRequiredField',
-        moduleKind,
-        descriptor.key,
-        `The field "${descriptor.key}" is required.`,
-      )
-    }
+    if (!isBlank(raw[descriptor.key])) continue
+    throw fieldError(
+      'blankRequiredField',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" is required.`,
+    )
   }
+}
 
-  // 3. Normalise text and check lengths.
+/** Trims every string and checks its length; non-string values stay for the format step. */
+function normalizeScalarValues(
+  moduleKind: InfoModuleKind,
+  descriptors: readonly FieldDescriptor[],
+  raw: Readonly<Record<string, unknown>>,
+): Map<string, InfoFieldValue> {
   const values = new Map<string, InfoFieldValue>()
   for (const descriptor of descriptors) {
     const value = raw[descriptor.key]
-    if (typeof value === 'string') {
-      const text = value.trim()
-      if (text === '') {
-        values.set(descriptor.key, null)
-        continue
-      }
-      if (descriptor.maxLength !== null && countCodePoints(text) > descriptor.maxLength) {
-        throw fieldError(
-          'fieldTooLong',
-          moduleKind,
-          descriptor.key,
-          `The field "${descriptor.key}" may be at most ${descriptor.maxLength.toString()} characters.`,
-        )
-      }
-      values.set(descriptor.key, text)
-      continue
-    }
-    values.set(descriptor.key, null)
+    values.set(
+      descriptor.key,
+      typeof value === 'string' ? normalizeTextField(moduleKind, descriptor, value) : null,
+    )
   }
+  return values
+}
 
-  // 4. Per-type formats.
+function normalizeTextField(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  value: string,
+): string | null {
+  const text = value.trim()
+  if (text === '') return null
+  if (descriptor.maxLength !== null && countCodePoints(text) > descriptor.maxLength) {
+    throw fieldError(
+      'fieldTooLong',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" may be at most ${descriptor.maxLength.toString()} characters.`,
+    )
+  }
+  return text
+}
+
+function applyFieldFormats(
+  moduleKind: InfoModuleKind,
+  descriptors: readonly FieldDescriptor[],
+  raw: Readonly<Record<string, unknown>>,
+  values: Map<string, InfoFieldValue>,
+): void {
   for (const descriptor of descriptors) {
-    const rawValue = raw[descriptor.key]
-    const value = values.get(descriptor.key) ?? null
-    if (descriptor.type === 'bool') {
-      if (rawValue === undefined || rawValue === null) {
-        values.set(descriptor.key, false)
-        continue
-      }
-      if (typeof rawValue !== 'boolean') {
-        throw fieldError(
-          'invalidFieldValue',
-          moduleKind,
-          descriptor.key,
-          `The field "${descriptor.key}" must be true or false.`,
-        )
-      }
-      values.set(descriptor.key, rawValue)
-      continue
-    }
-    if (typeof value !== 'string') {
-      if (rawValue !== undefined && rawValue !== null) {
-        throw fieldError(
-          'invalidFieldValue',
-          moduleKind,
-          descriptor.key,
-          `The field "${descriptor.key}" must be text.`,
-        )
-      }
-      continue
-    }
-    const pattern = FIELD_CONTENT_PATTERNS[moduleKind]?.[descriptor.key]
-    if (pattern !== undefined && !pattern.test(value)) {
-      throw fieldError(
-        'invalidFieldValue',
-        moduleKind,
-        descriptor.key,
-        `The field "${descriptor.key}" does not have an accepted format.`,
-      )
-    }
-    switch (descriptor.type) {
-      case 'text':
-      case 'textarea':
-        break
-      case 'email':
-        if (!EMAIL_PATTERN.test(value)) {
-          throw fieldError(
-            'invalidFieldValue',
-            moduleKind,
-            descriptor.key,
-            `The field "${descriptor.key}" must be an email address.`,
-          )
-        }
-        break
-      case 'url':
-        if (!URL_PATTERN.test(value)) {
-          throw fieldError(
-            'invalidFieldValue',
-            moduleKind,
-            descriptor.key,
-            `The field "${descriptor.key}" must be an http or https URL.`,
-          )
-        }
-        break
-      case 'enum':
-        if (!(descriptor.options ?? []).some((option) => option.value === value)) {
-          throw fieldError(
-            'invalidFieldValue',
-            moduleKind,
-            descriptor.key,
-            `"${value}" is not a value the field "${descriptor.key}" accepts.`,
-          )
-        }
-        break
-      case 'date':
-      case 'dateOrPresent': {
-        const parsed = parseKnowledgeDate(value)
-        if (parsed === null) {
-          throw fieldError(
-            'invalidFieldValue',
-            moduleKind,
-            descriptor.key,
-            `The field "${descriptor.key}" must be a year, a year and month, or present.`,
-          )
-        }
-        if (descriptor.type === 'date' && parsed === PRESENT) {
-          throw fieldError(
-            'invalidFieldValue',
-            moduleKind,
-            descriptor.key,
-            `The field "${descriptor.key}" cannot be present.`,
-          )
-        }
-        values.set(descriptor.key, parsed)
-        break
-      }
-    }
+    applyFieldFormat(moduleKind, descriptor, raw[descriptor.key], values)
   }
+}
 
-  // 5. A range must not end before it starts. `present` is later than any date.
+function applyFieldFormat(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  rawValue: unknown,
+  values: Map<string, InfoFieldValue>,
+): void {
+  if (descriptor.type === 'bool') {
+    applyBooleanFormat(moduleKind, descriptor, rawValue, values)
+    return
+  }
+  const value = values.get(descriptor.key)
+  if (typeof value !== 'string') {
+    if (rawValue === undefined || rawValue === null) return
+    throw fieldError(
+      'invalidFieldValue',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" must be text.`,
+    )
+  }
+  assertContentPattern(moduleKind, descriptor, value)
+  validateTypedFormat(moduleKind, descriptor, value, values)
+}
+
+function applyBooleanFormat(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  rawValue: unknown,
+  values: Map<string, InfoFieldValue>,
+): void {
+  if (rawValue === undefined || rawValue === null) {
+    values.set(descriptor.key, false)
+    return
+  }
+  if (typeof rawValue !== 'boolean') {
+    throw fieldError(
+      'invalidFieldValue',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" must be true or false.`,
+    )
+  }
+  values.set(descriptor.key, rawValue)
+}
+
+/** The content rule of a single field (the phone dialling characters, today). */
+function assertContentPattern(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  value: string,
+): void {
+  const pattern = FIELD_CONTENT_PATTERNS[moduleKind]?.[descriptor.key]
+  if (pattern !== undefined && !pattern.test(value)) {
+    throw fieldError(
+      'invalidFieldValue',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" does not have an accepted format.`,
+    )
+  }
+}
+
+function validateTypedFormat(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  value: string,
+  values: Map<string, InfoFieldValue>,
+): void {
+  switch (descriptor.type) {
+    case 'text':
+    case 'textarea':
+    case 'bool':
+      return
+    case 'email':
+      assertPattern(moduleKind, descriptor, EMAIL_PATTERN, value, 'an email address')
+      return
+    case 'url':
+      assertPattern(moduleKind, descriptor, URL_PATTERN, value, 'an http or https URL')
+      return
+    case 'enum':
+      assertEnumValue(moduleKind, descriptor, value)
+      return
+    case 'date':
+    case 'dateOrPresent':
+      values.set(descriptor.key, parseDateValue(moduleKind, descriptor, value))
+  }
+}
+
+function assertPattern(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  pattern: RegExp,
+  value: string,
+  expected: string,
+): void {
+  if (pattern.test(value)) return
+  throw fieldError(
+    'invalidFieldValue',
+    moduleKind,
+    descriptor.key,
+    `The field "${descriptor.key}" must be ${expected}.`,
+  )
+}
+
+function assertEnumValue(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  value: string,
+): void {
+  if ((descriptor.options ?? []).some((option) => option.value === value)) return
+  throw fieldError(
+    'invalidFieldValue',
+    moduleKind,
+    descriptor.key,
+    `"${value}" is not a value the field "${descriptor.key}" accepts.`,
+  )
+}
+
+/** Parses a date field and rejects `present` for a start-only date. */
+function parseDateValue(
+  moduleKind: InfoModuleKind,
+  descriptor: FieldDescriptor,
+  value: string,
+): InfoFieldValue {
+  const parsed = parseKnowledgeDate(value)
+  if (parsed === null) {
+    throw fieldError(
+      'invalidFieldValue',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" must be a year, a year and month, or present.`,
+    )
+  }
+  if (descriptor.type === 'date' && parsed === PRESENT) {
+    throw fieldError(
+      'invalidFieldValue',
+      moduleKind,
+      descriptor.key,
+      `The field "${descriptor.key}" cannot be present.`,
+    )
+  }
+  return parsed
+}
+
+/** A range must not end before it starts; `present` is later than any date. */
+function assertRangeOrder(
+  moduleKind: InfoModuleKind,
+  values: ReadonlyMap<string, InfoFieldValue>,
+): void {
   const start = values.get('startDate')
   const end = values.get('endDate')
-  if (typeof start === 'string' && typeof end === 'string' && end !== PRESENT) {
-    const startDate = parseKnowledgeDate(start)
-    const endDate = parseKnowledgeDate(end)
-    if (startDate !== null && endDate !== null && compareKnowledgeDate(startDate, endDate) > 0) {
-      throw fieldError(
-        'endBeforeStart',
-        moduleKind,
-        'endDate',
-        'The end date must not be earlier than the start date.',
-      )
-    }
-  }
+  if (typeof start !== 'string' || typeof end !== 'string' || end === PRESENT) return
+  const startDate = parseKnowledgeDate(start)
+  const endDate = parseKnowledgeDate(end)
+  if (startDate === null || endDate === null) return
+  if (compareKnowledgeDate(startDate, endDate) <= 0) return
+  throw fieldError(
+    'endBeforeStart',
+    moduleKind,
+    'endDate',
+    'The end date must not be earlier than the start date.',
+  )
+}
 
+function collectNormalizedValues(
+  descriptors: readonly FieldDescriptor[],
+  values: ReadonlyMap<string, InfoFieldValue>,
+): Readonly<Record<string, InfoFieldValue>> {
   const normalized: Record<string, InfoFieldValue> = {}
   for (const descriptor of descriptors) {
     normalized[descriptor.key] = values.get(descriptor.key) ?? null

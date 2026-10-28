@@ -165,37 +165,64 @@ async function applyFieldValueChanges(
   fieldValueChanges: readonly CustomFieldValueChange[],
   updatedAt: string,
 ): Promise<void> {
+  for (const [entryId, changes] of groupChangesByEntry(fieldValueChanges)) {
+    await rewriteEntryFields(database, entryId, changes, updatedAt)
+  }
+}
+
+function groupChangesByEntry(
+  fieldValueChanges: readonly CustomFieldValueChange[],
+): ReadonlyMap<string, readonly CustomFieldValueChange[]> {
   const changesByEntry = new Map<string, CustomFieldValueChange[]>()
   for (const fieldChange of fieldValueChanges) {
     const changes = changesByEntry.get(fieldChange.entryId) ?? []
     changes.push(fieldChange)
     changesByEntry.set(fieldChange.entryId, changes)
   }
-  for (const [entryId, changes] of changesByEntry) {
-    const rows = await database.select<Row>(
-      'SELECT fields_json FROM info_entry WHERE id = $1',
-      [entryId],
-    )
-    const row = rows[0]
-    if (row === undefined) {
-      throw new Error(
-        `Cannot apply a field change: the info entry "${entryId}" no longer exists.`,
-      )
-    }
-    const fields = readJsonRecordEnvelope(row.fields_json, 'info_entry.fields_json')
-    for (const change of changes) {
-      if (change.restoredValue === undefined) {
-        delete fields[change.fieldKey]
-      } else {
-        fields[change.fieldKey] = change.restoredValue
-      }
-    }
-    const result = await database.execute(
-      'UPDATE info_entry SET fields_json = $1, updated_at = $2 WHERE id = $3',
-      [writeJsonEnvelope(fields), updatedAt, entryId],
-    )
-    if (result.rowsAffected !== 1) {
-      throw new Error(`Cannot apply a field change: the info entry "${entryId}" was not updated.`)
-    }
+  return changesByEntry
+}
+
+/** Rewrites one entry's stored field record with the given changes applied. */
+async function rewriteEntryFields(
+  database: SqlDatabase,
+  entryId: string,
+  changes: readonly CustomFieldValueChange[],
+  updatedAt: string,
+): Promise<void> {
+  const fields = readJsonRecordEnvelope(
+    await readFieldsJson(database, entryId),
+    'info_entry.fields_json',
+  )
+  for (const change of changes) applyFieldChange(fields, change)
+  const result = await database.execute(
+    'UPDATE info_entry SET fields_json = $1, updated_at = $2 WHERE id = $3',
+    [writeJsonEnvelope(fields), updatedAt, entryId],
+  )
+  if (result.rowsAffected !== 1) {
+    throw new Error(`Cannot apply a field change: the info entry "${entryId}" was not updated.`)
   }
+}
+
+/** Reads the stored field envelope of an entry, reporting a row that disappeared. */
+async function readFieldsJson(database: SqlDatabase, entryId: string): Promise<unknown> {
+  const rows = await database.select<Row>(
+    'SELECT fields_json FROM info_entry WHERE id = $1',
+    [entryId],
+  )
+  const row = rows[0]
+  if (row === undefined) {
+    throw new Error(`Cannot apply a field change: the info entry "${entryId}" no longer exists.`)
+  }
+  return row.fields_json
+}
+
+function applyFieldChange(
+  fields: Record<string, unknown>,
+  change: CustomFieldValueChange,
+): void {
+  if (change.restoredValue === undefined) {
+    delete fields[change.fieldKey]
+    return
+  }
+  fields[change.fieldKey] = change.restoredValue
 }
