@@ -10,12 +10,9 @@
  *   is the panel's own empty state for that module.
  */
 
-import type { CustomModuleDefinition } from '../../../domain/info/CustomModule'
 import type { InfoEntry } from '../../../domain/info/InfoEntry'
-import type { InfoModuleKind } from '../../../domain/info/InfoModuleKind'
 import type { CustomModuleId, InfoEntryId } from '../../../domain/shared/branded-id'
-import type { ModuleSelection } from './stores/infoStore'
-import type { InfoRevealRequest } from './stores/infoStore'
+import type { InfoRevealRequest, ModuleSelection } from './stores/infoStore'
 
 export interface RevealSelection {
   readonly selection: ModuleSelection
@@ -48,11 +45,9 @@ export function resolveRevealSelection(
   return null
 }
 
-/** The module kind a custom module change should select. */
+/** The selection a custom module reveal asks for. */
 export function customModuleSelection(
   customModuleId: CustomModuleId,
 ): { readonly selection: ModuleSelection; readonly entryId: null } {
   return { selection: { moduleKind: 'custom', customModuleId }, entryId: null }
 }
-
-export type { InfoEntry, CustomModuleDefinition, InfoModuleKind }
