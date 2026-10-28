@@ -35,6 +35,7 @@ export function InteractionSection() {
     { keys: [modifier, '+'], label: '放大界面' },
     { keys: [modifier, '−'], label: '缩小界面' },
     { keys: [modifier, '0'], label: '缩放复位到 100%' },
+    { keys: ['Esc'], label: '关闭覆盖层、抽屉或弹层' },
   ]
 
   return (
