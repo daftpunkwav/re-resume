@@ -93,6 +93,8 @@ export default defineConfig({
             'zustand',
             '@testing-library/react',
             '@testing-library/jest-dom/vitest',
+            'konva',
+            'react-konva',
           ],
         },
         test: {
