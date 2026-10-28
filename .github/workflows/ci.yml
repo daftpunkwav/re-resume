@@ -69,6 +69,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The production bundle is what the desktop window loads; a change that
+      # breaks it must fail here rather than when a release is cut.
+      - name: Build production bundle
+        run: pnpm run build
+
       # The browser flows drive the preview assembly in a real Chromium; the
       # browser install step above already fetched it.
       - name: End-to-end tests
