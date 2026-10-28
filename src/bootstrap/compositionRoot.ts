@@ -282,6 +282,95 @@ function createResumeRuntime(input: {
   })
 }
 
+/** The port implementations one native root owns for its whole lifetime. */
+interface RootRepositories {
+  readonly settings: SqliteAppSettingsRepository
+  readonly customModules: SqliteCustomModuleRepository
+  readonly entries: SqliteInfoEntryRepository
+  readonly changes: SqliteChangeRecordRepository
+  readonly resumes: SqliteResumeRepository
+  readonly providerConfigs: SqliteProviderConfigRepository
+  readonly secrets: StrongholdSecretStore
+}
+
+function createRootRepositories(input: {
+  readonly database: ManagedSqlDatabase
+  readonly clock: Clock
+  readonly ids: IdGenerator
+  readonly stronghold: CompositionRootOptions['stronghold']
+}): RootRepositories {
+  const customModules = new SqliteCustomModuleRepository(input.database)
+  return {
+    settings: new SqliteAppSettingsRepository(input.database, input.clock),
+    customModules,
+    entries: new SqliteInfoEntryRepository(input.database, customModules),
+    changes: new SqliteChangeRecordRepository(input.database),
+    resumes: new SqliteResumeRepository(input.database, input.clock, input.ids),
+    providerConfigs: new SqliteProviderConfigRepository(input.database),
+    secrets: new StrongholdSecretStore(input.stronghold),
+  }
+}
+
+/** The library and the resume capabilities, bound to the same repository set. */
+function createLibraryRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly repositories: RootRepositories
+  readonly measurer: TextMeasurer
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): Pick<CompositionRoot, 'info' | 'resume' | 'libraryChanges'> {
+  const info = createInfoService({
+    entries: input.repositories.entries,
+    customModules: input.repositories.customModules,
+    references: new ResumeEntryReferences(input.repositories.resumes),
+    clock: input.clock,
+    ids: input.ids,
+  })
+  return {
+    info,
+    resume: createResumeRuntime({
+      database: input.database,
+      resumes: input.repositories.resumes,
+      entries: input.repositories.entries,
+      customModules: input.repositories.customModules,
+      updateInfoEntry: info.updateEntry,
+      measurer: input.measurer,
+      clock: input.clock,
+      ids: input.ids,
+    }),
+    libraryChanges: createLibraryChangesService({
+      changes: input.repositories.changes,
+      entries: input.repositories.entries,
+      customModules: input.repositories.customModules,
+      clock: input.clock,
+    }),
+  }
+}
+
+/** The conversation capability and the provider settings that select its model. */
+async function createAgentRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly repositories: RootRepositories
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): Promise<Pick<CompositionRoot, 'conversation' | 'providers'>> {
+  const conversation = await createConversationRuntime({
+    database: input.database,
+    providerConfigs: input.repositories.providerConfigs,
+    secrets: input.repositories.secrets,
+    clock: input.clock,
+    ids: input.ids,
+  })
+  const providers = createProviderRuntime({
+    providers: input.repositories.providerConfigs,
+    settings: input.repositories.settings,
+    secrets: input.repositories.secrets,
+    clock: input.clock,
+    ids: input.ids,
+  })
+  return { conversation, providers }
+}
+
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
@@ -293,59 +382,21 @@ export async function createCompositionRoot(
   })
 
   try {
-    const settingsRepository = new SqliteAppSettingsRepository(database, clock)
-    const customModuleRepository = new SqliteCustomModuleRepository(database)
-    const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
-    const changeLog = new SqliteChangeRecordRepository(database)
     const ids = new RandomIdGenerator()
-    const resumes = new SqliteResumeRepository(database, clock, ids)
-    const providerConfigs = new SqliteProviderConfigRepository(database)
-    const secrets = new StrongholdSecretStore(options.stronghold)
-    const conversation = await createConversationRuntime({
+    const repositories = createRootRepositories({
       database,
-      providerConfigs,
-      secrets,
       clock,
       ids,
+      stronghold: options.stronghold,
     })
-    const providers = createProviderRuntime({
-      providers: providerConfigs,
-      settings: settingsRepository,
-      secrets,
-      clock,
-      ids,
-    })
-    const databaseFile = await resolveDatabaseFile()
-    const info = createInfoService({
-      entries: infoEntries,
-      customModules: customModuleRepository,
-      references: new ResumeEntryReferences(resumes),
-      clock,
-      ids,
-    })
+    const agent = await createAgentRuntime({ database, repositories, clock, ids })
+    const library = createLibraryRuntime({ database, repositories, measurer, clock, ids })
     return {
-      appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
-      settings: createAppSettingsService({ repository: settingsRepository }),
-      info,
-      resume: createResumeRuntime({
-        database,
-        resumes,
-        entries: infoEntries,
-        customModules: customModuleRepository,
-        updateInfoEntry: info.updateEntry,
-        measurer,
-        clock,
-        ids,
-      }),
-      conversation,
-      providers,
-      libraryChanges: createLibraryChangesService({
-        changes: changeLog,
-        entries: infoEntries,
-        customModules: customModuleRepository,
-        clock,
-      }),
-      secrets,
+      appInfo: describeAppInfo({ runtime: 'tauri', databaseFile: await resolveDatabaseFile() }),
+      settings: createAppSettingsService({ repository: repositories.settings }),
+      ...library,
+      ...agent,
+      secrets: repositories.secrets,
       shutdown: async (): Promise<void> => {
         await database.close()
       },
