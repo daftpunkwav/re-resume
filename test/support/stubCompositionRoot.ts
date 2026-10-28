@@ -10,8 +10,12 @@ import { createInfoService } from '../../src/bootstrap/wiring/info'
 import { createResumeService } from '../../src/bootstrap/wiring/resume'
 import { createLibraryChangesService } from '../../src/bootstrap/wiring/changes'
 import { createProviderService } from '../../src/bootstrap/wiring/providers'
+import { createAppSettingsService } from '../../src/bootstrap/wiring/appSettings'
+import { createSeedDataService } from '../../src/bootstrap/wiring/seed'
 import { DEFAULT_APP_SETTINGS } from '../../src/domain/settings/AppSettings'
 import type { AppSettings } from '../../src/domain/settings/AppSettings'
+import { BACKUP_APP_MARKER, BACKUP_DOCUMENT_VERSION, BACKUP_SCHEMA_VERSION } from '../../src/domain/backup/BackupDocument'
+import type { DateTime } from '../../src/domain/shared/DateTime'
 import { FixtureTextMeasurer } from '../../src/infrastructure/measurement/FixtureTextMeasurer'
 import {
   InMemoryAppSettingsRepository,
@@ -35,7 +39,8 @@ import { ScriptedModelProvider } from '../../src/infrastructure/preview/Scripted
 
 export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): CompositionRoot {
   const settings: AppSettings = DEFAULT_APP_SETTINGS
-  const { service: conversation } = createPreviewConversationService()
+  const conversationAssembly = createPreviewConversationService()
+  const conversation = conversationAssembly.service
   const clock = new FixedClock()
   const changes = new InMemoryChangeLogRepository()
   const entries = new InMemoryInfoEntryRepository(changes)
@@ -50,6 +55,17 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
     clock,
     ids: new SequentialIdGenerator('stub'),
   })
+  const resume = createResumeService({
+    resumes,
+    entries,
+    customModules,
+    jobPostings: new InMemoryJobPostingRepository(),
+    attachments: new InMemoryAttachmentRepository(),
+    updateInfoEntry: info.updateEntry,
+    measurer: new FixtureTextMeasurer(),
+    clock,
+    ids: new SequentialIdGenerator('stub-resume'),
+  })
   return {
     appInfo: {
       version: '0.0.0-test',
@@ -58,22 +74,40 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
       license: 'MIT',
       databaseFile: null,
     },
-    settings: {
-      read: async () => settings,
-      save: async (patch) => ({ ...settings, ...patch }),
+    // A root for tests that only exercises the interface. Backup is available
+    // but holds no content; a test that needs a real document supplies its own
+    // override.
+    backup: {
+      canManageData: true,
+      exportDocument: async () => ({
+        v: BACKUP_DOCUMENT_VERSION,
+        app: BACKUP_APP_MARKER,
+        exportedAt: '2026-01-01T00:00:00.000Z' as DateTime,
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        tables: {},
+        attachments: [],
+      }),
+      inspectDocument: () => ({ tables: {}, attachments: 0 }),
+      importDocument: async () => ({ tables: {}, attachments: 0 }),
+      clearAllData: async () => ({
+        removedAttachments: 0,
+        removedSecrets: 0,
+        undeletedFiles: [],
+        undeletedSecrets: [],
+      }),
+      cleanupOrphanAttachments: async () => ({ removed: 0, undeletedFiles: [] }),
     },
-    info,
-    resume: createResumeService({
-      resumes,
-      entries,
-      customModules,
-      jobPostings: new InMemoryJobPostingRepository(),
-      attachments: new InMemoryAttachmentRepository(),
-      updateInfoEntry: info.updateEntry,
-      measurer: new FixtureTextMeasurer(),
+    seed: createSeedDataService({
+      settings: settingsRepository,
+      info,
+      resume,
+      conversation,
+      messages: conversationAssembly.repositories.messages,
       clock,
-      ids: new SequentialIdGenerator('stub-resume'),
     }),
+    settings: createAppSettingsService({ repository: settingsRepository }),
+    info,
+    resume,
     conversation,
     providers: createProviderService({
       providers: new InMemoryProviderConfigRepository(),

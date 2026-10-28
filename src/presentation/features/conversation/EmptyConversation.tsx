@@ -6,16 +6,21 @@
  *
  * Constraints:
  * - Every quick action does what it says. The job-description action opens a
- *   paste dialog and sends the pasted text as the first user turn; the other two
- *   switch the workspace to the panel that owns the task.
+ *   paste dialog and sends the pasted text as the first user turn; the sample
+ *   action imports the sample library; the last one switches to the information
+ *   panel.
  */
 
 import { useState } from 'react'
+import { useApplicationRebuild, useServices } from '../../app/ApplicationServicesProvider'
 import { Button } from '../../app/components/Button'
 import { Dialog } from '../../app/components/Dialog'
 import { Notice } from '../../app/components/Notice'
 import { TextAreaField } from '../../app/components/TextAreaField'
+import { messageOf } from '../../app/settings/settingsErrors'
+import { useSettingsStore } from '../../app/stores/settingsStore'
 import { useShellStore } from '../../app/stores/shellStore'
+import { showToast } from '../../app/stores/toastStore'
 import type { FeatureIconName } from './icons'
 import { FeatureIcon } from './icons'
 import { useProviderStore } from './stores/providerStore'
@@ -37,27 +42,49 @@ export function EmptyConversation() {
   const [pasting, setPasting] = useState(false)
   const [jobPosting, setJobPosting] = useState('')
   const missingModel = providerStatus === 'ready' && providers.length === 0
+  const services = useServices()
+  const rebuild = useApplicationRebuild()
+  const sampleDataSeeded = useSettingsStore((state) => state.settings.sampleDataSeeded)
+  const [seeding, setSeeding] = useState(false)
 
-  const actions: readonly QuickAction[] = [
+  const seed = async (): Promise<void> => {
+    if (seeding) return
+    setSeeding(true)
+    try {
+      await services.seed.seedSampleData()
+      showToast('success', '示例数据已导入，正在重新加载本地数据')
+      rebuild()
+    } catch (failure) {
+      showToast('danger', messageOf(failure))
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  const quickActions: readonly QuickAction[] = [
     {
       icon: 'clipboard',
       title: '粘贴岗位描述',
       description: '把招聘要求发给助手，让它按岗位整理简历。',
       onClick: () => setPasting(true),
     },
+    ...(sampleDataSeeded
+      ? []
+      : [
+          {
+            icon: 'sparkles' as const,
+            title: '导入示例数据',
+            description: '填入一位虚构候选人的完整资料，先看看完整效果。',
+            onClick: () => {
+              void seed()
+            },
+          },
+        ]),
     {
       icon: 'pencil',
       title: '完善我的信息',
       description: '在右侧信息面板补充经历，助手只会使用你写下的内容。',
       onClick: () => setRightPanel('info'),
-    },
-    {
-      icon: 'plug',
-      title: missingModel ? '配置模型服务' : '查看模型服务',
-      description: missingModel
-        ? '助手需要先连接一个模型服务才能生成回答。'
-        : '查看当前使用的模型服务，或切换成别的服务。',
-      onClick: () => openSettings('model'),
     },
   ]
 
@@ -87,7 +114,7 @@ export function EmptyConversation() {
           </Notice>
         ) : null}
         <div className="quick-actions">
-          {actions.map((action) => (
+          {quickActions.map((action) => (
             <button
               type="button"
               className="quick-action"

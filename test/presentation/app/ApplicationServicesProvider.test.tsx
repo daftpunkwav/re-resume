@@ -42,6 +42,8 @@ function stubRoot(): CompositionRoot {
     conversation: createPreviewConversationService().service,
     providers: base.providers,
     libraryChanges: base.libraryChanges,
+    backup: base.backup,
+    seed: base.seed,
     secrets: new InMemorySecretStore(),
     shutdown: vi.fn(async () => undefined),
   }

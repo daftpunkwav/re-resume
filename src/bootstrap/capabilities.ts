@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file capabilities
  * @description The surface the composition root exposes to the interface. The
  * interface receives ready-to-call services and never sees a repository, a SQL
@@ -155,6 +155,10 @@ import type {
   ProviderConnectionTestResult,
   TestProviderConnectionInput,
 } from '../application/settings/testProviderConnection'
+import type { BackupDocument, BackupImportSummary } from '../domain/backup/BackupDocument'
+import type { ClearAllDataResult } from '../application/settings/clearAllData'
+import type { CleanupOrphanAttachmentsResult } from '../application/settings/cleanupOrphanAttachments'
+import type { SeedSampleDataOutput } from '../application/seed/seedSampleData'
 import type { ConversationService } from './wiring/conversation'
 
 /** Build information shown in the about section. Every field is a fact about the running build. */
@@ -172,6 +176,30 @@ export interface AppInfo {
 export interface AppSettingsService {
   readonly read: () => Promise<AppSettings>
   readonly save: (patch: Partial<AppSettings>) => Promise<AppSettings>
+}
+
+/**
+ * Backup and data management. The browser preview uses memory and declares
+ * `canManageData: false`, so the settings surface can state that limitation
+ * instead of offering an action that cannot work there.
+ */
+export interface BackupService {
+  readonly canManageData: boolean
+  /** Builds the document from the current data; the file is written by the interface. */
+  readonly exportDocument: () => Promise<BackupDocument>
+  /** Validates without writing, for the confirmation before a restore. */
+  readonly inspectDocument: (raw: unknown) => BackupImportSummary
+  /** Validates and restores in one transaction. */
+  readonly importDocument: (raw: unknown) => Promise<BackupImportSummary>
+  /** Clears every table and the attachment files beside them. */
+  readonly clearAllData: () => Promise<ClearAllDataResult>
+  /** Removes attachment rows and files nothing refers to any more. */
+  readonly cleanupOrphanAttachments: () => Promise<CleanupOrphanAttachmentsResult>
+}
+
+/** The sample library: one call that fills an empty window. */
+export interface SeedDataService {
+  readonly seedSampleData: () => Promise<SeedSampleDataOutput>
 }
 
 /**
@@ -296,6 +324,10 @@ export interface ResumeService {
 export interface CompositionRoot {
   readonly appInfo: AppInfo
   readonly settings: AppSettingsService
+  /** Backup export, import, clear-all and the orphan attachment sweep. */
+  readonly backup: BackupService
+  /** The sample data an empty window can import once. */
+  readonly seed: SeedDataService
   /** Conversations, messages, attachments and the agent run of one turn. */
   readonly conversation: ConversationService
   readonly info: InfoService

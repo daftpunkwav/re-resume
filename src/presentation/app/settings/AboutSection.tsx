@@ -32,6 +32,12 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
           <dd>{RUNTIME_LABELS[appInfo.runtime]}</dd>
         </div>
         <div className="settings-definition-row">
+          <dt>数据库</dt>
+          <dd className="settings-mono">
+            {appInfo.databaseFile ?? '浏览器预览：使用内存数据，不写入磁盘'}
+          </dd>
+        </div>
+        <div className="settings-definition-row">
           <dt>许可证</dt>
           <dd>{appInfo.license}</dd>
         </div>

@@ -81,6 +81,7 @@ describe('SettingsOverlay', () => {
     await user.click(within(dialog).getByRole('button', { name: '交互' }))
     expect(within(dialog).getByRole('heading', { name: '交互' })).toBeInTheDocument()
     expect(within(dialog).getByText('快捷键')).toBeInTheDocument()
+    expect(within(dialog).getByText('关闭覆盖层、抽屉或弹层')).toBeInTheDocument()
   })
 
   it('changes the theme and reports it in the document', async () => {
@@ -142,7 +143,7 @@ describe('SettingsOverlay', () => {
     }
   })
 
-  it('renders honest empty states without unbacked forms', async () => {
+  it('renders honest states for the sections that hold data', async () => {
     const user = userEvent.setup({ delay: null })
     renderOverlay()
     await user.click(await screen.findByRole('button', { name: '打开设置' }))
@@ -153,7 +154,10 @@ describe('SettingsOverlay', () => {
     expect(within(dialog).queryByRole('textbox')).toBeNull()
 
     await user.click(within(dialog).getByRole('button', { name: '数据' }))
-    expect(within(dialog).getByText('本地数据')).toBeInTheDocument()
+    expect(within(dialog).getByText('存储位置')).toBeInTheDocument()
+    expect(within(dialog).getByText('备份格式')).toBeInTheDocument()
+    // The clear confirmation is hidden behind its own step, so no text box is
+    // in the section before the user asks for it.
     expect(within(dialog).queryByRole('textbox')).toBeNull()
   })
 
@@ -168,5 +172,6 @@ describe('SettingsOverlay', () => {
     expect(within(dialog).getByText('0.0.0-test')).toBeInTheDocument()
     expect(within(dialog).getAllByText('浏览器预览').length).toBeGreaterThan(0)
     expect(within(dialog).getByText('MIT')).toBeInTheDocument()
+    expect(within(dialog).getByText('数据库')).toBeInTheDocument()
   })
 })
