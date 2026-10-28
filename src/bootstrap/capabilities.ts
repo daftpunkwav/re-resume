@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file capabilities
  * @description The surface the composition root exposes to the interface. The
  * interface receives ready-to-call services and never sees a repository, a SQL
@@ -132,6 +132,8 @@ import type {
   WriteSummaryOverrideInput,
   WriteSummaryOverrideOutput,
 } from '../application/resume/writeSummaryOverride'
+import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReferenceQuery'
+import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import type { MissingReference } from '../domain/resume/MissingReference'
@@ -160,9 +162,10 @@ export interface AppSettingsService {
 
 /**
  * The information library as the interface sees it: the library use cases,
- * already bound to their repositories, clock and identifier source. The facade
- * hands out domain values and throws `DomainError` for a refusal; it hides which
- * storage answers.
+ * already bound to their repositories, clock and identifier source, plus the
+ * two reference reads a delete confirmation needs to name what still uses the
+ * value. The facade hands out domain values and throws `DomainError` for a
+ * refusal; it hides which storage answers.
  */
 export interface InfoService {
   readonly listEntries: (input?: ListInfoEntriesInput) => Promise<ListInfoEntriesOutput>
@@ -170,6 +173,16 @@ export interface InfoService {
   readonly createEntry: (input: CreateInfoEntryInput) => Promise<CreateInfoEntryOutput>
   readonly updateEntry: (input: UpdateInfoEntryInput) => Promise<UpdateInfoEntryOutput>
   readonly deleteEntry: (input: DeleteInfoEntryInput) => Promise<DeleteInfoEntryOutput>
+  /**
+   * Resumes that still select an entry. The delete use case reports the same
+   * references when it refuses; this read lets the confirmation name the
+   * resumes before the deletion is attempted.
+   */
+  readonly listEntryReferences: (entryId: InfoEntryId) => Promise<readonly InfoEntryReference[]>
+  /** Resumes whose sections reference a custom module itself. */
+  readonly listModuleReferences: (
+    moduleId: CustomModuleId,
+  ) => Promise<readonly InfoEntryReference[]>
   readonly reorderEntries: (input: ReorderInfoEntriesInput) => Promise<ReorderInfoEntriesOutput>
   readonly createCustomModule: (
     input: CreateCustomModuleInput,
