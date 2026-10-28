@@ -171,7 +171,7 @@ describe('SettingsOverlay', () => {
 
     expect(within(dialog).getByText('0.0.0-test')).toBeInTheDocument()
     expect(within(dialog).getAllByText('浏览器预览').length).toBeGreaterThan(0)
-    expect(within(dialog).getByText('MIT')).toBeInTheDocument()
+    expect(within(dialog).getByText('Apache-2.0')).toBeInTheDocument()
     expect(within(dialog).getByText('数据库')).toBeInTheDocument()
   })
 })

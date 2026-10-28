@@ -88,7 +88,7 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
       version: '0.0.0-test',
       buildMode: 'test',
       runtime: 'browser',
-      license: 'MIT',
+      license: 'Apache-2.0',
       databaseFile: null,
     },
     // A root for tests that only exercises the interface. Backup is available

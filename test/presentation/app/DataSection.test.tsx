@@ -29,7 +29,7 @@ const APP_INFO: AppInfo = {
   version: '0.0.0-test',
   buildMode: 'test',
   runtime: 'tauri',
-  license: 'MIT',
+  license: 'Apache-2.0',
   databaseFile: 'C:/Users/test/AppData/Roaming/re-resume/re-resume.db',
 }
 
