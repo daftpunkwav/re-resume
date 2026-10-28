@@ -5,7 +5,7 @@
  * be a placeholder — would only show up on a fresh install otherwise.
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -117,6 +117,42 @@ describe('migrations', () => {
     expect(resume).toContain('frozen_state_json TEXT NOT NULL')
     expect(resume).toContain('materialized_json TEXT NOT NULL')
     expect(resume).toContain("CHECK (status IN ('draft', 'frozen'))")
+  })
+
+  it('drops only the remaining v1 tables at version 10', () => {
+    const legacy = readMigration('010_drop_legacy.sql')
+    // The exact executable body: only the four v1-only names, children before
+    // the `experience` table their foreign keys point at. Version 8 already
+    // removed `claim` and `variant`; version 10 repeats them defensively.
+    //
+    // No v2 table may be named here: `provider_config`, `job_posting`,
+    // `agent_run`, `tool_invocation`, `resume` and `resume_snapshot` were
+    // rebuilt by versions 2, 8 and 9, and dropping one would delete live data.
+    expect(executableStatements(legacy)).toBe(
+      [
+        'DROP TABLE IF EXISTS claim;',
+        'DROP TABLE IF EXISTS variant;',
+        'DROP TABLE IF EXISTS experience;',
+        'DROP TABLE IF EXISTS profile;',
+      ].join('\n'),
+    )
+  })
+
+  it('registers every migration file in the native shell', () => {
+    // The plugin applies exactly what `lib.rs` registers. A file without an
+    // entry is dead SQL, and the tests above would still pass.
+    const shell = readFileSync(join(REPOSITORY_ROOT, 'src-tauri/src/lib.rs'), 'utf8')
+    const files = readdirSync(MIGRATIONS)
+      .filter((name) => /^\d{3}_.*\.sql$/u.test(name))
+      .sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10))
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const version = Number.parseInt(file, 10)
+      expect(shell, `${file} must be registered as version ${version}`).toContain(
+        `version: ${version},`,
+      )
+      expect(shell, `${file} must be compiled into the shell`).toContain(`migrations/${file}`)
+    }
   })
 
   it('keeps versions 3 to 6 comment-only', () => {
