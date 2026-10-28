@@ -13,29 +13,27 @@
  * Constraints:
  * - Presentation only: every rule that decides whether a write is legal lives
  *   in the domain and application layers. The deletion and authoring flows live
- *   in their own hooks so this file stays the panel's layout and selection.
+ *   in their own hooks, and the two long regions of the panel in their own
+ *   areas, so this file stays the panel's state and composition.
  * - The "add to conversation" action is passed in by the shell once the
  *   assistant feature exists; with no handler the action is not rendered, so
  *   the panel never shows a control that cannot do anything.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import type { InfoEntry } from '../../../domain/info/InfoEntry'
 import type { InfoEntryId } from '../../../domain/shared/branded-id'
 import { describeError } from '../../app/errorMessages'
 import { useServices } from '../../app/ApplicationServicesProvider'
 import { Button } from '../../app/components/Button'
-import { EmptyState } from '../../app/components/EmptyState'
-import { IconButton } from '../../app/components/IconButton'
 import { Notice } from '../../app/components/Notice'
 import { showToast } from '../../app/stores/toastStore'
+import { EntryEditorArea } from './EntryEditorArea'
+import type { EntryEditorHandle } from './EntryEditor'
+import { EntryListArea } from './EntryListArea'
 import { moduleSelectionLabel } from './formatInfoValues'
 import { useInfoLayoutTier } from './infoLayout'
-import { EntryEditor } from './EntryEditor'
-import type { EntryEditorHandle } from './EntryEditor'
-import { EntryList } from './EntryList'
-import { ModuleNav, ModulePicker } from './ModuleNav'
+import { ModuleNav } from './ModuleNav'
 import { bindInfoPanel, consumePendingInfoSearchFocus } from './panelBridge'
 import { useInfoStore } from './stores/infoStore'
 import type { ModuleSelection } from './stores/infoStore'
@@ -270,179 +268,78 @@ export function InfoPanel({ onAddEntryToConversation }: InfoPanelProps) {
       })
   }
 
-  const openEditModule = (): void => {
-    if (selectedCustomModule === null) return
-    authoring.openEdit(selectedCustomModule)
+  const createEntry = async (
+    fields: Readonly<Record<string, unknown>>,
+  ): Promise<InfoEntry> => {
+    const selection = useInfoStore.getState().selectedModule
+    if (selection === null) throw new Error('信息模块未选择。')
+    const output = await useInfoStore.getState().createEntry({
+      moduleKind: selection.moduleKind,
+      customModuleId: selection.customModuleId,
+      fields,
+    })
+    return output.entry
   }
 
-  const editorNode: ReactNode = creating ? (
-    selectedModule === null ? null : (
-      <EntryEditor
-        key={`new-${String(createEpoch)}`}
-        ref={editorRef}
-        moduleKind={selectedModule.moduleKind}
-        customModule={selectedCustomModule}
-        entry={null}
-        agentTouch={null}
-        onSaved={handleEntrySaved}
-        onCancel={cancelEditor}
-        {...(tier === 'narrow' ? { onBack: backToList } : {})}
-        onRequestDelete={entryDeletion.request}
-        {...(onAddEntryToConversation === undefined
-          ? {}
-          : { onAddToConversation: onAddEntryToConversation })}
-        onCreate={async (fields) => {
-          const output = await useInfoStore.getState().createEntry({
-            moduleKind: selectedModule.moduleKind,
-            customModuleId: selectedModule.customModuleId,
-            fields,
-          })
-          return output.entry
-        }}
-        onUpdate={async (entryId, fields) => {
-          const output = await useInfoStore.getState().updateEntry({ entryId, fields })
-          return output.entry
-        }}
-      />
-    )
-  ) : selectedEntry === null ? null : (
-    <EntryEditor
-      key={selectedEntry.id}
-      ref={editorRef}
-      moduleKind={selectedEntry.moduleKind}
-      customModule={selectedCustomModule}
-      entry={selectedEntry}
-      agentTouch={agentTouched[selectedEntry.id] ?? null}
-      onSaved={handleEntrySaved}
-      onCancel={cancelEditor}
-      {...(tier === 'narrow' ? { onBack: backToList } : {})}
-      onRequestDelete={entryDeletion.request}
-      {...(onAddEntryToConversation === undefined
-        ? {}
-        : { onAddToConversation: onAddEntryToConversation })}
-      onCreate={async (fields) => {
-        const output = await useInfoStore.getState().createEntry({
-          moduleKind: selectedEntry.moduleKind,
-          customModuleId: selectedEntry.customModuleId,
-          fields,
-        })
-        return output.entry
-      }}
-      onUpdate={async (entryId, fields) => {
-        const output = await useInfoStore.getState().updateEntry({ entryId, fields })
-        return output.entry
-      }}
-    />
-  )
-
-  const editorPlaceholder =
-    moduleEntries.length === 0 ? (
-      <div className="info-editor info-editor-empty">
-        <EmptyState
-          compact
-          icon="id-card"
-          title={`还没有可编辑的${moduleLabel}`}
-          description="在左侧新建一条后，在这里填写字段。"
-        />
-      </div>
-    ) : (
-      <div className="info-editor info-editor-empty">
-        <EmptyState
-          compact
-          icon="id-card"
-          title="选择一条信息"
-          description="在列表中选择要编辑的信息，或新建一条。"
-          action={
-            <Button size="small" variant="secondary" icon="plus" onClick={startCreate}>
-              新建{moduleLabel}
-            </Button>
-          }
-        />
-      </div>
-    )
-
-  /** The three-column layout has room for a named list column. */
-  const wideHeader = (
-    <div className="info-list-head">
-      <div className="info-list-heading">
-        <h3 className="info-list-title" title={moduleLabel}>
-          {moduleLabel}
-        </h3>
-        <span className="info-list-count">{moduleEntries.length} 条</span>
-      </div>
-      <div className="info-list-head-actions">
-        {selectedModule?.moduleKind === 'custom' ? (
-          <IconButton
-            icon="settings"
-            label={`管理「${moduleLabel}」模块`}
-            size="small"
-            onClick={openEditModule}
-          />
-        ) : null}
-        <Button size="small" variant="secondary" icon="plus" onClick={startCreate}>
-          新建
-        </Button>
-      </div>
-    </div>
-  )
-
-  /**
-   * The folded layouts keep one compact bar: the module picker and module
-   * management on top, the search field and the create button below. The named
-   * column header would repeat what the picker already says.
-   */
-  const compactHeader = (
-    <div className="info-compact-head">
-      <ModulePicker
-        summaries={summaries}
-        selectedModule={selectedModule}
-        onSelect={selectModule}
-        onCreateModule={authoring.openCreate}
-      />
-      {selectedModule?.moduleKind === 'custom' ? (
-        <IconButton
-          icon="settings"
-          label={`管理「${moduleLabel}」模块`}
-          onClick={openEditModule}
-        />
-      ) : null}
-    </div>
-  )
-
-  const compactCreate = (
-    <Button variant="secondary" icon="plus" onClick={startCreate}>
-      新建
-    </Button>
-  )
-
-  const listNode = (
-    <EntryList
-      moduleKind={selectedModule?.moduleKind ?? 'personal'}
-      moduleLabel={moduleLabel}
-      customModule={selectedCustomModule}
-      entries={moduleEntries}
-      selectedEntryId={selectedEntryId}
-      query={query}
-      onQueryChange={(next) => useInfoStore.getState().setQuery(next)}
-      searchRef={searchRef}
-      header={tier === 'wide' ? wideHeader : compactHeader}
-      {...(tier === 'wide' ? {} : { searchAction: compactCreate })}
-      showDisclosure={tier === 'narrow'}
-      loading={loading}
-      onSelect={selectEntry}
-      onCreate={startCreate}
-      onDelete={entryDeletion.request}
-      onReorder={handleReorder}
-      {...(onAddEntryToConversation === undefined
-        ? {}
-        : { onAddToConversation: onAddEntryToConversation })}
-      agentTouched={agentTouched}
-    />
-  )
+  const updateEntry = async (
+    entryId: InfoEntryId,
+    fields: Readonly<Record<string, unknown>>,
+  ): Promise<InfoEntry> => {
+    const output = await useInfoStore.getState().updateEntry({ entryId, fields })
+    return output.entry
+  }
 
   const editorOpen = creating || selectedEntry !== null
   const errorState = !loading && error !== null && entries.length === 0
   const staleBanner = error !== null && entries.length > 0
+
+  const listArea = (
+    <EntryListArea
+      tier={tier}
+      moduleLabel={moduleLabel}
+      selectedModule={selectedModule}
+      selectedCustomModule={selectedCustomModule}
+      summaries={summaries}
+      moduleEntries={moduleEntries}
+      selectedEntryId={selectedEntryId}
+      query={query}
+      loading={loading}
+      agentTouched={agentTouched}
+      searchRef={searchRef}
+      onSelectModule={selectModule}
+      onCreateModule={authoring.openCreate}
+      onOpenModuleSettings={authoring.openEdit}
+      onCreateEntry={startCreate}
+      onSelectEntry={selectEntry}
+      onDeleteEntry={entryDeletion.request}
+      onReorder={handleReorder}
+      onQueryChange={(next) => useInfoStore.getState().setQuery(next)}
+      onAddToConversation={onAddEntryToConversation}
+    />
+  )
+
+  const editorArea = (
+    <EntryEditorArea
+      creating={creating}
+      createEpoch={createEpoch}
+      selectedModule={selectedModule}
+      selectedEntry={selectedEntry}
+      selectedCustomModule={selectedCustomModule}
+      moduleEntries={moduleEntries}
+      moduleLabel={moduleLabel}
+      tier={tier}
+      agentTouched={agentTouched}
+      editorRef={editorRef}
+      onStartCreate={startCreate}
+      onBack={backToList}
+      onSaved={handleEntrySaved}
+      onCancel={cancelEditor}
+      onRequestDelete={entryDeletion.request}
+      onAddToConversation={onAddEntryToConversation}
+      onCreateEntry={createEntry}
+      onUpdateEntry={updateEntry}
+    />
+  )
 
   return (
     <div className="info-panel" ref={panelRef} data-info-tier={tier}>
@@ -461,7 +358,7 @@ export function InfoPanel({ onAddEntryToConversation }: InfoPanelProps) {
               </Button>
             }
           >
-            <p>{error.message}</p>
+            <p>{error?.message}</p>
           </Notice>
         </div>
       ) : null}
@@ -498,14 +395,14 @@ export function InfoPanel({ onAddEntryToConversation }: InfoPanelProps) {
           ) : null}
           {tier === 'narrow' ? (
             editorOpen ? (
-              <div className="info-narrow-detail">{editorNode ?? editorPlaceholder}</div>
+              <div className="info-narrow-detail">{editorArea}</div>
             ) : (
-              listNode
+              listArea
             )
           ) : (
             <>
-              {listNode}
-              <div className="info-editor-pane">{editorNode ?? editorPlaceholder}</div>
+              {listArea}
+              <div className="info-editor-pane">{editorArea}</div>
             </>
           )}
         </div>
