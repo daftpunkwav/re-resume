@@ -190,6 +190,11 @@ export async function executeToolCall(
     }
   }
 
+  const refusal = readToolRefusal(value)
+  if (refusal !== null) {
+    return finishFailed(deps, input, invocation, refusal)
+  }
+
   const metadata = readToolOutcomeMetadata(value)
   const content = truncateToolResult(successResultJson(value))
   await deps.invocations.record({
@@ -271,6 +276,18 @@ function parseToolArguments(
 function describeFailure(error: unknown): string {
   if (error instanceof DomainError) return `${error.code}: ${error.message}`
   return describeThrown(error)
+}
+
+/**
+ * Reads the refusal a tool returns instead of throwing: the model-facing
+ * `{ ok:false, error }` value the domain mapping produces. A refusal is a
+ * failed call, so the card and the audit row say so, while the run continues.
+ */
+function readToolRefusal(value: unknown): string | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const candidate = value as { readonly ok?: unknown; readonly error?: unknown }
+  if (candidate.ok !== false || typeof candidate.error !== 'string') return null
+  return candidate.error
 }
 
 function describeThrown(error: unknown): string {
