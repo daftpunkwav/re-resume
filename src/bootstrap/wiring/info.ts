@@ -49,6 +49,8 @@ export function createInfoService(wiring: InfoWiring): InfoService {
     createEntry: (input) => createInfoEntry(deps, input),
     updateEntry: (input) => updateInfoEntry(deps, input),
     deleteEntry: (input) => deleteInfoEntry(deps, input),
+    listEntryReferences: (entryId) => deps.references.listEntryReferences(entryId),
+    listModuleReferences: (moduleId) => deps.references.listModuleReferences(moduleId),
     reorderEntries: (input) => reorderInfoEntries(deps, input),
     createCustomModule: (input) => createCustomModule(deps, input),
     updateCustomModule: (input) => updateCustomModule(deps, input),

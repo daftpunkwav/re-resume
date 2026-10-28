@@ -12,8 +12,10 @@
  *
  * Constraints:
  * - The panel contents belong to the information and resume features; this
- *   file only frames them (placeholders until those features land). The
- *   information panel arrives with PR-06, the resume panel with PR-08.
+ *   file only frames them and routes their close command. The information panel
+ *   is here; the resume panel is still its placeholder until its feature lands.
+ * - A close is a navigation away from the information panel, so it goes through
+ *   the panel's unsaved-draft guard rather than writing the shell state here.
  * - While closed, the contents are unmounted rather than hidden: a region that
  *   cannot be seen must not keep its buttons in the tab order.
  */
@@ -27,7 +29,8 @@ import {
 } from '../../domain/settings/AppSettings'
 import { IconButton } from './components/IconButton'
 import { TabList } from './components/Tabs'
-import { InfoPanelPlaceholder } from './placeholders/InfoPanelPlaceholder'
+import { InfoPanel } from '../features/info/InfoPanel'
+import { requestInfoPanelClose } from '../features/info/panelBridge'
 import { ResumePanelPlaceholder } from './placeholders/ResumePanelPlaceholder'
 import { ResizeHandle } from './ResizeHandle'
 import type { LayoutTier } from './useLayoutTier'
@@ -53,7 +56,16 @@ const PANEL_TITLES: Readonly<Record<PanelKind, string>> = {
 const TWO_PANE_MIN_WIDTH = PANEL_WIDTH_MIN * 2
 
 function panelBody(kind: PanelKind) {
-  return kind === 'resume' ? <ResumePanelPlaceholder /> : <InfoPanelPlaceholder />
+  return kind === 'resume' ? <ResumePanelPlaceholder /> : <InfoPanel />
+}
+
+/**
+ * The information panel fills its region and owns its own scrolling; the
+ * placeholder-centered body layout would leave it floating in the middle of a
+ * scroll container.
+ */
+function dockBodyClass(kind: PanelKind): string {
+  return kind === 'info' ? 'dock-body dock-body-fill' : 'dock-body'
 }
 
 function PaneHeader({ kind, onClose }: { readonly kind: PanelKind; readonly onClose: () => void }) {
@@ -161,7 +173,11 @@ export function PanelDock({ tier }: PanelDockProps) {
   const bounds = { minimum: minimumRatio, maximum: 1 - minimumRatio }
   const resizeMinimum = splitView ? TWO_PANE_MIN_WIDTH : PANEL_WIDTH_MIN
 
-  const closeAll = (): void => setRightPanel('none')
+  // A close is a navigation away from the information panel, so it has to pass
+  // the panel's unsaved-draft guard first. With the panel not mounted (the
+  // resume panel is the only one open) the bridge runs the close immediately.
+  const closeAll = (): void => requestInfoPanelClose(() => setRightPanel('none'))
+  const closeInfoPane = (): void => requestInfoPanelClose(() => togglePanel('info'))
 
   return (
     <aside
@@ -185,12 +201,12 @@ export function PanelDock({ tier }: PanelDockProps) {
                   aria-label="简历创作"
                 >
                   <PaneHeader kind="resume" onClose={() => togglePanel('resume')} />
-                  <div className="dock-body">{panelBody('resume')}</div>
+                  <div className={dockBodyClass('resume')}>{panelBody('resume')}</div>
                 </section>
                 <SplitDivider ratio={splitRatio} bounds={bounds} onChange={setSplitRatio} />
                 <section className="dock-pane" aria-label="简历信息">
-                  <PaneHeader kind="info" onClose={() => togglePanel('info')} />
-                  <div className="dock-body">{panelBody('info')}</div>
+                  <PaneHeader kind="info" onClose={closeInfoPane} />
+                  <div className={dockBodyClass('info')}>{panelBody('info')}</div>
                 </section>
               </div>
             ) : (
@@ -211,7 +227,11 @@ export function PanelDock({ tier }: PanelDockProps) {
                   )}
                   <IconButton icon="close" label="关闭面板" size="small" onClick={closeAll} />
                 </header>
-                <div className="dock-body">
+                <div
+                  className={dockBodyClass(
+                    both ? activeTab : rightPanel === 'resume' ? 'resume' : 'info',
+                  )}
+                >
                   {panelBody(both ? activeTab : rightPanel === 'resume' ? 'resume' : 'info')}
                 </div>
               </>
