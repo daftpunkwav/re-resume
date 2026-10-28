@@ -95,6 +95,7 @@ function createHarness(): Harness {
         undoRevision: async () => {
           throw new Error('not used in this test')
         },
+        readChange: async () => null,
       },
     },
   }

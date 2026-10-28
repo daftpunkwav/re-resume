@@ -39,6 +39,7 @@ export function ConversationView() {
   const error = useConversationStore((state) => state.error)
   const clearError = useConversationStore((state) => state.clearError)
   const retry = useConversationStore((state) => state.retry)
+  const composerFocusRequest = useConversationStore((state) => state.composerFocusRequest)
   const draftEpoch = useShellStore((state) => state.draftEpoch)
   const runStatus = useRunStore((state) => state.status)
   const composerInput = useRef<HTMLTextAreaElement>(null)
@@ -58,6 +59,13 @@ export function ConversationView() {
     const timer = window.setTimeout(() => composerInput.current?.focus(), 0)
     return () => window.clearTimeout(timer)
   }, [draftEpoch])
+
+  // A chip attached from a panel is meant to be sent next; the keyboard goes
+  // with it instead of staying on the panel control.
+  useEffect(() => {
+    if (composerFocusRequest === 0) return
+    composerInput.current?.focus()
+  }, [composerFocusRequest])
 
   // The streamed text is not a live region; the status node announces the run
   // state once per transition instead.

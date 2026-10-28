@@ -152,7 +152,11 @@ function FreezeAction({ resume, busy }: { readonly resume: Resume; readonly busy
   )
 }
 
-export function ResumeToolbar() {
+export interface ResumeToolbarProps {
+  readonly onAddToConversation?: (resume: Resume) => void
+}
+
+export function ResumeToolbar({ onAddToConversation }: ResumeToolbarProps = {}) {
   const resume = useResumeStore((state) => state.resume)
   const committing = useResumeStore((state) => state.committing)
   const [exportOpen, setExportOpen] = useState(false)
@@ -161,6 +165,15 @@ export function ResumeToolbar() {
     <div className="studio-revision-bar">
       <UndoRedoButtons resume={resume} busy={committing} />
       <div className="studio-revision-group">
+        {onAddToConversation === undefined ? null : (
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => onAddToConversation(resume)}
+          >
+            加入对话
+          </Button>
+        )}
         <FreezeAction resume={resume} busy={committing} />
         <Button
           variant="primary"
@@ -174,6 +187,7 @@ export function ResumeToolbar() {
       {exportOpen ? (
         <ExportResumeDialog resume={resume} open onClose={() => setExportOpen(false)} />
       ) : null}
+
     </div>
   )
 }

@@ -33,6 +33,19 @@ export function createLibraryChangesService(
   const inverse = createLibraryChangeInverseWriter(wiring)
   return {
     undo: (input) => undoLibraryChange({ changes: wiring.changes, inverse, clock: wiring.clock }, input),
+    readChange: async (changeId) => {
+      const record = await wiring.changes.findById(changeId)
+      if (record === null) return null
+      return {
+        id: record.id,
+        scope: record.scope,
+        entity: record.entity,
+        entityId: record.entityId,
+        op: record.op,
+        label: record.label,
+        undone: record.undoneAt !== null,
+      }
+    },
     undoRevision: (input) => undoRevision({ resumes: wiring.resumes }, input),
   }
 }

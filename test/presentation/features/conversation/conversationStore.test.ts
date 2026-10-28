@@ -99,7 +99,7 @@ function createHarness(): Harness {
       conversation,
       info,
       settings: createAppSettingsService({ repository: settingsRepository }),
-      libraryChanges: { undo, undoRevision },
+      libraryChanges: { undo, undoRevision, readChange: async () => null },
     },
   }
 }
