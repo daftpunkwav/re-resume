@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file PanelDock
  * @description The right-hand tool area: one panel, both panels side by side,
  * or — below the wide breakpoint with both open — one panel at a time behind
@@ -31,7 +31,7 @@ import { IconButton } from './components/IconButton'
 import { TabList } from './components/Tabs'
 import { InfoPanel } from '../features/info/InfoPanel'
 import { requestInfoPanelClose } from '../features/info/panelBridge'
-import { ResumePanelPlaceholder } from './placeholders/ResumePanelPlaceholder'
+import { ResumePanel } from '../features/resume/ResumePanel'
 import { ResizeHandle } from './ResizeHandle'
 import type { LayoutTier } from './useLayoutTier'
 import { useShellStore } from './stores/shellStore'
@@ -56,16 +56,16 @@ const PANEL_TITLES: Readonly<Record<PanelKind, string>> = {
 const TWO_PANE_MIN_WIDTH = PANEL_WIDTH_MIN * 2
 
 function panelBody(kind: PanelKind) {
-  return kind === 'resume' ? <ResumePanelPlaceholder /> : <InfoPanel />
+  return kind === 'resume' ? <ResumePanel /> : <InfoPanel />
 }
 
 /**
- * The information panel fills its region and owns its own scrolling; the
- * placeholder-centered body layout would leave it floating in the middle of a
+ * Both feature panels fill their region and own their own scrolling; the
+ * placeholder-centered body layout would leave them floating in the middle of a
  * scroll container.
  */
-function dockBodyClass(kind: PanelKind): string {
-  return kind === 'info' ? 'dock-body dock-body-fill' : 'dock-body'
+function dockBodyClass(_kind: PanelKind): string {
+  return 'dock-body dock-body-fill'
 }
 
 function PaneHeader({ kind, onClose }: { readonly kind: PanelKind; readonly onClose: () => void }) {

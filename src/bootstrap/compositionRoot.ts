@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file compositionRoot
  * @description The one module allowed to construct infrastructure and hand it
  * to the interface as ready-to-call services. Everything below
@@ -51,6 +51,7 @@ import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/Sq
 import { SqliteResumeRepository } from '../infrastructure/persistence/resume/SqliteResumeRepository'
 import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
 import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
+import { registerCanvasFonts } from '../infrastructure/measurement/CanvasFontRegistration'
 import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import { SqliteChangeRecordRepository } from '../infrastructure/persistence/info/SqliteChangeRecordRepository'
@@ -170,12 +171,16 @@ function createConversationRepositories(
 }
 
 /**
- * Loads the bundled font bytes and builds the canonical measurer. A failure is
- * fatal: without the bundled faces every line break would move, so a window that
- * cannot measure must not pretend it can.
+ * Loads the bundled font bytes, registers them with the document's FontFaceSet
+ * and builds the canonical measurer. Registration is what lets the canvas paint
+ * the faces the measurer measured; a failure is fatal because without the
+ * bundled faces every line break would move, so a window that cannot measure
+ * must not pretend it can.
  */
-async function createCanonicalMeasurer(): Promise<TextMeasurer> {
-  return createFontkitTextMeasurer(await loadBundledFontRegistry())
+async function createCanvasMeasurement(): Promise<TextMeasurer> {
+  const fonts = await loadBundledFontRegistry()
+  await registerCanvasFonts(fonts)
+  return createFontkitTextMeasurer(fonts)
 }
 
 /**
@@ -380,7 +385,7 @@ export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
   const clock: Clock = new SystemClock()
-  const measurer = await createCanonicalMeasurer()
+  const measurer = await createCanvasMeasurement()
   const database = await startLocalDatabase({
     backupBeforeMigration: recordPreMigrationBackup,
     openDatabase: () => openSqliteDatabase(options.databaseConnectionString),

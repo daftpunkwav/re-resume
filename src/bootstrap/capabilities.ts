@@ -133,13 +133,15 @@ import type {
   WriteSummaryOverrideOutput,
 } from '../application/resume/writeSummaryOverride'
 import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReferenceQuery'
-import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
+import type { CanvasBlockId, CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { ProviderConfig } from '../domain/settings/ProviderConfig'
 import type { ChangeRecord } from '../domain/changes/ChangeRecord'
 import type { ChangeRecordId, RevisionId } from '../domain/shared/branded-id'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
+import type { MaterializedDocument } from '../domain/resume/ResumeSnapshot'
 import type { MissingReference } from '../domain/resume/MissingReference'
+import type { LayoutOutput } from '../domain/resume/PageLayout'
 import type { Resume } from '../domain/resume/Resume'
 import type { Revision } from '../domain/resume/Revision'
 import type { TemplateDefinition } from '../domain/resume/Template'
@@ -273,6 +275,24 @@ export interface InfoService {
 }
 
 /**
+ * A resume with its materialized content and the geometry a canvas draws. The
+ * interface never computes layout itself: this value is the materializer and
+ * layout engine output for one document state.
+ */
+export interface ResumeRender {
+  readonly resume: Resume
+  readonly materialized: MaterializedDocument
+  readonly layout: LayoutOutput
+}
+
+/** Editing the text of one free canvas block. */
+export interface UpdateCanvasBlockTextInput {
+  readonly resumeId: ResumeId
+  readonly blockId: CanvasBlockId
+  readonly text: string
+}
+
+/**
  * The resume document as the interface sees it: every document use case, already
  * bound to the store, the library, the measurer, the clock and the identifier
  * source. The facade hands out domain values and throws `DomainError` for a
@@ -320,6 +340,11 @@ export interface ResumeService {
   readonly materializeDocument: (
     input: ReadMaterializedDocumentInput,
   ) => Promise<ReadMaterializedDocumentOutput>
+  /** The document plus the geometry the studio canvas draws. */
+  readonly renderResume: (resumeId: ResumeId) => Promise<ResumeRender>
+  readonly listRevisions: (resumeId: ResumeId) => Promise<readonly Revision[]>
+  /** Replaces the text of one free canvas block through one revision. */
+  readonly updateCanvasBlockText: (input: UpdateCanvasBlockTextInput) => Promise<Revision>
   readonly findMissingReferences: (
     input: FindMissingReferencesInput,
   ) => Promise<readonly MissingReference[]>
