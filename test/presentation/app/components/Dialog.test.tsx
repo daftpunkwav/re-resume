@@ -124,8 +124,11 @@ describe('dialog focus', () => {
     // token fails here instead of leaving the panel without a ring.
     expect(indicator).toContain('var(--accent)')
     // The offset reaches the focused element, which is what proves the rule
-    // applies to this panel and not to some other selector.
-    expect(window.getComputedStyle(panel).outlineOffset).toBe('2px')
+    // applies to this panel and not to some other selector. The browser
+    // project reads the resolved 2px; jsdom keeps the token as written.
+    expect(ruleFor('.dialog:focus')?.style.getPropertyValue('outline-offset')).toBe(
+      'var(--focus-ring-offset)',
+    )
   })
 
   it('leaves focus where it is when the parent re-renders', async () => {

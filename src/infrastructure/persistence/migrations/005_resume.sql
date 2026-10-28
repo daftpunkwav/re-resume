@@ -1,0 +1,1 @@
+-- Resume, revision and snapshot schema is applied by a later migration version.

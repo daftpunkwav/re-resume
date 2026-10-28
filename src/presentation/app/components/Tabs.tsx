@@ -2,6 +2,9 @@
  * @file Tabs
  * @description Horizontal section switcher. Arrow keys move between tabs, which
  * is the behaviour the tab role implies and a mouse-only switcher would omit.
+ *
+ * The list is available on its own so a region that already renders its own
+ * panel chrome (the dock header) can use the tabs without a second wrapper.
  */
 
 import { useRef } from 'react'
@@ -12,17 +15,25 @@ export interface TabDescriptor<Id extends string> {
   readonly label: string
 }
 
-export interface TabsProps<Id extends string> {
+export interface TabListProps<Id extends string> {
   readonly tabs: readonly TabDescriptor<Id>[]
   readonly active: Id
   readonly onChange: (id: Id) => void
-  readonly children: ReactNode
+  /** Accessible name of the tab list. */
+  readonly label: string
+  readonly className?: string
 }
 
-export function Tabs<Id extends string>({ tabs, active, onChange, children }: TabsProps<Id>) {
+export function TabList<Id extends string>({
+  tabs,
+  active,
+  onChange,
+  label,
+  className,
+}: TabListProps<Id>) {
   const listRef = useRef<HTMLDivElement>(null)
 
-  const moveFocus = (from: number, delta: number) => {
+  const moveFocus = (from: number, delta: number): void => {
     const next = (from + delta + tabs.length) % tabs.length
     const target = tabs[next]
     if (target === undefined) return
@@ -32,18 +43,24 @@ export function Tabs<Id extends string>({ tabs, active, onChange, children }: Ta
   }
 
   return (
-    <div className="tabs">
-      <div className="tabs-list" role="tablist" ref={listRef}>
-        {tabs.map((tab, index) => (
+    <div
+      className={className === undefined ? 'tabs-list' : `tabs-list ${className}`}
+      role="tablist"
+      aria-label={label}
+      ref={listRef}
+    >
+      {tabs.map((tab, index) => {
+        const selected = tab.id === active
+        return (
           <button
             key={tab.id}
             type="button"
             role="tab"
             id={`tab-${tab.id}`}
-            aria-selected={tab.id === active}
+            aria-selected={selected}
             aria-controls={`tabpanel-${tab.id}`}
-            tabIndex={tab.id === active ? 0 : -1}
-            className={tab.id === active ? 'tab tab-active' : 'tab'}
+            tabIndex={selected ? 0 : -1}
+            className={selected ? 'tab tab-active' : 'tab'}
             onClick={() => onChange(tab.id)}
             onKeyDown={(event) => {
               if (event.key === 'ArrowRight') {
@@ -54,12 +71,39 @@ export function Tabs<Id extends string>({ tabs, active, onChange, children }: Ta
                 event.preventDefault()
                 moveFocus(index, -1)
               }
+              if (event.key === 'Home') {
+                event.preventDefault()
+                moveFocus(index, -index)
+              }
+              if (event.key === 'End') {
+                event.preventDefault()
+                moveFocus(index, tabs.length - 1 - index)
+              }
             }}
           >
             {tab.label}
           </button>
-        ))}
-      </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export interface TabsProps<Id extends string> extends TabListProps<Id> {
+  readonly children: ReactNode
+}
+
+export function Tabs<Id extends string>({
+  tabs,
+  active,
+  onChange,
+  label,
+  className,
+  children,
+}: TabsProps<Id>) {
+  return (
+    <div className="tabs">
+      <TabList tabs={tabs} active={active} onChange={onChange} label={label} className={className} />
       <div
         className="tabs-panel"
         role="tabpanel"

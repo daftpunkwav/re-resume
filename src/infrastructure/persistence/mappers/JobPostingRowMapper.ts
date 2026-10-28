@@ -2,11 +2,11 @@
  * @file JobPostingRowMapper
  * @description Row conversion for job_posting. The parsed payload goes through
  * the shared envelope reader, so an unknown format is refused rather than
- * guessed at — a silently mis-parsed requirement list would reach the agent.
+ * guessed at 鈥?a silently mis-parsed requirement list would reach the agent.
  */
 
 import { parseDateTime } from '../../../domain/shared/DateTime'
-import { RowMappingError, readJsonRecordEnvelope, writeJsonEnvelope } from './JsonEnvelope'
+import { RowMappingError, readJsonRecordEnvelope, writeJsonEnvelope } from '../JsonEnvelope'
 import { asAgentRunId, asJobPostingId } from '../../../domain/shared/branded-id'
 import type { JobPosting, ParsedJobPosting } from '../../../domain/generation/JobPosting'
 

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { configDefaults, defineConfig } from 'vitest/config'
 import { playwright } from '@vitest/browser-playwright'
 import react from '@vitejs/plugin-react'
@@ -14,6 +15,17 @@ if (process.env.VITEST !== undefined && process.env.NODE_ENV === 'production') {
 }
 
 /**
+ * The package version is the one fact the About section shows about the build.
+ * Reading it here keeps the number in package.json instead of in a second place
+ * that would drift.
+ */
+const packageVersion = (
+  JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
+
+/**
  * The WebView baseline is Safari 15 on the macOS side, so the production bundle
  * is compiled down to it. Vite 8 transpiles through Oxc/Rolldown and no longer
  * exposes a top-level esbuild target, so build.target is the single place the
@@ -23,6 +35,9 @@ const webviewBaseline = 'safari15'
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageVersion),
+  },
   build: {
     target: webviewBaseline,
     outDir: 'dist',

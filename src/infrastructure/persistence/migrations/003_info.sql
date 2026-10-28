@@ -1,0 +1,1 @@
+-- Information library schema is applied by a later migration version.

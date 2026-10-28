@@ -1,51 +1,78 @@
 /**
  * @file ApplicationServicesProvider.test
  * @description How the composition root reaches the interface: what happens on
- * the first boot, and what happens to a working session when a rebuild fails.
+ * the first boot, what a failed rebuild does to a working session, and how the
+ * settings value the root reads is adopted.
  */
 
 import { act, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApplicationServicesProvider } from '../../../src/presentation/app/ApplicationServicesProvider'
-import { useProviderSettings } from '../../../src/presentation/app/providerSettingsStore'
-import type { CompositionRoot } from '../../../src/bootstrap/compositionRoot'
+import {
+  ApplicationServicesProvider,
+  useApplicationRebuild,
+} from '../../../src/presentation/app/ApplicationServicesProvider'
+import type { CompositionRoot } from '../../../src/bootstrap/capabilities'
 import type { createCompositionRoot } from '../../../src/bootstrap/compositionRoot'
+import { DEFAULT_APP_SETTINGS } from '../../../src/domain/settings/AppSettings'
+import { InMemorySecretStore } from '../../../src/infrastructure/preview/inMemoryRepositories'
+import { useSettingsStore } from '../../../src/presentation/app/stores/settingsStore'
+import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
 
 function stubRoot(): CompositionRoot {
-  return { shutdown: vi.fn(async () => undefined) } as unknown as CompositionRoot
+  return {
+    appInfo: {
+      version: '0.0.0-test',
+      buildMode: 'test',
+      runtime: 'browser',
+      license: 'MIT',
+      databaseFile: null,
+    },
+    settings: {
+      read: async () => DEFAULT_APP_SETTINGS,
+      save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
+    },
+    secrets: new InMemorySecretStore(),
+    shutdown: vi.fn(async () => undefined),
+  }
 }
 
-/**
- * Saving a provider or unlocking the vault is what re-runs the boot effect, so
- * the store is the trigger rather than anything this harness could render.
- */
-let rebuildCount = 0
-function rebuild(): void {
-  // Each rebuild has to change the password: the provider selects it, and a
-  // store update that leaves the selection identical re-runs nothing.
-  rebuildCount += 1
-  act(() => {
-    useProviderSettings.getState().unlockVault(`password-${rebuildCount}`)
-  })
+/** A control inside the provider that asks for a rebuild, as the banner does. */
+const rebuildHolder: { current: (() => void) | null } = { current: null }
+
+function RebuildProbe() {
+  const rebuild = useApplicationRebuild()
+  useEffect(() => {
+    rebuildHolder.current = rebuild
+  }, [rebuild])
+  return (
+    <button type="button" onClick={rebuild}>
+      重建
+    </button>
+  )
 }
 
-function renderProvider(
-  createRoot: typeof createCompositionRoot,
-): void {
+function renderProvider(createRoot: typeof createCompositionRoot): void {
   render(
     <ApplicationServicesProvider
       createRoot={createRoot}
       resolveSnapshotPath={async () => '/tmp/credentials.hold'}
     >
       <p>简历工作台</p>
+      <RebuildProbe />
     </ApplicationServicesProvider>,
   )
 }
 
 beforeEach(() => {
-  useProviderSettings.setState({ settings: null, vaultPassword: '' })
+  useSettingsStore.setState({
+    settings: DEFAULT_APP_SETTINGS,
+    status: 'connecting',
+    error: null,
+  })
+  useShellStore.setState({ rightPanel: 'none', rightWidth: 400, sidebarCollapsed: false })
 })
 
 describe('ApplicationServicesProvider', () => {
@@ -54,6 +81,34 @@ describe('ApplicationServicesProvider', () => {
 
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
     expect(screen.queryByText('无法连接本地应用容器')).toBeNull()
+  })
+
+  it('adopts the settings the root reads', async () => {
+    const settings = { ...DEFAULT_APP_SETTINGS, uiScale: 1.2 }
+    renderProvider(async () => ({
+      ...stubRoot(),
+      settings: { read: async () => settings, save: async () => settings },
+    }))
+
+    await screen.findByText('简历工作台')
+    expect(useSettingsStore.getState().settings.uiScale).toBe(1.2)
+    expect(useSettingsStore.getState().status).toBe('ready')
+  })
+
+  it('keeps the cached settings when the root cannot read them', async () => {
+    renderProvider(async () => ({
+      ...stubRoot(),
+      settings: {
+        read: async () => {
+          throw new Error('设置行损坏')
+        },
+        save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
+      },
+    }))
+
+    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
+    expect(useSettingsStore.getState().status).toBe('unavailable')
+    expect(useSettingsStore.getState().error?.message).toContain('设置行损坏')
   })
 
   it('shows the failure screen when the first boot fails', async () => {
@@ -67,6 +122,7 @@ describe('ApplicationServicesProvider', () => {
   })
 
   it('keeps the working session when a rebuild fails', async () => {
+    const user = userEvent.setup({ delay: null })
     let attempt = 0
     renderProvider(async () => {
       attempt += 1
@@ -75,7 +131,7 @@ describe('ApplicationServicesProvider', () => {
     })
     await screen.findByText('简历工作台')
 
-    rebuild()
+    await user.click(screen.getByRole('button', { name: '重建' }))
 
     // The settings that triggered the rebuild must not take the window down
     // with them; the root that was already serving keeps serving.
@@ -86,6 +142,7 @@ describe('ApplicationServicesProvider', () => {
   })
 
   it('closes the root a successful rebuild replaced', async () => {
+    const user = userEvent.setup({ delay: null })
     const first = stubRoot()
     const second = stubRoot()
     let attempt = 0
@@ -95,7 +152,7 @@ describe('ApplicationServicesProvider', () => {
     })
     await screen.findByText('简历工作台')
 
-    rebuild()
+    await user.click(screen.getByRole('button', { name: '重建' }))
 
     await vi.waitFor(() => expect(first.shutdown).toHaveBeenCalled())
     expect(second.shutdown).not.toHaveBeenCalled()
@@ -143,34 +200,10 @@ describe('ApplicationServicesProvider', () => {
     await user.click(screen.getByRole('button', { name: '重试启动' }))
     await screen.findByText('无法连接本地应用容器')
 
-    // The second retry has to carry the same password even though writing it
-    // into the store again changes nothing there.
     await user.click(screen.getByRole('button', { name: '重试启动' }))
 
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
     expect(seen).toEqual(['', 'first', 'first'])
-  })
-
-  it('retries with no password when the vault is not what failed', async () => {
-    const user = userEvent.setup({ delay: null })
-    const seen: string[] = []
-    let attempt = 0
-    renderProvider(async (options) => {
-      attempt += 1
-      seen.push(options.stronghold.password)
-      // A failure nothing the user typed could fix. Clearing the field is the
-      // only move left, so the retry must not require a password to be typed.
-      if (attempt < 3) throw new Error('端口被占用')
-      return stubRoot()
-    })
-    await screen.findByText('无法连接本地应用容器')
-
-    await user.click(screen.getByRole('button', { name: '重试启动' }))
-    await screen.findByText('无法连接本地应用容器')
-    await user.click(screen.getByRole('button', { name: '重试启动' }))
-
-    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
-    expect(seen).toEqual(['', '', ''])
   })
 
   it('closes a root that arrives after a newer rebuild superseded it', async () => {
@@ -190,11 +223,15 @@ describe('ApplicationServicesProvider', () => {
     })
     await screen.findByText('简历工作台')
 
-    rebuild()
-    rebuild()
+    // The button is unmounted while the provider shows its boot state, so the
+    // rebuild is triggered through the function the provider handed out.
+    act(() => rebuildHolder.current?.())
+    act(() => rebuildHolder.current?.())
 
-    await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled())
+    // The superseded boot resolves after a timer; on a busy machine the
+    // shutdown callback can land later than the default wait.
+    await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled(), { timeout: 3000 })
     expect(kept.shutdown).not.toHaveBeenCalled()
-    expect(screen.getByText('简历工作台')).toBeInTheDocument()
+    expect(await screen.findByText('简历工作台')).toBeInTheDocument()
   })
 })

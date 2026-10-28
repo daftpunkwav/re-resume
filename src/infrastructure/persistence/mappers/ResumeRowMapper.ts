@@ -1,6 +1,6 @@
 /**
  * @file ResumeRowMapper
- * @description Row ↔ aggregate mapping for the resume aggregate: the pointer
+ * @description Row 鈫?aggregate mapping for the resume aggregate: the pointer
  * row, the revision chain that doubles as its undo/redo history, and the
  * frozen snapshots. `blocks_json` carries the whole document model, so this
  * file reconstructs every block variant, layout and text style from stored
@@ -51,7 +51,7 @@ import {
   readJsonArrayEnvelope,
   readJsonRecordEnvelope,
   writeJsonEnvelope,
-} from './JsonEnvelope'
+} from '../JsonEnvelope'
 
 const BLOCK_CONTENT_TYPES = ['text', 'profile', 'experience', 'divider', 'graphic'] as const
 const RESUME_STATUSES = ['draft', 'frozen'] as const

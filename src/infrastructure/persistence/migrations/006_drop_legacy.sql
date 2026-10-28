@@ -1,0 +1,1 @@
+-- Removal of the superseded v1 tables is applied by a later migration version.

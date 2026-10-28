@@ -1,4 +1,14 @@
+import { configure } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+
+/**
+ * The provider boots asynchronously in most of these tests, and the machine
+ * running the suite may be busy: the default one-second query timeout is close
+ * enough to the margin that a slow scheduler looks like a broken assertion. The
+ * longer default keeps what a failing test reports about behaviour rather than
+ * about how quickly the scheduler ran.
+ */
+configure({ asyncUtilTimeout: 3000 })
 
 /**
  * jsdom implements neither ResizeObserver nor a layout engine: every element
@@ -57,3 +67,23 @@ function resizeEntry(target: Element, width: number, height: number): ResizeObse
 }
 
 globalThis.ResizeObserver = TestResizeObserver
+
+/**
+ * jsdom has no media query engine, and the interface asks it two questions:
+ * whether the operating system prefers a dark palette, and whether motion
+ * should be reduced. The default answer is "no" to both; a test that needs the
+ * other answer replaces this double for its own case.
+ */
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList
+}

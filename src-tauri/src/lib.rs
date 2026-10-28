@@ -12,26 +12,43 @@
 //! - The webview's reach is bounded by `capabilities/default.json5`, not by
 //!   what is registered here. Registering a plugin grants nothing on its own.
 
+mod backup;
 mod connection;
 mod export;
 
 use tauri::Manager;
 use tauri_plugin_sql::{Builder as SqlBuilder, Migration, MigrationKind};
 
-/// Connection string of the application database. Relative to Tauri's app data
-/// directory. This string must match the one the frontend passes to
-/// `Database.load`, and the one listed under `plugins.sql.preload` in
-/// tauri.conf.json: the plugin runs the migrations registered below against a
-/// connection opened with exactly this string, and a connection under any other
-/// name would start with no schema.
+/// Connection string of the application database. Relative to Tauri's app
+/// config directory, which is the directory the SQL plugin resolves it against.
+/// This string must match the one the frontend passes to `Database.load`: the
+/// plugin runs the migrations registered below against a connection opened with
+/// exactly this string, and a connection under any other name would start with
+/// no schema.
+///
+/// The SQL plugin does not preload this connection; the frontend loads it after
+/// it has asked the native side for the pre-migration backup.
 const DATABASE_URL: &str = "sqlite:re-resume.db";
 
-/// Initial schema, owned by the TypeScript layer.
+/// Schema files, owned by the TypeScript layer. Every file is compiled in rather
+/// than copied, so editing one is a build error rather than a migration that
+/// silently does not apply.
 ///
-/// The file is compiled in rather than copied so that editing it is a build
-/// error rather than a migration that silently does not apply.
+/// Version numbers are allocated once and never reused. A version whose file
+/// holds no statements yet is registered as well: the plugin's ledger records
+/// it as applied, and replacing the file's body later needs no change here.
 const MIGRATION_001_INIT: &str =
     include_str!("../../src/infrastructure/persistence/migrations/001_init.sql");
+const MIGRATION_002_SETTINGS: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/002_settings.sql");
+const MIGRATION_003_INFO: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/003_info.sql");
+const MIGRATION_004_CONVERSATION: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/004_conversation.sql");
+const MIGRATION_005_RESUME: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/005_resume.sql");
+const MIGRATION_006_DROP_LEGACY: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/006_drop_legacy.sql");
 
 /// Name of the file holding the Stronghold key-derivation salt. The salt is not
 /// a secret — it is the Argon2 parameter that makes a password produce the same
@@ -47,13 +64,49 @@ const STRONGHOLD_SALT_FILE: &str = "stronghold-salt.bin";
 /// drift. Adding a migration means adding a file under
 /// `src/infrastructure/persistence/migrations/` and an entry here with the next
 /// version number.
+///
+/// The versions above 1 are registered while their files still hold a comment
+/// only. The plugin records them as applied, so replacing a file's body later
+/// changes what a fresh install creates without touching this list.
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "initial schema",
-        sql: MIGRATION_001_INIT,
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "initial schema",
+            sql: MIGRATION_001_INIT,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "settings and provider configuration",
+            sql: MIGRATION_002_SETTINGS,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "information library",
+            sql: MIGRATION_003_INFO,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 4,
+            description: "conversation and agent runtime",
+            sql: MIGRATION_004_CONVERSATION,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "resume document",
+            sql: MIGRATION_005_RESUME,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "drop superseded tables",
+            sql: MIGRATION_006_DROP_LEGACY,
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 pub fn run() {
@@ -67,6 +120,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            backup::backup_database_once,
             connection::pin_sqlite_connection,
             export::publish_export
         ])
