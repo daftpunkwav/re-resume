@@ -1,9 +1,9 @@
-/**
+﻿/**
  * @file sqlite
  * @description The statement serialisation the connection seam is responsible
  * for. SQLite answers a second BEGIN issued while one is open with an error,
  * and it folds any statement that arrives mid-transaction into that
- * transaction — so both are exercised here rather than left to the runtime.
+ * transaction 鈥?so both are exercised here rather than left to the runtime.
  *
  * The plugin's own behaviour is modelled rather than mocked away: it keeps one
  * pool per connection string, its close command closes whichever pool is
@@ -231,7 +231,7 @@ describe('the sqlite seam over a shared database', () => {
     await expect(openSqliteDatabase(connectionString)).rejects.toThrow(/could not be opened/)
 
     const database = await openSqliteDatabase(connectionString)
-    await expect(database.select('SELECT * FROM experience')).resolves.toEqual([])
+    await expect(database.select('SELECT * FROM info_entry')).resolves.toEqual([])
 
     await database.close()
   })
@@ -246,7 +246,7 @@ describe('the sqlite seam over a shared database', () => {
     await first.close()
 
     // The second release must not have closed the pool the other root holds.
-    await expect(second.select('SELECT * FROM experience')).resolves.toEqual([])
+    await expect(second.select('SELECT * FROM info_entry')).resolves.toEqual([])
 
     await second.close()
   })
@@ -263,7 +263,7 @@ describe('the sqlite seam over a shared database', () => {
     // root with a pool every statement fails on.
     await first.close()
 
-    await expect(second.select('SELECT * FROM experience')).resolves.toEqual([])
+    await expect(second.select('SELECT * FROM info_entry')).resolves.toEqual([])
 
     await second.close()
   })
@@ -309,7 +309,7 @@ describe('the sqlite seam over a shared database', () => {
     await closing
     const database = await second
 
-    await expect(database.select('SELECT * FROM experience')).resolves.toEqual([])
+    await expect(database.select('SELECT * FROM info_entry')).resolves.toEqual([])
 
     await database.close()
   })

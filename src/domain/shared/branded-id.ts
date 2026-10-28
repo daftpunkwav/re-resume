@@ -10,8 +10,6 @@
  * Constraints:
  * - Brand values cannot be constructed by literal assignment; use the
  *   reconstruction functions below at the persistence boundary.
- * - The legacy identifiers stay until the modules that still declare them are
- *   deleted; no new code may reference them.
  */
 
 declare const brand: unique symbol
@@ -121,57 +119,4 @@ export function asToolInvocationId(raw: string): ToolInvocationId {
 
 export function asChangeRecordId(raw: string): ChangeRecordId {
   return raw as ChangeRecordId
-}
-
-/**
- * Identifiers of the v1 model that is being replaced.
- *
- * @deprecated Only the v1 modules that are deleted by their owning changes may
- * use these; the current model uses the identifiers above.
- */
-export type ExperienceId = Brand<string, 'ExperienceId'>
-
-/** @deprecated See `ExperienceId`. */
-export type VariantId = Brand<string, 'VariantId'>
-
-/** @deprecated See `ExperienceId`. */
-export type ClaimId = Brand<string, 'ClaimId'>
-
-/** @deprecated See `ExperienceId`. */
-export type BlockId = Brand<string, 'BlockId'>
-
-/** @deprecated See `ExperienceId`. */
-export type ProfileId = Brand<string, 'ProfileId'>
-
-/** @deprecated See `ExperienceId`. */
-export type AssetId = Brand<string, 'AssetId'>
-
-/** @deprecated See `ExperienceId`. */
-export function asExperienceId(raw: string): ExperienceId {
-  return raw as ExperienceId
-}
-
-/** @deprecated See `ExperienceId`. */
-export function asVariantId(raw: string): VariantId {
-  return raw as VariantId
-}
-
-/** @deprecated See `ExperienceId`. */
-export function asClaimId(raw: string): ClaimId {
-  return raw as ClaimId
-}
-
-/** @deprecated See `ExperienceId`. */
-export function asBlockId(raw: string): BlockId {
-  return raw as BlockId
-}
-
-/** @deprecated See `ExperienceId`. */
-export function asProfileId(raw: string): ProfileId {
-  return raw as ProfileId
-}
-
-/** @deprecated See `ExperienceId`. */
-export function asAssetId(raw: string): AssetId {
-  return raw as AssetId
 }

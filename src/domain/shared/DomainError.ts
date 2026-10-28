@@ -14,8 +14,8 @@
  */
 
 /**
- * The closed v2 code set. Codes are grouped the way the technical contract
- * states them: field validation, library, resume, revision chain, conversation,
+ * The closed code set. Codes are grouped the way the technical contract states
+ * them: field validation, library, resume, revision chain, conversation,
  * attachments, change log, settings and model access.
  */
 export const DOMAIN_ERROR_CODES = [
@@ -73,32 +73,6 @@ export const DOMAIN_ERROR_CODES = [
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
 
-/**
- * Codes thrown by the v1 modules that are being replaced. They stay declared
- * until those modules are deleted so that the retained code keeps compiling;
- * no current module throws them.
- *
- * @deprecated Use a code from `DOMAIN_ERROR_CODES`.
- */
-export const LEGACY_DOMAIN_ERROR_CODES = [
-  'emptyTitle',
-  'currentWithEndDate',
-  'duplicateVariantLabel',
-  'duplicateClaimStatement',
-  'duplicateBlockId',
-  'multipleProfileBlocks',
-  'frozenResumeImmutable',
-  'variantNotInExperience',
-  'variantUnconfirmed',
-  'claimRejected',
-  'claimNotFound',
-  'claimPending',
-  'referencedByBlocks',
-  'invalidClaimTransition',
-] as const
-
-export type LegacyDomainErrorCode = (typeof LEGACY_DOMAIN_ERROR_CODES)[number]
-
 export interface DomainErrorDetail {
   readonly entity: string
   readonly id: string
@@ -107,11 +81,11 @@ export interface DomainErrorDetail {
 }
 
 export class DomainError extends Error {
-  readonly code: DomainErrorCode | LegacyDomainErrorCode
+  readonly code: DomainErrorCode
   readonly detail: DomainErrorDetail | null
 
   constructor(
-    code: DomainErrorCode | LegacyDomainErrorCode,
+    code: DomainErrorCode,
     message: string,
     detail: DomainErrorDetail | null = null,
   ) {

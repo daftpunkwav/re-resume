@@ -1,7 +1,7 @@
 /**
  * @file Badge
  * @description Compact status label. Tone maps to the semantic roles, so a
- * pending claim reads the same in every palette.
+ * status label reads the same in every palette.
  */
 
 import type { ReactNode } from 'react'

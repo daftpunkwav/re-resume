@@ -16,9 +16,9 @@
  */
 
 import { isDomainError } from '../../domain/shared/DomainError'
-import type { DomainErrorCode, LegacyDomainErrorCode } from '../../domain/shared/DomainError'
+import type { DomainErrorCode } from '../../domain/shared/DomainError'
 
-const DOMAIN_MESSAGES: Readonly<Record<DomainErrorCode | LegacyDomainErrorCode, string>> = {
+const DOMAIN_MESSAGES: Readonly<Record<DomainErrorCode, string>> = {
   // Field validation.
   blankRequiredField: '必填项不能为空。',
   fieldTooLong: '内容超出长度上限，请精简后再保存。',
@@ -69,22 +69,6 @@ const DOMAIN_MESSAGES: Readonly<Record<DomainErrorCode | LegacyDomainErrorCode, 
   providerNotFound: '找不到这个模型服务配置。',
   providerNotConfigured: '模型服务尚未配置，请先在设置中填写。',
   modelCallFailed: '模型调用失败，请稍后重试。',
-
-  // Legacy codes thrown by the v1 modules that are still present.
-  emptyTitle: '标题不能为空。',
-  currentWithEndDate: '标记为「至今」的经历不能同时填写结束日期。',
-  duplicateVariantLabel: '同一经历下的表述名称不能重复。',
-  duplicateClaimStatement: '这条断言已经在当前经历中存在。',
-  duplicateBlockId: '简历中出现了重复的区块。',
-  multipleProfileBlocks: '每份简历最多只能有一个个人资料区块。',
-  frozenResumeImmutable: '这份简历已定稿，复制一份新的草稿再继续修改。',
-  variantNotInExperience: '这条表述不属于所选经历。',
-  variantUnconfirmed: '这条表述还没确认，确认后才能放进简历。',
-  claimRejected: '有断言已被拒绝，需要先更换或移除。',
-  claimNotFound: '找不到这条断言，它不属于当前经历。',
-  claimPending: '存在待确认的断言，定稿前请先确认或拒绝它们。',
-  referencedByBlocks: '仍被简历引用，请先在这些简历中解除引用。',
-  invalidClaimTransition: '这条断言当前的状态不允许这个操作。',
 }
 
 export interface ReadableError {

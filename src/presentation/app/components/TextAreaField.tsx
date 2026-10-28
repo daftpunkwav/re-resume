@@ -1,6 +1,6 @@
 /**
  * @file TextAreaField
- * @description Multi-line labeled input for variant and claim bodies.
+ * @description Multi-line labeled input for long-form text.
  */
 
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
