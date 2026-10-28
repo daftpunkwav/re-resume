@@ -3,12 +3,16 @@
  * @description Turns a thrown value into a sentence a user can act on. Domain
  * violations arrive as coded errors with the identifiers that blocked them;
  * anything else is unexpected and is reported as such rather than guessed at.
+ * A failed boot is the one case where the interface can only show the reason:
+ * its rejection comes from a native plugin, so it has its own reader below
+ * instead of the generic sentence used for an operation that failed.
  *
  * Constraints:
  * - Every code in the closed set has a message; a code without one would reach
  *   the interface as `undefined`.
- * - Messages describe what was refused and what to do next, not which module
- *   threw.
+ * - Messages for refused operations describe what was refused and what to do
+ *   next, not which module threw. A boot reason is the exception: the native
+ *   rejection is the only diagnostic the user can pass on.
  */
 
 import { isDomainError } from '../../domain/shared/DomainError'
@@ -100,4 +104,31 @@ export function describeError(error: unknown): ReadableError {
     return { message: error.message, blockers: [] }
   }
   return { message: '操作没有完成，请重试。', blockers: [] }
+}
+
+/**
+ * The reason a boot failed, read from the value the native container rejected
+ * with. Native plugins reject with a string or a plain `{ message }` /
+ * `{ error }` object rather than an `Error`, so a reader that understands only
+ * `Error` reports an unknown cause for the failures a user most needs to read.
+ * Nothing is translated here: the plugin's message is the only diagnostic
+ * available, and the failure screen shows it as it is.
+ */
+export function describeBootFailure(thrown: unknown): string {
+  if (thrown instanceof Error) return thrown.message
+  if (typeof thrown === 'string') return thrown
+  if (typeof thrown === 'object' && thrown !== null) {
+    const rejection = thrown as Record<string, unknown>
+    if (typeof rejection.message === 'string') return rejection.message
+    if (typeof rejection.error === 'string') return rejection.error
+  }
+  try {
+    const serialised = JSON.stringify(thrown)
+    // JSON.stringify returns undefined for the values JSON cannot represent
+    // (undefined, functions, symbols); String is the last resort for those.
+    return typeof serialised === 'string' ? serialised : String(thrown)
+  } catch {
+    // Cycles and BigInt values make the serialisation itself throw.
+    return String(thrown)
+  }
 }

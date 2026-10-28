@@ -121,6 +121,19 @@ describe('ApplicationServicesProvider', () => {
     expect(screen.queryByText('简历工作台')).toBeNull()
   })
 
+  it('shows a plugin rejection reason instead of an unknown cause', async () => {
+    // A native rejection can be a string rather than an Error, and that string
+    // is the only diagnostic the user can read or report.
+    const rejection = 'error returned from database: unable to open database file'
+    renderProvider(async () => {
+      throw rejection
+    })
+
+    expect(await screen.findByText('无法连接本地应用容器')).toBeInTheDocument()
+    expect(screen.getByText(rejection)).toBeInTheDocument()
+    expect(screen.queryByText('未知原因')).toBeNull()
+  })
+
   it('keeps the working session when a rebuild fails', async () => {
     const user = userEvent.setup({ delay: null })
     let attempt = 0
