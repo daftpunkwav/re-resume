@@ -24,6 +24,8 @@ export type UndoScope = 'library' | 'resume'
 export type WorkspaceSignal =
   | { readonly kind: 'agentEvent'; readonly event: AgentEvent }
   | { readonly kind: 'changesUndone'; readonly scope: UndoScope }
+  /** The open turn stopped, whatever ended it; no UI marker may outlive it. */
+  | { readonly kind: 'runSettled' }
 
 export type WorkspaceSignalListener = (signal: WorkspaceSignal) => void
 

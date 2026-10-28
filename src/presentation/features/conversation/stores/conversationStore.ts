@@ -360,6 +360,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     messageGeneration += 1
     attachmentGeneration += 1
     useRunStore.getState().reset()
+    publishWorkspaceSignal({ kind: 'runSettled' })
     set({
       activeId: null,
       draft: true,
@@ -378,6 +379,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (current === null) return
     messageGeneration += 1
     useRunStore.getState().reset()
+    publishWorkspaceSignal({ kind: 'runSettled' })
     set({
       activeId: conversationId,
       draft: false,
@@ -674,6 +676,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     } finally {
       const started = useRunStore.getState().started
       useRunStore.getState().finish()
+      publishWorkspaceSignal({ kind: 'runSettled' })
       await Promise.all([get().loadMessagesFor(conversationId), get().loadConversations()])
       if (started) set({ pendingUser: null })
     }
@@ -708,6 +711,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       set({ error: describeError(failure) })
     } finally {
       useRunStore.getState().finish()
+      publishWorkspaceSignal({ kind: 'runSettled' })
       await Promise.all([get().loadMessagesFor(conversationId), get().loadConversations()])
     }
   },

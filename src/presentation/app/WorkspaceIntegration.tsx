@@ -92,8 +92,17 @@ function applyAgentEvent(services: CompositionRoot, event: AgentEvent): void {
 }
 
 function applySignal(services: CompositionRoot, signal: WorkspaceSignal): void {
-  if (signal.kind === 'agentEvent') applyAgentEvent(services, signal.event)
-  else applyUndo(signal.scope)
+  if (signal.kind === 'agentEvent') {
+    applyAgentEvent(services, signal.event)
+    return
+  }
+  if (signal.kind === 'runSettled') {
+    // A turn can end without a done event (a throwing provider, a cancelled
+    // stream); the marker belongs to the turn, so settling always clears it.
+    useResumeStore.getState().setAgentBusy(false)
+    return
+  }
+  applyUndo(signal.scope)
 }
 
 export function WorkspaceIntegration() {
