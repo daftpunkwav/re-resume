@@ -106,60 +106,24 @@ export interface UndoAgentChangeOutput {
   readonly undone: readonly string[]
 }
 
+type LibraryChangeInverseWriter = ReturnType<typeof createLibraryChangeInverseWriter>
+
+type UndoAgentChangeDeps = Pick<
+  ToolPackDeps,
+  'changes' | 'entries' | 'customModules' | 'resumes' | 'clock'
+>
+
 /**
  * Reverses the agent writes a tool card names. Library changes are undone newest
  * first; a resume revision is undone only while it is the cursor.
  */
 export async function undoAgentChange(
-  deps: Pick<
-    ToolPackDeps,
-    'changes' | 'entries' | 'customModules' | 'resumes' | 'clock'
-  >,
+  deps: UndoAgentChangeDeps,
   input: UndoAgentChangeInput,
 ): Promise<UndoAgentChangeOutput> {
-  const undone: string[] = []
-  const inverse = createLibraryChangeInverseWriter({
-    changes: deps.changes,
-    entries: deps.entries,
-    customModules: deps.customModules,
-    clock: deps.clock,
-  })
-  for (const changeId of [...(input.changeIds ?? [])].reverse()) {
-    const record = await deps.changes.findById(changeId)
-    if (record === null) {
-      throw new DomainError('changeNotFound', '要撤销的修改记录不存在。', {
-        entity: 'changeRecord',
-        id: changeId,
-        blockers: [changeId],
-      })
-    }
-    if (record.origin !== 'agent') {
-      throw new DomainError('changeOutOfOrder', '只能撤销 Agent 产生的修改。', {
-        entity: 'changeRecord',
-        id: changeId,
-        blockers: [changeId],
-      })
-    }
-    const undoneRecord = await undoLibraryChange(
-      { changes: deps.changes, inverse, clock: deps.clock },
-      { changeId },
-    )
-    undone.push(undoneRecord.label)
-  }
-  if (input.revisionId !== undefined) {
-    if (input.resumeId === undefined) {
-      throw new DomainError('blankRequiredField', '撤销简历修订需要提供简历标识。', {
-        entity: 'resume',
-        id: '',
-        blockers: ['resumeId'],
-      })
-    }
-    const result = await undoRevision(deps, {
-      resumeId: input.resumeId,
-      revisionId: input.revisionId,
-    })
-    undone.push(result.label)
-  }
+  const undone = await undoLibraryChanges(deps, input.changeIds ?? [])
+  const revisionLabel = await undoRevisionTarget(deps, input)
+  if (revisionLabel !== null) undone.push(revisionLabel)
   if (undone.length === 0) {
     throw new DomainError('blankRequiredField', '没有指定要撤销的修改。', {
       entity: 'changeRecord',
@@ -168,6 +132,76 @@ export async function undoAgentChange(
     })
   }
   return { undone }
+}
+
+/** Undoes a batch of library changes newest-first and returns their labels. */
+async function undoLibraryChanges(
+  deps: UndoAgentChangeDeps,
+  changeIds: readonly ChangeRecordId[],
+): Promise<string[]> {
+  if (changeIds.length === 0) return []
+  const inverse = createInverseWriter(deps)
+  const undone: string[] = []
+  for (const changeId of [...changeIds].reverse()) {
+    undone.push(await undoOneLibraryChange(deps, inverse, changeId))
+  }
+  return undone
+}
+
+function createInverseWriter(deps: UndoAgentChangeDeps): LibraryChangeInverseWriter {
+  return createLibraryChangeInverseWriter({
+    changes: deps.changes,
+    entries: deps.entries,
+    customModules: deps.customModules,
+    clock: deps.clock,
+  })
+}
+
+async function undoOneLibraryChange(
+  deps: UndoAgentChangeDeps,
+  inverse: LibraryChangeInverseWriter,
+  changeId: ChangeRecordId,
+): Promise<string> {
+  const record = await deps.changes.findById(changeId)
+  if (record === null) {
+    throw new DomainError('changeNotFound', '要撤销的修改记录不存在。', {
+      entity: 'changeRecord',
+      id: changeId,
+      blockers: [changeId],
+    })
+  }
+  if (record.origin !== 'agent') {
+    throw new DomainError('changeOutOfOrder', '只能撤销 Agent 产生的修改。', {
+      entity: 'changeRecord',
+      id: changeId,
+      blockers: [changeId],
+    })
+  }
+  const undoneRecord = await undoLibraryChange(
+    { changes: deps.changes, inverse, clock: deps.clock },
+    { changeId },
+  )
+  return undoneRecord.label
+}
+
+/** The resume part of an undo request, or null when it names no revision. */
+async function undoRevisionTarget(
+  deps: UndoAgentChangeDeps,
+  input: UndoAgentChangeInput,
+): Promise<string | null> {
+  if (input.revisionId === undefined) return null
+  if (input.resumeId === undefined) {
+    throw new DomainError('blankRequiredField', '撤销简历修订需要提供简历标识。', {
+      entity: 'resume',
+      id: '',
+      blockers: ['resumeId'],
+    })
+  }
+  const result = await undoRevision(deps, {
+    resumeId: input.resumeId,
+    revisionId: input.revisionId,
+  })
+  return result.label
 }
 
 export function createUndoTools(deps: ToolPackDeps): readonly ToolDefinition<unknown>[] {
@@ -184,41 +218,58 @@ export function createUndoTools(deps: ToolPackDeps): readonly ToolDefinition<unk
       }),
       execute: (input, _context: ToolContext) =>
         executeSafely(async () => {
-          if (input.target === 'library') {
-            if (input.changeId === undefined) {
-              throw new DomainError('blankRequiredField', '撤销信息库变更需要提供 changeId。', {
-                entity: 'changeRecord',
-                id: '',
-                blockers: ['changeId'],
-              })
-            }
-            const result = await undoAgentChange(deps, {
-              changeIds: [asChangeRecordId(input.changeId)],
-            })
-            return { undone: true, label: result.undone[0] ?? '' }
-          }
-          if (input.resumeId === undefined) {
-            throw new DomainError('blankRequiredField', '撤销简历修订需要提供 resumeId。', {
-              entity: 'resume',
-              id: '',
-              blockers: ['resumeId'],
-            })
-          }
-          const resumeId = asResumeId(input.resumeId)
-          const resume = await deps.resumes.findById(resumeId)
-          if (resume === null) {
-            throw new DomainError('resumeNotFound', 'The resume does not exist.', {
-              entity: 'resume',
-              id: resumeId,
-              blockers: [resumeId],
-            })
-          }
-          const result = await undoAgentChange(deps, {
-            resumeId,
-            revisionId: asRevisionId(resume.currentRevision),
-          })
-          return { undone: true, label: result.undone[0] ?? '' }
+          const label =
+            input.target === 'library'
+              ? await undoLibraryTarget(deps, input.changeId)
+              : await undoResumeTarget(deps, input.resumeId)
+          return { undone: true, label }
         }),
     }),
   ]
+}
+
+/** The tool's library target: one change record named by the model. */
+async function undoLibraryTarget(
+  deps: ToolPackDeps,
+  changeId: string | undefined,
+): Promise<string> {
+  if (changeId === undefined) {
+    throw new DomainError('blankRequiredField', '撤销信息库变更需要提供 changeId。', {
+      entity: 'changeRecord',
+      id: '',
+      blockers: ['changeId'],
+    })
+  }
+  const result = await undoAgentChange(deps, {
+    changeIds: [asChangeRecordId(changeId)],
+  })
+  return result.undone[0] ?? ''
+}
+
+/** The tool's resume target: the current revision of the named resume. */
+async function undoResumeTarget(
+  deps: ToolPackDeps,
+  resumeId: string | undefined,
+): Promise<string> {
+  if (resumeId === undefined) {
+    throw new DomainError('blankRequiredField', '撤销简历修订需要提供 resumeId。', {
+      entity: 'resume',
+      id: '',
+      blockers: ['resumeId'],
+    })
+  }
+  const brandedResumeId = asResumeId(resumeId)
+  const resume = await deps.resumes.findById(brandedResumeId)
+  if (resume === null) {
+    throw new DomainError('resumeNotFound', 'The resume does not exist.', {
+      entity: 'resume',
+      id: brandedResumeId,
+      blockers: [brandedResumeId],
+    })
+  }
+  const result = await undoAgentChange(deps, {
+    resumeId: brandedResumeId,
+    revisionId: asRevisionId(resume.currentRevision),
+  })
+  return result.undone[0] ?? ''
 }

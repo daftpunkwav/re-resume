@@ -73,44 +73,80 @@ function renderResumeSummary(
   summary: ResumeSummary,
   options: SummaryRenderOptions,
 ): string {
+  return [
+    ...headerLines(summary),
+    ...sectionLines(summary, options.includeTitles),
+    ...overrideLines(summary, options.overrideLimit),
+  ].join('\n')
+}
+
+/** The metadata lines that stay in every variant of the summary block. */
+function headerLines(summary: ResumeSummary): string[] {
   const template = getTemplate(summary.templateId)
-  const lines: string[] = [
-    `简历：${summary.title}（${summary.status === 'frozen' ? '已冻结' : '草稿'}）`,
+  const status = summary.status === 'frozen' ? '已冻结' : '草稿'
+  const columns = summary.pageSetup.columns === 1 ? '单栏' : '双栏'
+  const pageNumber = summary.pageSetup.showPageNumber ? '开启' : '关闭'
+  return [
+    `简历：${summary.title}（${status}）`,
     `目标岗位：${describeTargetJob(summary)}`,
     `模板：${template?.name ?? summary.templateId}`,
-    `页面：${summary.pageSetup.paper}，${summary.pageSetup.columns === 1 ? '单栏' : '双栏'}，页码${summary.pageSetup.showPageNumber ? '开启' : '关闭'}`,
+    `页面：${summary.pageSetup.paper}，${columns}，页码${pageNumber}`,
     `缺失引用：${summary.missingReferences.length.toString()} 项；自由块：${summary.freeBlockCount.toString()} 个`,
   ]
-  if (summary.sections.length === 0) {
-    lines.push('章节：无')
-  } else {
-    lines.push('章节：')
-    const titlesBySection = new Map(
-      summary.selectedEntryTitles.map((entry) => [entry.sectionId, entry.titles]),
-    )
-    for (const section of summary.sections) {
-      const name = sectionName(summary, section.sectionId) ?? section.moduleKind
-      const titles = titlesBySection.get(section.sectionId) ?? []
-      const suffix = section.visible ? '' : '，隐藏'
-      const titleText =
-        options.includeTitles && titles.length > 0 ? `：${titles.join('、')}` : ''
-      lines.push(`- ${name}（${section.entryIds.length.toString()} 条${suffix}）${titleText}`)
-    }
-  }
-  if (summary.overrides.length > 0) {
-    lines.push('定制文案：')
-    for (const override of summary.overrides) {
-      const target =
-        override.target.kind === 'summary' ? '岗位总结' : `条目 ${override.target.entryId}`
-      const origin = override.origin === 'agent' ? 'Agent 生成' : '用户撰写'
-      const text =
-        options.overrideLimit === null
-          ? override.text
-          : truncateCodePoints(override.text, options.overrideLimit)
-      lines.push(`- ${target}（${origin}${override.editedByUser ? '，已人工修改' : ''}）：${text}`)
-    }
-  }
-  return lines.join('\n')
+}
+
+/** The chapter lines, including the selected titles when the variant keeps them. */
+function sectionLines(summary: ResumeSummary, includeTitles: boolean): string[] {
+  if (summary.sections.length === 0) return ['章节：无']
+  const titlesBySection = selectedTitlesBySection(summary)
+  const lines = summary.sections.map((section) =>
+    sectionLine(summary, section, titlesBySection.get(section.sectionId) ?? [], includeTitles),
+  )
+  return ['章节：', ...lines]
+}
+
+function selectedTitlesBySection(
+  summary: ResumeSummary,
+): Map<ResumeSummary['sections'][number]['sectionId'], readonly string[]> {
+  return new Map(summary.selectedEntryTitles.map((entry) => [entry.sectionId, entry.titles]))
+}
+
+function sectionLine(
+  summary: ResumeSummary,
+  section: ResumeSummary['sections'][number],
+  titles: readonly string[],
+  includeTitles: boolean,
+): string {
+  const name = sectionName(summary, section.sectionId) ?? section.moduleKind
+  const suffix = section.visible ? '' : '，隐藏'
+  const titleText = includeTitles ? titleSuffix(titles) : ''
+  return `- ${name}（${section.entryIds.length.toString()} 条${suffix}）${titleText}`
+}
+
+function titleSuffix(titles: readonly string[]): string {
+  return titles.length === 0 ? '' : `：${titles.join('、')}`
+}
+
+/** The tailored-text lines; an override limit shortens each text. */
+function overrideLines(summary: ResumeSummary, overrideLimit: number | null): string[] {
+  if (summary.overrides.length === 0) return []
+  const lines = summary.overrides.map((override) => overrideLine(override, overrideLimit))
+  return ['定制文案：', ...lines]
+}
+
+function overrideLine(
+  override: ResumeSummary['overrides'][number],
+  overrideLimit: number | null,
+): string {
+  const target =
+    override.target.kind === 'summary' ? '岗位总结' : `条目 ${override.target.entryId}`
+  const origin = override.origin === 'agent' ? 'Agent 生成' : '用户撰写'
+  const edited = override.editedByUser ? '，已人工修改' : ''
+  const text =
+    overrideLimit === null
+      ? override.text
+      : truncateCodePoints(override.text, overrideLimit)
+  return `- ${target}（${origin}${edited}）：${text}`
 }
 
 function sectionName(
@@ -142,23 +178,60 @@ export function buildLibraryOverviewBlock(
   totalEntries: number,
 ): string {
   const budget = CONTEXT_BLOCK_TOKEN_BUDGET.libraryOverview
-  const modules = orderModules(customModules).map((module) => ({
+  const modules = buildOverviewModules(entriesByModule, customModules)
+  const titleFit = fitTitles(modules, totalEntries, budget)
+  if (titleFit.rendered !== null) return titleFit.rendered
+  return dropModules(modules, totalEntries, budget, titleFit.trimmedTitles)
+}
+
+function buildOverviewModules(
+  entriesByModule: ReadonlyMap<string, readonly string[]>,
+  customModules: readonly CustomModuleDefinition[],
+): OverviewModule[] {
+  return orderModules(customModules).map((module) => ({
     ...module,
     titles: (entriesByModule.get(moduleKey(module.kind, module.customModuleId)) ?? []).slice(
       0,
       LIBRARY_OVERVIEW_TITLES_PER_MODULE,
     ),
   }))
+}
+
+interface TitleFit {
+  /** The fitted block, or null when the titled variant cannot fit at all. */
+  readonly rendered: string | null
+  readonly trimmedTitles: boolean
+}
+
+/**
+ * The first trimming phase: give up one title from the last module that still
+ * has more than the floor, until the rendered block fits or no title is left.
+ */
+function fitTitles(
+  modules: OverviewModule[],
+  totalEntries: number,
+  budget: number,
+): TitleFit {
   let trimmedTitles = false
   for (;;) {
-    if (fitsWithNote(renderOverview(modules, totalEntries), trimmedTitles, budget)) {
-      return withTrimNote(renderOverview(modules, totalEntries), trimmedTitles)
+    const rendered = renderOverview(modules, totalEntries)
+    if (fitsWithNote(rendered, trimmedTitles, budget)) {
+      return { rendered: withTrimNote(rendered, trimmedTitles), trimmedTitles }
     }
     const target = lastModuleWithSpareTitles(modules)
-    if (target === -1) break
+    if (target === -1) return { rendered: null, trimmedTitles }
     modules[target]?.titles.pop()
     trimmedTitles = true
   }
+}
+
+/** The second trimming phase: omit whole module lines from the end. */
+function dropModules(
+  modules: readonly OverviewModule[],
+  totalEntries: number,
+  budget: number,
+  trimmedTitles: boolean,
+): string {
   let kept = modules
   let omittedModules = false
   while (kept.length > 0) {
