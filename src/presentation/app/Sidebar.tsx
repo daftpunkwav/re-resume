@@ -19,6 +19,7 @@ import { ConversationList } from '../features/conversation/ConversationList'
 import { describeProviderStatus } from './providerStatus'
 import { useSettingsStore } from './stores/settingsStore'
 import { useShellStore } from './stores/shellStore'
+import { useLayoutTier } from './useLayoutTier'
 
 export interface SidebarProps {
   readonly collapsed: boolean
@@ -26,7 +27,9 @@ export interface SidebarProps {
 
 export function Sidebar({ collapsed }: SidebarProps) {
   const rightPanel = useShellStore((state) => state.rightPanel)
+  const setRightPanel = useShellStore((state) => state.setRightPanel)
   const togglePanel = useShellStore((state) => state.togglePanel)
+  const tier = useLayoutTier()
   const toggleSidebar = useShellStore((state) => state.toggleSidebar)
   const startNewConversation = useShellStore((state) => state.startNewConversation)
   const openSettings = useShellStore((state) => state.openSettings)
@@ -37,6 +40,15 @@ export function Sidebar({ collapsed }: SidebarProps) {
   const status = describeProviderStatus(activeProviderId)
   const infoVisible = rightPanel === 'info' || rightPanel === 'both'
   const resumeVisible = rightPanel === 'resume' || rightPanel === 'both'
+  // Below the compact breakpoint the dock is a drawer that shows one panel at a
+  // time, so the entries select rather than compose a two-pane dock.
+  const selectPanel = (panel: 'info' | 'resume'): void => {
+    if (tier !== 'compact') {
+      togglePanel(panel)
+      return
+    }
+    setRightPanel(rightPanel === panel ? 'none' : panel)
+  }
 
   return (
     <aside
@@ -85,7 +97,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             className={infoVisible ? 'sidebar-item sidebar-item-active' : 'sidebar-item'}
             aria-label="简历信息"
             aria-pressed={infoVisible}
-            onClick={() => togglePanel('info')}
+            aria-controls="panel-dock"
+            aria-expanded={infoVisible}
+            onClick={() => selectPanel('info')}
           >
             <Icon name="id-card" size={16} />
             {collapsed ? null : <span className="sidebar-item-label">简历信息</span>}
@@ -97,7 +111,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             className={resumeVisible ? 'sidebar-item sidebar-item-active' : 'sidebar-item'}
             aria-label="简历创作"
             aria-pressed={resumeVisible}
-            onClick={() => togglePanel('resume')}
+            aria-controls="panel-dock"
+            aria-expanded={resumeVisible}
+            onClick={() => selectPanel('resume')}
           >
             <Icon name="pen" size={16} />
             {collapsed ? null : <span className="sidebar-item-label">简历创作</span>}
