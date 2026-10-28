@@ -256,6 +256,57 @@ function orderedIds(order: readonly OrderEntry[]): readonly string[] {
   return [...order].sort((left, right) => left.sortOrder - right.sortOrder).map((entry) => entry.id)
 }
 
+/**
+ * Undoes a recorded entry write: when the row is gone the inverse inserts the
+ * recorded state, otherwise it rewrites it. The direction is decided by what is
+ * stored now, so a create and a delete share the same path.
+ */
+async function restoreInfoEntry(
+  deps: LibraryChangeInverseWriterDeps,
+  beforeJson: string,
+  entityId: string,
+): Promise<void> {
+  const what = `before 数据（infoEntry ${entityId}）`
+  const entry = parseEntry(decodeJson(beforeJson, null, what), what)
+  const record = await liveRecord(deps, 'infoEntry', entityId)
+  const current = await deps.entries.findById(entry.id)
+  const stamp = stamped(record, deps)
+  if (current === null) {
+    await deps.entries.insert(entry, stamp)
+    return
+  }
+  await deps.entries.update(entry, stamp)
+}
+
+/** Undoes a recorded module write, restoring the definition and any cleared values. */
+async function restoreCustomModuleDefinition(
+  deps: LibraryChangeInverseWriterDeps,
+  beforeJson: string,
+  entityId: string,
+): Promise<void> {
+  const what = `before 数据（customModule ${entityId}）`
+  const payload = decodeJson(beforeJson, null, what)
+  if (!isRecord(payload)) throw corrupt(null, what)
+  const module = parseCustomModule(payload.module, what)
+  const cleared = parseClearedValues(payload.clearedValues, what)
+  const record = await liveRecord(deps, 'customModule', entityId)
+  const current = await deps.customModules.findById(module.id)
+  const stamp = stamped(record, deps)
+  if (current === null) {
+    await deps.customModules.insert(module, stamp)
+    return
+  }
+  await deps.customModules.update(
+    module,
+    cleared.map((value) => ({
+      entryId: value.entryId,
+      fieldKey: value.fieldKey,
+      restoredValue: value.value,
+    })),
+    stamp,
+  )
+}
+
 export function createLibraryChangeInverseWriter(
   deps: LibraryChangeInverseWriterDeps,
 ): LibraryChangeInverseWriter {
@@ -281,38 +332,12 @@ export function createLibraryChangeInverseWriter(
     },
 
     async restoreEntity(entity, entityId, beforeJson) {
-      const what = `before 数据（${entity} ${entityId}）`
       if (entity === 'infoEntry') {
-        const entry = parseEntry(decodeJson(beforeJson, null, what), what)
-        const record = await liveRecord(deps, entity, entityId)
-        const current = await deps.entries.findById(entry.id)
-        if (current === null) {
-          await deps.entries.insert(entry, stamped(record, deps))
-        } else {
-          await deps.entries.update(entry, stamped(record, deps))
-        }
+        await restoreInfoEntry(deps, beforeJson, entityId)
         return
       }
       if (entity === 'customModule') {
-        const payload = decodeJson(beforeJson, null, what)
-        if (!isRecord(payload)) throw corrupt(null, what)
-        const module = parseCustomModule(payload.module, what)
-        const cleared = parseClearedValues(payload.clearedValues, what)
-        const record = await liveRecord(deps, entity, entityId)
-        const current = await deps.customModules.findById(module.id)
-        if (current === null) {
-          await deps.customModules.insert(module, stamped(record, deps))
-        } else {
-          await deps.customModules.update(
-            module,
-            cleared.map((value) => ({
-              entryId: value.entryId,
-              fieldKey: value.fieldKey,
-              restoredValue: value.value,
-            })),
-            stamped(record, deps),
-          )
-        }
+        await restoreCustomModuleDefinition(deps, beforeJson, entityId)
         return
       }
       throw new Error(`No persistence port can restore a "${entity}" row.`)
