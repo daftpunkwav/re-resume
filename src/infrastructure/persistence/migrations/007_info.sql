@@ -1,6 +1,13 @@
 -- Information library: custom module definitions, their entries, and the
 -- append-only change log that makes every library write reversible.
 --
+-- Why this schema is version 7: version 3 was registered while its file held
+-- only a comment, and once a database records a version its body is immutable —
+-- the plugin's ledger validates the checksum of every recorded version, so
+-- editing an applied file makes the next open fail instead of applying the new
+-- statements. The library schema therefore ships as a new version, and version 3
+-- stays byte-identical to what those databases recorded.
+--
 -- Why these three tables share one migration version: the change log is the
 -- transaction partner of every library write (spec sections 4.10 and 8.6), so a
 -- migration that created the entities without the log could not record a single
