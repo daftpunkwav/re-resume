@@ -10,6 +10,10 @@
  * only applying the files in order shows that. Nothing here simulates the
  * plugin: the files are the input and SQLite is the judge.
  *
+ * The version map is forward-only. Versions 3 to 6 were registered while their
+ * files were empty placeholders; their bodies stay empty, and the information
+ * library schema ships as version 7.
+ *
  * Constraints:
  * - Each test opens a temporary file, because the plugin migrates a file on
  *   disk and the assertion has to hold for that file, not for a memory
@@ -36,6 +40,7 @@ const MIGRATION_FILES = [
   '004_conversation.sql',
   '005_resume.sql',
   '006_drop_legacy.sql',
+  '007_info.sql',
 ] as const
 
 const scratchDirectories: string[] = []
@@ -181,6 +186,37 @@ INSERT INTO provider_config (
   ).toThrow()
 }
 
+/**
+ * The information library schema added at version 7: the columns the row
+ * mappers read and the empty starting state.
+ */
+function expectInformationLibrarySchema(database: DatabaseSync): void {
+  expect(columnNames(database, 'custom_module')).toEqual([
+    'id',
+    'name',
+    'fields_json',
+    'sort_order',
+    'created_at',
+    'updated_at',
+  ])
+  expect(columnNames(database, 'info_entry')).toEqual([
+    'id',
+    'module_kind',
+    'custom_module_id',
+    'title',
+    'fields_json',
+    'sort_order',
+    'origin',
+    'source_run_id',
+    'created_at',
+    'updated_at',
+  ])
+  expect(columnNames(database, 'change_record')).toContain('before_json')
+  expect(countRows(database, 'custom_module')).toBe(0)
+  expect(countRows(database, 'info_entry')).toBe(0)
+  expect(countRows(database, 'change_record')).toBe(0)
+}
+
 describe('migrations applied in order', () => {
   it('upgrades a database that already holds the v1 schema', () => {
     const database = openScratchDatabase()
@@ -190,11 +226,12 @@ describe('migrations applied in order', () => {
 
     const applied = applyMigrations(database, MIGRATION_FILES.slice(1))
 
-    expect(applied).toEqual([2, 3, 4, 5, 6])
+    expect(applied).toEqual([2, 3, 4, 5, 6, 7])
     // The v2 provider table replaces the legacy one rather than living beside
     // it: the old row has no fields the v2 shape could carry over.
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
+    expectInformationLibrarySchema(database)
     // Replacing one table must not take the rest of the v1 data with it; the
     // removal of the legacy tables is version 6's work, not version 2's.
     expect(countRows(database, 'experience')).toBe(1)
@@ -205,9 +242,10 @@ describe('migrations applied in order', () => {
   it('creates the v2 schema on a fresh database', () => {
     const database = openScratchDatabase()
 
-    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7])
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
+    expectInformationLibrarySchema(database)
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 })

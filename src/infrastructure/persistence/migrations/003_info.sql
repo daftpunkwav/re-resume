@@ -1,1 +1,10 @@
--- Information library schema is applied by a later migration version.
+-- The information library schema is applied at version 7.
+--
+-- This file was registered empty as version 3, and an already-applied
+-- migration's body is immutable: the plugin's ledger validates the checksum of
+-- every version a database recorded, so replacing an applied body makes the
+-- next open fail instead of applying the new statements. The schema therefore
+-- ships as the new version 7, and this version stays comment-only forever.
+--
+-- A database that recorded version 3 recorded this file as applied and will
+-- apply nothing here; the tables arrive with version 7.

@@ -22,13 +22,18 @@ import type { Clock } from '../domain/shared/Clock'
 import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService } from './wiring/appSettings'
+import { createInfoService } from './wiring/info'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
 import { SqliteAppSettingsRepository } from '../infrastructure/persistence/settings/SqliteAppSettingsRepository'
+import { SqliteCustomModuleRepository } from '../infrastructure/persistence/info/SqliteCustomModuleRepository'
+import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/SqliteInfoEntryRepository'
+import { NoResumeEntryReferences } from '../infrastructure/persistence/info/NoResumeEntryReferences'
 import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecretStore'
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { SystemClock } from '../infrastructure/platform/systemClock'
+import { RandomIdGenerator } from '../infrastructure/platform/randomIdGenerator'
 
 /**
  * Connection string of the application database. Must match the one the native
@@ -100,10 +105,20 @@ export async function createCompositionRoot(
 
   try {
     const settingsRepository = new SqliteAppSettingsRepository(database, clock)
+    const customModuleRepository = new SqliteCustomModuleRepository(database)
+    const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
+    const ids = new RandomIdGenerator()
     const databaseFile = await resolveDatabaseFile()
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
       settings: createAppSettingsService({ repository: settingsRepository }),
+      info: createInfoService({
+        entries: infoEntries,
+        customModules: customModuleRepository,
+        references: new NoResumeEntryReferences(),
+        clock,
+        ids,
+      }),
       secrets: new StrongholdSecretStore(options.stronghold),
       shutdown: async (): Promise<void> => {
         await database.close()

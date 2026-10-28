@@ -20,6 +20,7 @@ import { DEFAULT_APP_SETTINGS } from '../../../src/domain/settings/AppSettings'
 import { InMemorySecretStore } from '../../../src/infrastructure/preview/inMemoryRepositories'
 import { useSettingsStore } from '../../../src/presentation/app/stores/settingsStore'
 import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
+import { stubCompositionRoot } from '../../support/stubCompositionRoot'
 
 function stubRoot(): CompositionRoot {
   return {
@@ -34,6 +35,7 @@ function stubRoot(): CompositionRoot {
       read: async () => DEFAULT_APP_SETTINGS,
       save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
     },
+    info: stubCompositionRoot().info,
     secrets: new InMemorySecretStore(),
     shutdown: vi.fn(async () => undefined),
   }
