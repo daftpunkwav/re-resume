@@ -42,13 +42,23 @@ describe('migrations', () => {
     expect(settings).toContain('WHERE is_active = 1')
   })
 
-  it('reserves versions 3 to 6 as comment-only placeholders', () => {
-    for (const name of [
-      '003_info.sql',
-      '004_conversation.sql',
-      '005_resume.sql',
-      '006_drop_legacy.sql',
-    ]) {
+  it('creates the information library tables at version 3', () => {
+    const info = readMigration('003_info.sql')
+    expect(info).toContain('CREATE TABLE custom_module')
+    expect(info).toContain('CREATE TABLE info_entry')
+    expect(info).toContain('CREATE TABLE change_record')
+    // The module owns its entries; the resume side deliberately has no FK here.
+    expect(info).toContain('REFERENCES custom_module (id) ON DELETE CASCADE')
+    expect(info).toContain("CHECK ((module_kind = 'custom') = (custom_module_id IS NOT NULL))")
+    expect(info).toContain('CREATE UNIQUE INDEX idx_info_entry_order')
+    // SQLite treats NULL values as distinct in a unique index; the module scope
+    // must read a built-in module's missing module id as one value.
+    expect(info).toContain("IFNULL(custom_module_id, '')")
+    expect(info).toContain('CREATE INDEX idx_change_entity')
+  })
+
+  it('reserves versions 4 to 6 as comment-only placeholders', () => {
+    for (const name of ['004_conversation.sql', '005_resume.sql', '006_drop_legacy.sql']) {
       expect(executableStatements(readMigration(name)), `${name} must stay empty`).toBe('')
     }
   })
