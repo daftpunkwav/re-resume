@@ -23,6 +23,7 @@ export type ShortcutAction =
   | { readonly kind: 'newConversation' }
   | { readonly kind: 'toggleSettings' }
   | { readonly kind: 'togglePanel' }
+  | { readonly kind: 'focusInfoSearch' }
   | { readonly kind: 'focusDomain'; readonly domain: FocusDomain }
   | { readonly kind: 'scale'; readonly direction: 1 | -1 }
   | { readonly kind: 'resetScale' }
@@ -31,6 +32,7 @@ export interface ShortcutHandlers {
   readonly newConversation: () => void
   readonly toggleSettings: () => void
   readonly togglePanel: () => void
+  readonly focusInfoSearch: () => void
   readonly focusDomain: (domain: FocusDomain) => void
   readonly adjustScale: (direction: 1 | -1) => void
   readonly resetScale: () => void
@@ -65,6 +67,8 @@ export function shortcutForEvent(event: ShortcutKeyEvent): ShortcutAction | null
       return { kind: 'toggleSettings' }
     case 'b':
       return { kind: 'togglePanel' }
+    case 'k':
+      return { kind: 'focusInfoSearch' }
     case '1':
       return { kind: 'focusDomain', domain: 'sidebar' }
     case '2':
@@ -94,6 +98,9 @@ function dispatch(action: ShortcutAction, handlers: ShortcutHandlers): void {
       return
     case 'togglePanel':
       handlers.togglePanel()
+      return
+    case 'focusInfoSearch':
+      handlers.focusInfoSearch()
       return
     case 'focusDomain':
       handlers.focusDomain(action.domain)

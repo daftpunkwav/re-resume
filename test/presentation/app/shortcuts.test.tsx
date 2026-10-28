@@ -39,6 +39,7 @@ describe('shortcutForEvent', () => {
     expect(shortcutForEvent(keyEvent({ key: 'n' }))).toEqual({ kind: 'newConversation' })
     expect(shortcutForEvent(keyEvent({ key: ',' }))).toEqual({ kind: 'toggleSettings' })
     expect(shortcutForEvent(keyEvent({ key: 'B' }))).toEqual({ kind: 'togglePanel' })
+    expect(shortcutForEvent(keyEvent({ key: 'k' }))).toEqual({ kind: 'focusInfoSearch' })
     expect(shortcutForEvent(keyEvent({ key: '1' }))).toEqual({
       kind: 'focusDomain',
       domain: 'sidebar',
@@ -83,7 +84,7 @@ describe('shortcutForEvent', () => {
   })
 
   it('ignores combinations it does not own', () => {
-    expect(shortcutForEvent(keyEvent({ key: 'k' }))).toBeNull()
+    expect(shortcutForEvent(keyEvent({ key: 'x' }))).toBeNull()
   })
 })
 
@@ -92,6 +93,7 @@ describe('useGlobalShortcuts', () => {
     newConversation: vi.fn(),
     toggleSettings: vi.fn(),
     togglePanel: vi.fn(),
+    focusInfoSearch: vi.fn(),
     focusDomain: vi.fn(),
     adjustScale: vi.fn(),
     resetScale: vi.fn(),

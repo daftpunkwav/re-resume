@@ -27,6 +27,7 @@ import {
   UI_SCALE_STEP,
 } from '../../domain/settings/AppSettings'
 import { ToastRegion } from './components/Toast'
+import { requestInfoPanelClose, requestInfoSearchFocus } from '../features/info/panelBridge'
 import { ConversationPlaceholder } from './placeholders/ConversationPlaceholder'
 import { PanelDock } from './PanelDock'
 import { SettingsOverlay } from './settings/SettingsOverlay'
@@ -76,6 +77,15 @@ export function AppShell() {
       else shell.openSettings()
     },
     togglePanel: () => useShellStore.getState().togglePanelVisibility(),
+    focusInfoSearch: () => {
+      // The search field only exists while the information panel is mounted,
+      // so the shortcut opens the panel first; the panel's bridge delivers the
+      // focus request once the field exists.
+      const shell = useShellStore.getState()
+      if (shell.rightPanel === 'none') shell.setRightPanel('info')
+      else if (shell.rightPanel === 'resume') shell.setRightPanel('both')
+      requestInfoSearchFocus()
+    },
     focusDomain: focusRegion,
     adjustScale: (direction) => {
       const current = useSettingsStore.getState().settings.uiScale
@@ -124,7 +134,10 @@ export function AppShell() {
       if (shell.settingsOpen) return
       if (tier === 'compact' && shell.rightPanel !== 'none') {
         event.preventDefault()
-        shell.setRightPanel('none')
+        // The drawer may hold an unsaved information draft; closing it is the
+        // panel's navigation, so it goes through the same guard as its own
+        // close button.
+        requestInfoPanelClose(() => shell.setRightPanel('none'))
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -154,7 +167,7 @@ export function AppShell() {
               <div
                 className="drawer-scrim"
                 role="presentation"
-                onMouseDown={() => setRightPanel('none')}
+                onMouseDown={() => requestInfoPanelClose(() => setRightPanel('none'))}
               />
             ) : null}
             <PanelDock tier={tier} />
