@@ -1,14 +1,22 @@
 /**
  * @file Revision
  * @description One entry of a resume's undo/redo chain, doubling as its change
- * record. Revisions store whole document states rather than patches: a resume
- * is a few pages, and whole-state storage buys undo, redo, agent preview and
- * an audit trail without an event-sourcing layer.
+ * record. Revisions store whole document states rather than patches: a resume is
+ * a few pages, and whole-state storage buys undo, redo, agent preview and an
+ * audit trail without an event-sourcing layer.
+ *
+ * Constraints:
+ * - `seq` is monotonic per resume and never reused; UNIQUE (resume_id, seq).
+ * - Title and target job are not part of the state, so metadata edits never
+ *   create a revision.
  */
 
 import type { DateTime } from '../shared/DateTime'
 import type { AgentRunId, ResumeId, RevisionId } from '../shared/branded-id'
-import type { ChangeOrigin, DocumentState } from './DocumentChange'
+import type { ChangeOrigin, ResumeDocumentState } from './DocumentState'
+
+/** Label the revision a resume opens with carries. */
+export const INITIAL_REVISION_LABEL = '创建简历'
 
 export interface Revision {
   readonly id: RevisionId
@@ -19,14 +27,13 @@ export interface Revision {
   readonly origin: ChangeOrigin
   readonly runId: AgentRunId | null
   /** The full document state after this change. */
-  readonly state: DocumentState
+  readonly state: ResumeDocumentState
   /** Set when an undo branch was abandoned; see the cursor model. */
   readonly supersededAt: DateTime | null
   readonly createdAt: DateTime
 }
 
-export const INITIAL_REVISION_LABEL = '创建简历'
-
+/** True for a revision on the chain redo can reach. */
 export function isLiveRevision(revision: Revision): boolean {
   return revision.supersededAt === null
 }

@@ -20,11 +20,13 @@
  */
 
 import type { Clock } from '../domain/shared/Clock'
+import type { IdGenerator } from '../domain/shared/IdGenerator'
 import type { FileStore } from '../domain/conversation/ports/FileStore'
 import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService } from './wiring/appSettings'
 import { createInfoService } from './wiring/info'
+import { createResumeService } from './wiring/resume'
 import {
   createConversationService,
   readActiveProviderSecret,
@@ -41,7 +43,11 @@ import { SqliteAppSettingsRepository } from '../infrastructure/persistence/setti
 import { SqliteProviderConfigRepository } from '../infrastructure/persistence/settings/SqliteProviderConfigRepository'
 import { SqliteCustomModuleRepository } from '../infrastructure/persistence/info/SqliteCustomModuleRepository'
 import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/SqliteInfoEntryRepository'
-import { NoResumeEntryReferences } from '../infrastructure/persistence/info/NoResumeEntryReferences'
+import { SqliteResumeRepository } from '../infrastructure/persistence/resume/SqliteResumeRepository'
+import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
+import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
+import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
+import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
 import { SqliteConversationRepository } from '../infrastructure/persistence/conversation/SqliteConversationRepository'
@@ -157,10 +163,98 @@ function createConversationRepositories(
   }
 }
 
+/**
+ * Loads the bundled font bytes and builds the canonical measurer. A failure is
+ * fatal: without the bundled faces every line break would move, so a window that
+ * cannot measure must not pretend it can.
+ */
+async function createCanonicalMeasurer(): Promise<TextMeasurer> {
+  return createFontkitTextMeasurer(await loadBundledFontRegistry())
+}
+
+/**
+ * Resolves the active provider and builds the conversation service, including
+ * the recovery pass for runs a previous process left behind.
+ */
+async function createConversationRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly providerConfigs: SqliteProviderConfigRepository
+  readonly secrets: StrongholdSecretStore
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): Promise<ReturnType<typeof createConversationService>> {
+  const http = createTauriHttpClient()
+  const model = await resolveActiveProvider({
+    providerConfigs: input.providerConfigs,
+    secrets: input.secrets,
+    http,
+    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+  })
+  const providerSecrets = await readActiveProviderSecret({
+    providerConfigs: input.providerConfigs,
+    secrets: input.secrets,
+  })
+  const conversation = createConversationService({
+    repositories: createConversationRepositories(
+      input.database,
+      new UnavailableAttachmentStore(),
+    ),
+    clock: input.clock,
+    ids: input.ids,
+    model,
+    titleModel: model,
+    activeRuns: new ActiveRunRegistry(),
+    secrets: providerSecrets,
+    registry: buildToolRegistry(),
+    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    onWarning: (message, warning) => {
+      console.warn(`[conversation] ${message}`, warning)
+    },
+  })
+  try {
+    const recovery = await conversation.recoverInterruptedRuns()
+    if (recovery.failedRuns > 0 || recovery.repairedMessages > 0) {
+      console.info(
+        `[startup] interrupted run recovery: ${recovery.failedRuns} run(s), ${recovery.repairedMessages} message(s)`,
+      )
+    }
+  } catch (failure) {
+    // A stale run row is untidy, not fatal: the window still opens and the next
+    // send is gated by the same database rule.
+    console.warn('[startup] interrupted run recovery failed; continuing.', failure)
+  }
+  return conversation
+}
+
+/** Binds the resume use cases to the database, the library and the measurer. */
+function createResumeRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly resumes: SqliteResumeRepository
+  readonly entries: SqliteInfoEntryRepository
+  readonly customModules: SqliteCustomModuleRepository
+  readonly updateInfoEntry: ReturnType<typeof createInfoService>['updateEntry']
+  readonly measurer: TextMeasurer
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): ReturnType<typeof createResumeService> {
+  return createResumeService({
+    resumes: input.resumes,
+    entries: input.entries,
+    customModules: input.customModules,
+    jobPostings: new SqliteJobPostingRepository(input.database),
+    attachments: new SqliteAttachmentRepository(input.database),
+    updateInfoEntry: input.updateInfoEntry,
+    measurer: input.measurer,
+    clock: input.clock,
+    ids: input.ids,
+  })
+}
+
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
   const clock: Clock = new SystemClock()
+  const measurer = await createCanonicalMeasurer()
   const database = await startLocalDatabase({
     backupBeforeMigration: recordPreMigrationBackup,
     openDatabase: () => openSqliteDatabase(options.databaseConnectionString),
@@ -171,50 +265,35 @@ export async function createCompositionRoot(
     const customModuleRepository = new SqliteCustomModuleRepository(database)
     const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
     const ids = new RandomIdGenerator()
+    const resumes = new SqliteResumeRepository(database, clock, ids)
     const providerConfigs = new SqliteProviderConfigRepository(database)
     const secrets = new StrongholdSecretStore(options.stronghold)
-    const http = createTauriHttpClient()
-    const model = await resolveActiveProvider({
+    const conversation = await createConversationRuntime({
+      database,
       providerConfigs,
       secrets,
-      http,
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-    })
-    const providerSecrets = await readActiveProviderSecret({ providerConfigs, secrets })
-    const conversation = createConversationService({
-      repositories: createConversationRepositories(database, new UnavailableAttachmentStore()),
       clock,
       ids,
-      model,
-      titleModel: model,
-      activeRuns: new ActiveRunRegistry(),
-      secrets: providerSecrets,
-      registry: buildToolRegistry(),
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-      onWarning: (message, warning) => {
-        console.warn(`[conversation] ${message}`, warning)
-      },
     })
-    try {
-      const recovery = await conversation.recoverInterruptedRuns()
-      if (recovery.failedRuns > 0 || recovery.repairedMessages > 0) {
-        console.info(
-          `[startup] interrupted run recovery: ${recovery.failedRuns} run(s), ${recovery.repairedMessages} message(s)`,
-        )
-      }
-    } catch (failure) {
-      // A stale run row is untidy, not fatal: the window still opens and the
-      // next send is gated by the same database rule.
-      console.warn('[startup] interrupted run recovery failed; continuing.', failure)
-    }
     const databaseFile = await resolveDatabaseFile()
+    const info = createInfoService({
+      entries: infoEntries,
+      customModules: customModuleRepository,
+      references: new ResumeEntryReferences(resumes),
+      clock,
+      ids,
+    })
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
       settings: createAppSettingsService({ repository: settingsRepository }),
-      info: createInfoService({
+      info,
+      resume: createResumeRuntime({
+        database,
+        resumes,
         entries: infoEntries,
         customModules: customModuleRepository,
-        references: new NoResumeEntryReferences(),
+        updateInfoEntry: info.updateEntry,
+        measurer,
         clock,
         ids,
       }),

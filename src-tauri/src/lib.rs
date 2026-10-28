@@ -38,7 +38,8 @@ const DATABASE_URL: &str = "sqlite:re-resume.db";
 /// body is immutable: the plugin's ledger validates the checksum of every
 /// version a database recorded, so a new schema is a new version rather than an
 /// edit of an existing one. Version 3 was registered empty and stays empty; the
-/// information library schema is version 7.
+/// information library schema is version 7, the conversation runtime version 8
+/// and the resume document schema version 9.
 const MIGRATION_001_INIT: &str =
     include_str!("../../src/infrastructure/persistence/migrations/001_init.sql");
 const MIGRATION_002_SETTINGS: &str =
@@ -55,6 +56,8 @@ const MIGRATION_007_INFO: &str =
     include_str!("../../src/infrastructure/persistence/migrations/007_info.sql");
 const MIGRATION_008_CONVERSATION: &str =
     include_str!("../../src/infrastructure/persistence/migrations/008_conversation.sql");
+const MIGRATION_009_RESUME: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/009_resume.sql");
 
 /// Name of the file holding the Stronghold key-derivation salt. The salt is not
 /// a secret — it is the Argon2 parameter that makes a password produce the same
@@ -124,6 +127,12 @@ fn migrations() -> Vec<Migration> {
             version: 8,
             description: "conversation, messages and agent runs",
             sql: MIGRATION_008_CONVERSATION,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "resume composition document",
+            sql: MIGRATION_009_RESUME,
             kind: MigrationKind::Up,
         },
     ]

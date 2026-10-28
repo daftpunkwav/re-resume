@@ -37,6 +37,7 @@ function stubRoot(): CompositionRoot {
       save: async (patch) => ({ ...DEFAULT_APP_SETTINGS, ...patch }),
     },
     info: stubCompositionRoot().info,
+    resume: stubCompositionRoot().resume,
     conversation: createPreviewConversationService().service,
     secrets: new InMemorySecretStore(),
     shutdown: vi.fn(async () => undefined),

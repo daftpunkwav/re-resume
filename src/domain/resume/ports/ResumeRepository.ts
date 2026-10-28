@@ -1,63 +1,61 @@
 /**
  * @file ResumeRepository
- * @description Persistence port for the resume aggregate, including the
- * revision chain that doubles as its undo/redo history and change record.
+ * @description Persistence port for the resume aggregate: the pointer row, the
+ * revision chain that doubles as its history, the frozen snapshots, and the
+ * metadata columns that deliberately stay out of the chain.
  *
  * Constraints:
- * - DocumentChangeMeta comes from domain/resume/DocumentChange: no
- *   application-layer type may appear in a domain port.
+ * - Only domain types: no application type and no database row may appear here.
+ * - Every composite write is one transaction. Partial application of the
+ *   revision chain (supersede, append, cursor, trim) is a contract violation.
+ * - `saveDocument` and `appendSnapshot` carry `expectedRevisionId`, the revision
+ *   the caller read the state from; a mismatch is `revisionMismatch`.
  */
 
+import type { ConversationId, ResumeId, RevisionId, SnapshotId } from '../../shared/branded-id'
+import type { DateTime } from '../../shared/DateTime'
+import type { ResumeDocumentState, DocumentChangeMeta } from '../DocumentState'
 import type { Resume } from '../Resume'
-import type { Revision } from '../Revision'
 import type { ResumeSnapshot } from '../ResumeSnapshot'
-import type { DocumentChangeMeta, DocumentState } from '../DocumentChange'
-import type { ResumeId, RevisionId, SnapshotId } from '../../shared/branded-id'
+import type { Revision } from '../Revision'
+import type { TargetJob } from '../TargetJob'
+
+/** The metadata columns that are written directly, never through a revision. */
+export interface ResumeMetadataPatch {
+  readonly title?: string
+  readonly targetJob?: TargetJob | null
+  readonly conversationId?: ConversationId | null
+}
 
 export interface ResumeRepository {
-  /** Hydrates the aggregate from resume + its current revision (blocks, pageSetup). */
+  /** Hydrates the aggregate: pointer row + the revision the cursor names. */
   findById(id: ResumeId): Promise<Resume | null>
   listAll(): Promise<readonly Resume[]>
+  /** resume row + its first revision, in one transaction. */
+  insertWithInitialRevision(resume: Resume, revision: Revision): Promise<void>
   /**
-   * Appends a revision (full DocumentState), advances the cursor, supersedes
-   * the abandoned branch and applies the trim rule — atomically. Partial
-   * application of any of these steps is a contract violation.
+   * Supersede the abandoned branch, append the revision, move the cursor and
+   * trim the live chain, in one transaction.
    *
-   * `expectedRevisionId` is the revision the caller read `state` from. Two
-   * commits that both read the same revision would otherwise each overwrite the
-   * other with a state derived from the same base, and both would report
-   * success; the second one to reach this call is refused instead.
+   * @throws DomainError `revisionMismatch` when the stored cursor is not
+   *   `expectedRevisionId`.
    */
   saveDocument(
     id: ResumeId,
-    state: DocumentState,
+    state: ResumeDocumentState,
     change: DocumentChangeMeta,
     expectedRevisionId: RevisionId,
   ): Promise<Revision>
-  /** Undo/redo: moves the cursor without creating a revision. Refused for frozen resumes. */
+  /** Undo/redo: moves the cursor without creating a revision. */
   moveCursor(id: ResumeId, revisionId: RevisionId): Promise<void>
-  /**
-   * The resume's full revision chain, ascending by seq, superseded rows
-   * included. The use cases that walk the chain (undo, redo, the freeze guard)
-   * filter superseded rows themselves; this read takes no side in that choice.
-   */
+  /** The whole chain, ascending by seq, superseded rows included. */
   listRevisions(id: ResumeId): Promise<readonly Revision[]>
   readRevision(id: RevisionId): Promise<Revision | null>
-  /**
-   * Reads one snapshot by its own identifier; null when no snapshot carries it.
-   * A snapshot is addressed without its resume, so it is the port rather than
-   * findById that has to make that lookup — reading every resume to find one
-   * snapshot is what a comparison must not do.
-   */
   findSnapshotById(id: SnapshotId): Promise<ResumeSnapshot | null>
-  /**
-   * Writes the snapshot that justifies a frozen status and moves the status in
-   * the same transaction.
-   *
-   * `expectedRevisionId` is the revision the snapshot was cut from. Freezing
-   * reads the resume and materializes it before this call, and a commit landing
-   * in between would otherwise leave a snapshot of one revision attached to a
-   * resume whose cursor has already moved on.
-   */
+  /** The snapshot that justifies a frozen status, plus the status, in one transaction. */
   appendSnapshot(snapshot: ResumeSnapshot, expectedRevisionId: RevisionId): Promise<void>
+  /** Metadata direct write: title, target job and associated conversation. */
+  updateMetadata(id: ResumeId, patch: ResumeMetadataPatch, now: DateTime): Promise<void>
+  /** Deletes the resume; revisions and snapshots cascade, cross-domain pointers are cleared. */
+  delete(id: ResumeId): Promise<void>
 }

@@ -95,10 +95,34 @@ describe('migrations', () => {
     expect(conversation).toContain("CHECK ((kind = 'tool') = (tool_json IS NOT NULL))")
   })
 
+  it('creates the resume document tables at version 9', () => {
+    const resume = readMigration('009_resume.sql')
+    for (const table of ['resume', 'resume_revision', 'resume_snapshot']) {
+      expect(resume).toContain(`CREATE TABLE ${table} `)
+    }
+    // The v1 tables this version replaces must be dropped before any CREATE:
+    // version 1 created them with a different shape, and creating beside them
+    // fails with "table resume already exists".
+    const firstCreate = resume.indexOf('CREATE TABLE')
+    for (const legacy of ['document_revision', 'resume_snapshot', 'resume']) {
+      const drop = resume.indexOf(`DROP TABLE IF EXISTS ${legacy};`)
+      expect(drop, `${legacy} must be dropped`).toBeGreaterThan(-1)
+      expect(drop, `${legacy} must be dropped before the first CREATE`).toBeLessThan(firstCreate)
+    }
+    // The document state lives in the revision, and the cursor is a pointer to
+    // it: a revision belongs to exactly one resume and one sequence number.
+    expect(resume).toContain('state_json TEXT NOT NULL')
+    expect(resume).toContain('REFERENCES resume (id) ON DELETE CASCADE')
+    expect(resume).toContain('UNIQUE (resume_id, seq)')
+    expect(resume).toContain('frozen_state_json TEXT NOT NULL')
+    expect(resume).toContain('materialized_json TEXT NOT NULL')
+    expect(resume).toContain("CHECK (status IN ('draft', 'frozen'))")
+  })
+
   it('keeps versions 3 to 6 comment-only', () => {
     // An applied migration's body is immutable: these versions were recorded as
-    // empty placeholders, so later schemas ship as new versions (7 and 8) and
-    // these stay no-ops.
+    // empty placeholders, so later schemas ship as new versions (7, 8 and 9)
+    // and these stay no-ops.
     for (const name of [
       '003_info.sql',
       '004_conversation.sql',
