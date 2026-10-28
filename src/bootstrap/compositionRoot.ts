@@ -25,6 +25,7 @@ import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService } from './wiring/appSettings'
 import { createInfoService } from './wiring/info'
+import { createResumeService } from './wiring/resume'
 import {
   createConversationService,
   readActiveProviderSecret,
@@ -41,7 +42,11 @@ import { SqliteAppSettingsRepository } from '../infrastructure/persistence/setti
 import { SqliteProviderConfigRepository } from '../infrastructure/persistence/settings/SqliteProviderConfigRepository'
 import { SqliteCustomModuleRepository } from '../infrastructure/persistence/info/SqliteCustomModuleRepository'
 import { SqliteInfoEntryRepository } from '../infrastructure/persistence/info/SqliteInfoEntryRepository'
-import { NoResumeEntryReferences } from '../infrastructure/persistence/info/NoResumeEntryReferences'
+import { SqliteResumeRepository } from '../infrastructure/persistence/resume/SqliteResumeRepository'
+import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
+import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
+import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
+import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
 import { SqliteConversationRepository } from '../infrastructure/persistence/conversation/SqliteConversationRepository'
@@ -157,10 +162,20 @@ function createConversationRepositories(
   }
 }
 
+/**
+ * Loads the bundled font bytes and builds the canonical measurer. A failure is
+ * fatal: without the bundled faces every line break would move, so a window that
+ * cannot measure must not pretend it can.
+ */
+async function createCanonicalMeasurer(): Promise<TextMeasurer> {
+  return createFontkitTextMeasurer(await loadBundledFontRegistry())
+}
+
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
   const clock: Clock = new SystemClock()
+  const measurer = await createCanonicalMeasurer()
   const database = await startLocalDatabase({
     backupBeforeMigration: recordPreMigrationBackup,
     openDatabase: () => openSqliteDatabase(options.databaseConnectionString),
@@ -171,6 +186,7 @@ export async function createCompositionRoot(
     const customModuleRepository = new SqliteCustomModuleRepository(database)
     const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
     const ids = new RandomIdGenerator()
+    const resumes = new SqliteResumeRepository(database, clock, ids)
     const providerConfigs = new SqliteProviderConfigRepository(database)
     const secrets = new StrongholdSecretStore(options.stronghold)
     const http = createTauriHttpClient()
@@ -208,13 +224,25 @@ export async function createCompositionRoot(
       console.warn('[startup] interrupted run recovery failed; continuing.', failure)
     }
     const databaseFile = await resolveDatabaseFile()
+    const info = createInfoService({
+      entries: infoEntries,
+      customModules: customModuleRepository,
+      references: new ResumeEntryReferences(resumes),
+      clock,
+      ids,
+    })
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
       settings: createAppSettingsService({ repository: settingsRepository }),
-      info: createInfoService({
+      info,
+      resume: createResumeService({
+        resumes,
         entries: infoEntries,
         customModules: customModuleRepository,
-        references: new NoResumeEntryReferences(),
+        jobPostings: new SqliteJobPostingRepository(database),
+        attachments: new SqliteAttachmentRepository(database),
+        updateInfoEntry: info.updateEntry,
+        measurer,
         clock,
         ids,
       }),
