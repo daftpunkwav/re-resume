@@ -1,15 +1,17 @@
 /**
  * @file ResumeToolbar
  * @description The revision bar above the canvas: undo and redo across the
- * document's revision chain, the label of the revision currently shown, and the
- * freeze transition with its confirmation. The panel edits a document; it does
- * not export one.
+ * document's revision chain, the label of the revision currently shown, the
+ * freeze transition with its confirmation, and the PDF export that reads the
+ * plan before it asks for a destination.
  *
  * Constraints:
  * - Undo and redo move the cursor; they never create a revision, so the label
  *   follows the current revision instead of a counter.
  * - Freezing is confirmed and can refuse (empty document, unresolved
  *   references); the refusal text comes from the store notice.
+ * - Export is offered only while a resume is loaded and no document write is in
+ *   flight; the dialog shows overflows and warnings before the save dialog.
  */
 
 import { useState } from 'react'
@@ -20,6 +22,7 @@ import { Badge } from '../../app/components/Badge'
 import { Button } from '../../app/components/Button'
 import { Dialog } from '../../app/components/Dialog'
 import { showToast } from '../../app/stores/toastStore'
+import { ExportResumeDialog } from './ExportResumeDialog'
 import { ResumeIcon } from './resumeIcons'
 import { formatUpdatedAt, resumeStatusLabel } from './resumeFormat'
 import { useResumeStore } from './resumeStore'
@@ -152,11 +155,25 @@ function FreezeAction({ resume, busy }: { readonly resume: Resume; readonly busy
 export function ResumeToolbar() {
   const resume = useResumeStore((state) => state.resume)
   const committing = useResumeStore((state) => state.committing)
+  const [exportOpen, setExportOpen] = useState(false)
   if (resume === null) return null
   return (
     <div className="studio-revision-bar">
       <UndoRedoButtons resume={resume} busy={committing} />
-      <FreezeAction resume={resume} busy={committing} />
+      <div className="studio-revision-group">
+        <FreezeAction resume={resume} busy={committing} />
+        <Button
+          variant="primary"
+          size="small"
+          disabled={committing}
+          onClick={() => setExportOpen(true)}
+        >
+          导出 PDF
+        </Button>
+      </div>
+      {exportOpen ? (
+        <ExportResumeDialog resume={resume} open onClose={() => setExportOpen(false)} />
+      ) : null}
     </div>
   )
 }
