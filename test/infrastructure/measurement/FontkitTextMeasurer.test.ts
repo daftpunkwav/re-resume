@@ -26,8 +26,8 @@ import {
 } from '../../../src/infrastructure/measurement/BundledFontRegistry'
 import { DEFAULT_FONT_FAMILY, DEFAULT_TEXT_STYLE } from '../../../src/domain/resume/TextStyle'
 import type { TextStyle } from '../../../src/domain/resume/TextStyle'
-import type { MaterializedBlock } from '../../../src/domain/resume/ResumeSnapshot'
-import { asBlockId } from '../../../src/domain/shared/branded-id'
+import type { LayoutBlock } from '../../../src/domain/resume/Layout'
+import { asLayoutBlockId } from '../../../src/domain/shared/branded-id'
 
 const fontDirectory = fileURLToPath(new URL('../../../src/assets/fonts/', import.meta.url))
 
@@ -247,21 +247,24 @@ describe('FontkitTextMeasurer', () => {
   })
 
   it('feeds pagination: a CJK paragraph breaks at exactly the width limit', () => {
-    // 100 points of content at 10 points per ideograph: ten per line, and
-    // twenty-five characters fill two lines and part of a third.
+    // A Letter page whose margins leave a 100x500 point content box: 100 points
+    // of content at 10 points per ideograph means ten per line, and twenty-five
+    // characters fill two lines and part of a third.
     const paragraph = '简'.repeat(25)
     const result = layout({
-      blocks: [textMaterializedBlock(paragraph, 10)],
+      blocks: [textLayoutBlock(paragraph, 10)],
       page: {
-        pageWidth: 100,
-        pageHeight: 500,
+        paper: 'Letter',
         columns: 1,
         marginTop: 0,
-        marginRight: 0,
-        marginBottom: 0,
-        marginLeft: 0,
+        marginRight: 256,
+        marginBottom: 292,
+        marginLeft: 256,
+        showPageNumber: false,
       },
       measurer,
+      columnRatio: 0.35,
+      columnGutter: 12,
     })
     expect(result.overflows).toHaveLength(0)
     const lines = result.blocks[0]?.lines ?? []
@@ -272,12 +275,21 @@ describe('FontkitTextMeasurer', () => {
   })
 })
 
-function textMaterializedBlock(text: string, fontSize: number): MaterializedBlock {
+function textLayoutBlock(text: string, fontSize: number): LayoutBlock {
   return {
-    id: asBlockId('block-text'),
-    content: { type: 'text', text },
-    layout: { mode: 'flow', columnSpan: 1 },
-    textStyle: { ...DEFAULT_TEXT_STYLE, fontSize },
-    claims: [],
+    id: asLayoutBlockId('block-text'),
+    role: 'entry',
+    paragraphs: [
+      {
+        text,
+        style: { ...DEFAULT_TEXT_STYLE, fontSize },
+        bullet: false,
+        spaceBefore: 0,
+      },
+    ],
+    placement: { mode: 'flow', columnSpan: 1, column: 'auto' },
+    keepWithNext: false,
+    keepTogether: false,
+    image: null,
   }
 }
