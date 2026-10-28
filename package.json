@@ -1,10 +1,11 @@
 {
   "name": "re-resume",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@12.8.1",
   "description": "Local-first resume workbench built on a single TypeScript runtime.",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "pnpm run typecheck && vite build",
