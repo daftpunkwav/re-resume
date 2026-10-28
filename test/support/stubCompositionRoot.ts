@@ -8,6 +8,7 @@
 import type { CompositionRoot } from '../../src/bootstrap/capabilities'
 import { createInfoService } from '../../src/bootstrap/wiring/info'
 import { createResumeService } from '../../src/bootstrap/wiring/resume'
+import { createExportService } from '../../src/bootstrap/wiring/export'
 import { createLibraryChangesService } from '../../src/bootstrap/wiring/changes'
 import { createProviderService } from '../../src/bootstrap/wiring/providers'
 import { createAppSettingsService } from '../../src/bootstrap/wiring/appSettings'
@@ -33,9 +34,11 @@ import {
   InMemoryJobPostingRepository,
 } from '../../src/infrastructure/preview/inMemoryConversationRepositories'
 import { InMemoryResumeRepository } from '../../src/infrastructure/preview/inMemoryResumeRepository'
+import { InMemoryFileStore } from '../../src/infrastructure/preview/InMemoryFileStore'
 import { ResumeEntryReferences } from '../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import { FixedClock, SequentialIdGenerator } from './fakeEnvironment'
 import { ScriptedModelProvider } from '../../src/infrastructure/preview/ScriptedModelProvider'
+import { CancellingPdfFileSaver, FixedBytesPdfExporter } from './pdfDoubles'
 
 export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): CompositionRoot {
   const settings: AppSettings = DEFAULT_APP_SETTINGS
@@ -48,6 +51,8 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
   const settingsRepository = new InMemoryAppSettingsRepository(settings)
   const secrets = new InMemorySecretStore()
   const resumes = new InMemoryResumeRepository(clock)
+  const attachments = new InMemoryAttachmentRepository()
+  const fileStore = new InMemoryFileStore()
   const info = createInfoService({
     entries,
     customModules,
@@ -60,11 +65,23 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
     entries,
     customModules,
     jobPostings: new InMemoryJobPostingRepository(),
-    attachments: new InMemoryAttachmentRepository(),
+    attachments,
     updateInfoEntry: info.updateEntry,
     measurer: new FixtureTextMeasurer(),
     clock,
     ids: new SequentialIdGenerator('stub-resume'),
+  })
+  // Tests that only exercise the interface never save a file: the exporter
+  // returns fixed bytes and the saver models a dismissed dialog.
+  const pdfExport = createExportService({
+    resumes,
+    entries,
+    customModules,
+    measurer: new FixtureTextMeasurer(),
+    exporter: new FixedBytesPdfExporter(),
+    saver: new CancellingPdfFileSaver(),
+    attachments,
+    fileStore,
   })
   return {
     appInfo: {
@@ -108,6 +125,7 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
     settings: createAppSettingsService({ repository: settingsRepository }),
     info,
     resume,
+    export: pdfExport,
     conversation,
     providers: createProviderService({
       providers: new InMemoryProviderConfigRepository(),

@@ -28,6 +28,7 @@ import type { Conversation } from '../../../../src/domain/conversation/Conversat
 import type { ConversationGroups } from '../../../../src/application/conversation/listConversations'
 import { createConversationBed } from '../../../support/conversationBed'
 import type { ConversationBed } from '../../../support/conversationBed'
+import { FixedBytesPdfExporter, RecordingPdfFileSaver } from '../../../support/pdfDoubles'
 import { FixedClock, SequentialIdGenerator } from '../../../support/fakeEnvironment'
 
 async function flush(): Promise<void> {
@@ -68,6 +69,8 @@ function createHarness(): Harness {
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
+    pdfExporter: new FixedBytesPdfExporter(),
+    pdfSaver: new RecordingPdfFileSaver(),
   })
   const changes = new InMemoryChangeLogRepository()
   const entries = new InMemoryInfoEntryRepository(changes)

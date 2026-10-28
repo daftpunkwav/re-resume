@@ -43,6 +43,7 @@ import { FixtureTextMeasurer } from '../../src/infrastructure/measurement/Fixtur
 import { buildToolRegistry } from '../../src/application/generation/buildToolRegistry'
 import type { ToolPackDeps } from '../../src/application/generation/tools/deps'
 import { FixedClock, SequentialIdGenerator } from './fakeEnvironment'
+import { FixedBytesPdfExporter, RecordingPdfFileSaver } from './pdfDoubles'
 
 export interface ConversationBed {
   readonly clock: FixedClock
@@ -98,6 +99,8 @@ export function createConversationBed(): ConversationBed {
     measurer,
     clock,
     ids,
+    pdfExporter: new FixedBytesPdfExporter(),
+    pdfSaver: new RecordingPdfFileSaver(),
   }
   return {
     clock,
