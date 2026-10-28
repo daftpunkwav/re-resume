@@ -20,21 +20,57 @@ test.describe('the workbench shell', () => {
     await expect(page.getByRole('button', { name: /更新项目经历/ })).toBeVisible()
   })
 
-  test('opens each panel and shows both side by side on a wide window', async ({ page }) => {
+  test('keeps the conversation readable when both panels are requested at 1280', async ({ page }) => {
     await openPreview(page)
 
     const dock = await openPanel(page, 'info')
     await expect(dock.getByRole('heading', { name: '简历信息', exact: true })).toBeVisible()
-
     await openPanel(page, 'resume')
-    // At 1280px the dock splits into two labelled receiving regions.
+
+    // Below the split floor the dock keeps one pane at a time behind the tabs;
+    // opening the second panel must not shrink the conversation to a sliver.
+    await expect(page.getByRole('tablist', { name: '面板切换' })).toBeVisible()
+    await expect(page.getByRole('region', { name: '简历创作' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: '简历信息' })).toHaveCount(0)
+    const conversationWidth = await page.evaluate(
+      () => document.querySelector('.conversation')?.getBoundingClientRect().width ?? 0,
+    )
+    expect(conversationWidth).toBeGreaterThanOrEqual(360)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(1)
+
+    // Switching the tab changes the single visible pane.
+    await page.getByRole('tab', { name: '简历信息' }).click()
+    await expect(page.getByRole('combobox', { name: '模块' })).toBeVisible()
+
+    // The composer hint is on one line; a squeezed column would wrap it
+    // character by character or push it below the controls.
+    const hint = page.locator('.composer-hint')
+    if (await hint.isVisible()) {
+      const box = await hint.boundingBox()
+      expect(box?.height ?? 0).toBeLessThan(24)
+    }
+  })
+
+  test('splits the dock into two panes on a wide window', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openPreview(page)
+
+    await openPanel(page, 'info')
+    await openPanel(page, 'resume')
+    await expect(page.getByRole('separator', { name: '调整面板分栏' })).toBeVisible()
     await expect(page.getByRole('region', { name: '简历创作' })).toBeVisible()
     await expect(page.getByRole('region', { name: '简历信息' })).toBeVisible()
-
-    await page.getByRole('button', { name: '关闭简历信息' }).click()
-    await expect(page.getByRole('region', { name: '简历信息' })).toHaveCount(0)
-    // One pane open falls back to the single-panel header, not the split regions.
-    await expect(page.getByRole('heading', { name: '简历创作', exact: true })).toBeVisible()
+    const conversationWidth = await page.evaluate(
+      () => document.querySelector('.conversation')?.getBoundingClientRect().width ?? 0,
+    )
+    expect(conversationWidth).toBeGreaterThanOrEqual(360)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(1)
   })
 
   test('opens the settings overlay and closes it with Escape', async ({ page }) => {

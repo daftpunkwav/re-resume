@@ -121,7 +121,8 @@ describe('AppShell', () => {
     expect(useShellStore.getState().rightPanel).toBe('none')
   })
 
-  it('shows both panels side by side on a wide window', async () => {
+  it('shows both panels side by side on a window wide enough to split', async () => {
+    setWindowWidth(1600)
     const user = userEvent.setup({ delay: null })
     await renderShellReady()
 
@@ -133,6 +134,26 @@ describe('AppShell', () => {
     expect(useShellStore.getState().rightPanel).toBe('both')
     // The width edge and the divider between the panes are both separators.
     expect(screen.getAllByRole('separator')).toHaveLength(2)
+  })
+
+  it('keeps one pane behind the tabs when both are requested below the split floor', async () => {
+    const user = userEvent.setup({ delay: null })
+    await renderShellReady()
+
+    await user.click(screen.getByRole('button', { name: /^简历创作$/ }))
+    await user.click(screen.getByRole('button', { name: /^简历信息$/ }))
+
+    expect(useShellStore.getState().rightPanel).toBe('both')
+    // 1280 leaves too little conversation beside two panes, so the dock keeps
+    // one visible pane and switches between them with the tabs. The panel that
+    // was just requested is the one in front.
+    expect(screen.getByRole('tablist', { name: '面板切换' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '简历信息' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.queryByRole('region', { name: '简历创作' })).toBeNull()
+    expect(screen.queryByRole('region', { name: '简历信息' })).toBeNull()
   })
 
   it('opens and closes the settings overlay with the shortcut', async () => {

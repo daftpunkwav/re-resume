@@ -692,32 +692,46 @@
 
 .composer-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  row-gap: 4px;
   margin-top: 2px;
 }
 
 .composer-toolbar-leading,
 .composer-toolbar-trailing {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  row-gap: 4px;
   min-width: 0;
 }
 
+.composer-toolbar-trailing {
+  margin-left: auto;
+}
+
 .composer-hint {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--text-size-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-setup-hint {
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  background: var(--status-warning-soft);
-  color: var(--status-warning);
-  font-size: var(--text-size-xs);
+/* The conversation column can be narrow when the dock takes most of the
+   window; the controls then wrap instead of yielding one character per line,
+   and the shortcut hint (repeated in the settings) drops out. */
+.composer[data-compact='true'] .composer-hint {
+  display: none;
+}
+
+.composer[data-compact='true'] .composer-toolbar-leading {
+  flex: 1 1 auto;
 }
 
 .composer-send {

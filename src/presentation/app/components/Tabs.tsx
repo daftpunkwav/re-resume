@@ -58,7 +58,10 @@ export function TabList<Id extends string>({
             role="tab"
             id={`tab-${tab.id}`}
             aria-selected={selected}
-            aria-controls={`tabpanel-${tab.id}`}
+            // Only the rendered panel exists under the tabs; pointing an
+            // inactive tab at a missing panel is an invalid IDREF. The active
+            // tab names the panel it controls.
+            aria-controls={selected ? `tabpanel-${tab.id}` : undefined}
             tabIndex={selected ? 0 : -1}
             className={selected ? 'tab tab-active' : 'tab'}
             onClick={() => onChange(tab.id)}

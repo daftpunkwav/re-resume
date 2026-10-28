@@ -38,6 +38,7 @@ import {
 } from '../features/conversation/contextInjection'
 import { ResizeHandle } from './ResizeHandle'
 import type { LayoutTier } from './useLayoutTier'
+import { canSplitPanels, useViewportWidth } from './useLayoutTier'
 import { useShellStore } from './stores/shellStore'
 
 export interface PanelDockProps {
@@ -163,6 +164,7 @@ export function PanelDock({ tier }: PanelDockProps) {
   const setRightWidth = useShellStore((state) => state.setRightWidth)
   const setRightPanel = useShellStore((state) => state.setRightPanel)
   const togglePanel = useShellStore((state) => state.togglePanel)
+  const viewportWidth = useViewportWidth()
 
   const [activeTab, setActiveTab] = useState<PanelKind>('resume')
   const [splitRatio, setSplitRatio] = useState(0.5)
@@ -179,15 +181,27 @@ export function PanelDock({ tier }: PanelDockProps) {
   const maximum = tier === 'wide' ? PANEL_WIDTH_MAX : PANEL_WIDTH_NARROW_MAX
   const storedWidth = Math.min(rightWidth, maximum)
   const both = rightPanel === 'both'
-  // With both panels open on a wide window the dock has to be wide enough for
-  // two panes at their own minimum; the stored width is not rewritten, so
-  // closing one panel returns to the width the user chose.
-  const dockWidth =
-    both && tier === 'wide' ? Math.max(storedWidth, TWO_PANE_MIN_WIDTH) : storedWidth
-  const splitView = both && tier === 'wide' && dockWidth >= TWO_PANE_MIN_WIDTH
+  // Both panes need enough window beside the conversation; below that the dock
+  // keeps one pane at a time behind the tabs and remembers which panel was last
+  // in front. The stored width is not rewritten, so closing one panel returns to
+  // the width the user chose.
+  const splitView = both && tier === 'wide' && canSplitPanels(viewportWidth)
+  const dockWidth = splitView ? Math.max(storedWidth, TWO_PANE_MIN_WIDTH) : storedWidth
   const minimumRatio = dockWidth === 0 ? 0.5 : Math.min(0.5, PANEL_WIDTH_MIN / dockWidth)
   const bounds = { minimum: minimumRatio, maximum: 1 - minimumRatio }
   const resizeMinimum = splitView ? TWO_PANE_MIN_WIDTH : PANEL_WIDTH_MIN
+
+  // In the tabs fallback, opening the second panel brings the newly opened one
+  // to the front; without this the tab would stay on whichever pane happened to
+  // be in front before the other entry was used.
+  const previousPanel = useRef(rightPanel)
+  useEffect(() => {
+    const previous = previousPanel.current
+    previousPanel.current = rightPanel
+    if (splitView || rightPanel !== 'both') return
+    if (previous === 'resume') setActiveTab('info')
+    if (previous === 'info') setActiveTab('resume')
+  }, [rightPanel, splitView])
 
   // A close is a navigation away from the information panel, so it has to pass
   // the panel's unsaved-draft guard first. With the panel not mounted (the
@@ -249,6 +263,15 @@ export function PanelDock({ tier }: PanelDockProps) {
                   className={dockBodyClass(
                     both ? activeTab : rightPanel === 'resume' ? 'resume' : 'info',
                   )}
+                  // The tab list names the panel it controls; the single-panel
+                  // header has no tab list and therefore no tabpanel role.
+                  {...(both
+                    ? {
+                        role: 'tabpanel' as const,
+                        id: `tabpanel-${activeTab}`,
+                        'aria-labelledby': `tab-${activeTab}`,
+                      }
+                    : {})}
                 >
                   {panelBody(both ? activeTab : rightPanel === 'resume' ? 'resume' : 'info')}
                 </div>
