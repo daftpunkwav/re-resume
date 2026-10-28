@@ -1,52 +1,63 @@
 /**
  * @file SqliteResumeRepository
- * @description SQLite persistence for the resume aggregate: the pointer row,
- * the revision chain that doubles as its undo/redo history, and the frozen
+ * @description SQLite persistence for the resume aggregate: the pointer row, the
+ * revision chain that doubles as its undo/redo history, and the frozen
  * snapshots.
  *
  * Constraints:
- * - saveDocument performs four steps 鈥?supersede the abandoned branch, append
- *   the new revision, move the cursor, trim 鈥?inside one transaction. Partial
- *   application is a contract violation: a revision without a cursor move is an
- *   invisible edit, and a cursor moved without a trim is unbounded growth.
- * - seq is max(seq) + 1 over the whole history including superseded rows, so a
+ * - `saveDocument` performs four steps — supersede the abandoned branch, append
+ *   the new revision, move the cursor, trim — inside one transaction. Partial
+ *   application is a contract violation.
+ * - `seq` is max(seq) + 1 over the whole history including superseded rows, so a
  *   sequence number is never reused and UNIQUE (resume_id, seq) always holds.
  * - Trim never touches the cursor or anything reachable from it by redo, and
  *   never deletes a superseded row: abandoned branches are kept for audit.
- * - moveCursor refuses a frozen resume and refuses a target that is superseded
- *   or belongs to another resume. Both refusals use cursorNotOnLiveChain or
- *   frozenResumeImmutable, the codes the domain already defines.
+ * - The repository never loads the whole history to hydrate one resume: only the
+ *   revision the cursor names is read.
+ * - Deleting a resume clears the cross-domain pointers that name it
+ *   (`conversation.active_resume_id`, `agent_run.resume_id`), because the schema
+ *   deliberately declares those columns without foreign keys.
  */
 
-import { DomainError } from '../../domain/shared/DomainError'
-import { nextSeq } from '../../domain/resume/Revision'
-import type { Revision } from '../../domain/resume/Revision'
-import type { Resume } from '../../domain/resume/Resume'
-import type { ResumeSnapshot } from '../../domain/resume/ResumeSnapshot'
-import type { DocumentChangeMeta, DocumentState } from '../../domain/resume/DocumentChange'
-import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
-import type { Clock } from '../../domain/shared/Clock'
-import type { IdGenerator } from '../../domain/shared/IdGenerator'
-import type { ResumeId, RevisionId, SnapshotId } from '../../domain/shared/branded-id'
-import { RowMappingError } from './JsonEnvelope'
+import { DomainError } from '../../../domain/shared/DomainError'
+import { nextSeq } from '../../../domain/resume/Revision'
+import type { Revision } from '../../../domain/resume/Revision'
+import type { Resume } from '../../../domain/resume/Resume'
+import type { ResumeSnapshot } from '../../../domain/resume/ResumeSnapshot'
+import type { DocumentChangeMeta, ResumeDocumentState } from '../../../domain/resume/DocumentState'
+import type {
+  ResumeMetadataPatch,
+  ResumeRepository,
+} from '../../../domain/resume/ports/ResumeRepository'
+import type { Clock } from '../../../domain/shared/Clock'
+import type { IdGenerator } from '../../../domain/shared/IdGenerator'
+import type { DateTime } from '../../../domain/shared/DateTime'
+import type {
+  ResumeId,
+  RevisionId,
+  SnapshotId,
+} from '../../../domain/shared/branded-id'
+import { asRevisionId } from '../../../domain/shared/branded-id'
+import { RowMappingError, writeJsonEnvelope } from '../JsonEnvelope'
 import {
-  fromDocumentRevisionRow,
-  fromResumeSnapshotRow,
+  fromRevisionRow,
+  fromSnapshotRow,
   hydrateResume,
-  toDocumentRevisionRow,
   toResumeRow,
-  toResumeSnapshotRow,
+  toRevisionRow,
+  toSnapshotRow,
 } from './mappers/ResumeRowMapper'
 import type {
-  DocumentRevisionRow,
+  ResumeRevisionRow,
   ResumeRow,
   ResumeSnapshotRow,
 } from './mappers/ResumeRowMapper'
-import type { SqlDatabase } from './sqlite'
+import type { SqlDatabase } from '../sqlite'
 
+/** How many live revisions one resume keeps; the newest window is preserved. */
 export const DEFAULT_REVISION_LIMIT = 200
 
-interface RevisionSeqRow {
+interface SeqRow {
   readonly id: string
   readonly seq: number
 }
@@ -73,37 +84,50 @@ export class SqliteResumeRepository implements ResumeRepository {
     const rows = await this.#database.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
     const row = rows[0]
     if (row === undefined) return null
-    // Only the revision the cursor names is read. Every document change starts
-    // with this lookup, and superseded revisions are never trimmed, so loading
-    // the whole chain to pick one row would make editing more expensive the
-    // longer a resume's abandoned history grew.
     const cursor = await this.#readRevisionAt(row.current_revision_id, id)
     const snapshots = await this.#readSnapshots(id)
     return hydrateResume(row, cursor, snapshots)
   }
 
   async listAll(): Promise<readonly Resume[]> {
-    const rows = await this.#database.select<ResumeRow>('SELECT * FROM resume ORDER BY created_at ASC, id ASC')
+    const rows = await this.#database.select<ResumeRow>(
+      'SELECT * FROM resume ORDER BY created_at ASC, id ASC',
+    )
     if (rows.length === 0) return []
-    const revisionsByResume = groupByResumeId(
-      await this.#database.select<DocumentRevisionRow>('SELECT * FROM document_revision ORDER BY seq ASC'),
+    const snapshotRows = await this.#database.select<ResumeSnapshotRow>(
+      'SELECT * FROM resume_snapshot ORDER BY seq ASC',
     )
-    const snapshotsByResume = groupByResumeId(
-      await this.#database.select<ResumeSnapshotRow>('SELECT * FROM resume_snapshot ORDER BY seq ASC'),
+    const snapshotsByResume = groupByResumeId(snapshotRows)
+    const cursors = await this.#database.select<ResumeRevisionRow>(
+      `SELECT revision.* FROM resume_revision revision
+       JOIN resume ON resume.current_revision_id = revision.id
+       WHERE revision.resume_id = resume.id`,
     )
-    return rows.map((row) => {
-      const revisions = (revisionsByResume.get(row.id) ?? []).map(fromDocumentRevisionRow)
-      return hydrateResume(
-        row,
-        this.#requireCursor(row, revisions),
-        (snapshotsByResume.get(row.id) ?? []).map(fromResumeSnapshotRow),
+    const cursorById = new Map(cursors.map((row) => [row.id, fromRevisionRow(row)]))
+    const resumes: Resume[] = []
+    for (const row of rows) {
+      const cursor = cursorById.get(row.current_revision_id)
+      if (cursor === undefined) {
+        throw new RowMappingError(
+          'resume.current_revision_id',
+          'names a revision that does not belong to this resume',
+          row.current_revision_id,
+        )
+      }
+      resumes.push(
+        hydrateResume(
+          row,
+          cursor,
+          (snapshotsByResume.get(row.id) ?? []).map(fromSnapshotRow),
+        ),
       )
-    })
+    }
+    return resumes
   }
 
   async saveDocument(
     id: ResumeId,
-    state: DocumentState,
+    state: ResumeDocumentState,
     change: DocumentChangeMeta,
     expectedRevisionId: RevisionId,
   ): Promise<Revision> {
@@ -111,19 +135,16 @@ export class SqliteResumeRepository implements ResumeRepository {
       const resumeRow = await this.#requireResumeRow(tx, id)
       if (resumeRow.status === 'frozen') {
         throw new DomainError(
-          'frozenResumeImmutable',
-          'A frozen resume cannot take another revision. Duplicate it to keep iterating.',
+          'resumeFrozen',
+          'A frozen resume cannot take another revision. Duplicate it to keep editing.',
           { entity: 'resume', id, blockers: [] },
         )
       }
       const history = await this.#readHistory(tx, id)
       const cursor = this.#requireCursor(resumeRow, history)
       if (cursor.id !== expectedRevisionId) {
-        // Reached from outside the queue this transaction holds: another commit
-        // appended a revision while this change was being prepared, so writing
-        // now would discard that edit.
         throw new DomainError(
-          'cursorNotOnLiveChain',
+          'revisionMismatch',
           'This resume took another revision while the change was being prepared. Reload it and try again.',
           { entity: 'resume', id, blockers: [expectedRevisionId, cursor.id] },
         )
@@ -137,12 +158,12 @@ export class SqliteResumeRepository implements ResumeRepository {
       }
       const now = this.#clock.now()
       await tx.execute(
-        `UPDATE document_revision SET superseded_at = $1
+        `UPDATE resume_revision SET superseded_at = $1
          WHERE resume_id = $2 AND seq > $3 AND superseded_at IS NULL`,
         [now, id, cursor.seq],
       )
       const revision: Revision = {
-        id: this.#ids.next() as RevisionId,
+        id: asRevisionId(this.#ids.next()),
         resumeId: id,
         seq: nextSeq(history),
         label: change.label,
@@ -167,13 +188,13 @@ export class SqliteResumeRepository implements ResumeRepository {
       const resumeRow = await this.#requireResumeRow(tx, id)
       if (resumeRow.status === 'frozen') {
         throw new DomainError(
-          'frozenResumeImmutable',
+          'resumeFrozen',
           'A frozen resume keeps the revision it was frozen at; its history is read-only.',
           { entity: 'resume', id, blockers: [] },
         )
       }
-      const targets = await tx.select<DocumentRevisionRow>(
-        'SELECT * FROM document_revision WHERE id = $1',
+      const targets = await tx.select<ResumeRevisionRow>(
+        'SELECT * FROM resume_revision WHERE id = $1',
         [revisionId],
       )
       const target = targets[0]
@@ -211,7 +232,7 @@ export class SqliteResumeRepository implements ResumeRepository {
       [id],
     )
     const row = rows[0]
-    return row === undefined ? null : fromResumeSnapshotRow(row)
+    return row === undefined ? null : fromSnapshotRow(row)
   }
 
   async listRevisions(id: ResumeId): Promise<readonly Revision[]> {
@@ -219,79 +240,90 @@ export class SqliteResumeRepository implements ResumeRepository {
   }
 
   async readRevision(id: RevisionId): Promise<Revision | null> {
-    const rows = await this.#database.select<DocumentRevisionRow>(
-      'SELECT * FROM document_revision WHERE id = $1',
+    const rows = await this.#database.select<ResumeRevisionRow>(
+      'SELECT * FROM resume_revision WHERE id = $1',
       [id],
     )
     const row = rows[0]
-    return row === undefined ? null : fromDocumentRevisionRow(row)
+    return row === undefined ? null : fromRevisionRow(row)
   }
 
   /**
    * Freezing is two writes: the snapshot that justifies the status, and the
-   * status itself. Invariant 3 holds because both land together 鈥?a frozen
-   * resume without its snapshot is unreachable, not merely unlikely.
-   *
-   * Both conditions the freeze was prepared against are re-read here rather
-   * than trusted: the caller read the resume and materialized it before calling,
-   * and a commit or a second freeze landing in that window would otherwise leave
-   * a snapshot describing a revision the resume is no longer on, or a second
-   * snapshot on a resume that is already frozen. The refusal is raised before
-   * the insert, so nothing is written; the status is in the UPDATE's condition
-   * as well, so the transition itself cannot apply to a frozen row.
+   * status itself. Both land in one transaction, so a frozen resume without its
+   * snapshot is unreachable rather than merely unlikely.
    */
   async appendSnapshot(
     snapshot: ResumeSnapshot,
     expectedRevisionId: RevisionId,
   ): Promise<void> {
-    const row = toResumeSnapshotRow(snapshot)
+    const row = toSnapshotRow(snapshot)
     await this.#database.transaction(async (tx) => {
       const resumeRow = await this.#requireResumeRow(tx, snapshot.resumeId)
       if (resumeRow.status === 'frozen') {
         throw new DomainError(
-          'frozenResumeImmutable',
+          'resumeFrozen',
           'This resume is already frozen and keeps the snapshot it was frozen at.',
           { entity: 'resume', id: snapshot.resumeId, blockers: [] },
         )
       }
       if (resumeRow.current_revision_id !== expectedRevisionId) {
         throw new DomainError(
-          'cursorNotOnLiveChain',
+          'revisionMismatch',
           'This resume took another revision while it was being finalized. Reload it and try again.',
           { entity: 'resume', id: snapshot.resumeId, blockers: [expectedRevisionId] },
         )
       }
       await tx.execute(
-        `INSERT INTO resume_snapshot (id, resume_id, seq, materialized_json, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [row.id, row.resume_id, row.seq, row.materialized_json, row.created_at],
+        `INSERT INTO resume_snapshot
+           (id, resume_id, seq, frozen_state_json, materialized_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          row.id,
+          row.resume_id,
+          row.seq,
+          row.frozen_state_json,
+          row.materialized_json,
+          row.created_at,
+        ],
       )
       await tx.execute(
         `UPDATE resume SET status = $1, updated_at = $2
          WHERE id = $3 AND current_revision_id = $4 AND status = $5`,
         ['frozen', snapshot.createdAt, snapshot.resumeId, expectedRevisionId, 'draft'],
       )
+      // The row was locked by BEGIN IMMEDIATE and checked above; a zero count
+      // here would mean the plan the use case materialized is no longer the
+      // frozen state, so the snapshot must not commit either.
+      const updated = await tx.select<{ id: string }>(
+        'SELECT id FROM resume WHERE id = $1 AND status = $2',
+        [snapshot.resumeId, 'frozen'],
+      )
+      if (updated.length === 0) {
+        throw new DomainError(
+          'revisionMismatch',
+          'This resume changed while it was being finalized. Reload it and try again.',
+          { entity: 'resume', id: snapshot.resumeId, blockers: [expectedRevisionId] },
+        )
+      }
     })
   }
 
-  /**
-   * Creates a resume together with the initial revision it points at. The
-   * resume row is written first: document_revision.resume_id is a real foreign
-   * key, while resume.current_revision_id deliberately is not, which is what
-   * lets the two reference each other (see the schema).
-   */
+  /** resume row + its first revision, one transaction. */
   async insertWithInitialRevision(resume: Resume, revision: Revision): Promise<void> {
     const resumeRow = toResumeRow(resume)
     await this.#database.transaction(async (tx) => {
       await tx.execute(
-        `INSERT INTO resume (id, title, target_role, status, current_revision_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO resume
+           (id, title, target_job_json, status, current_revision_id, conversation_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           resumeRow.id,
           resumeRow.title,
-          resumeRow.target_role,
+          resumeRow.target_job_json,
           resumeRow.status,
           resumeRow.current_revision_id,
+          resumeRow.conversation_id,
           resumeRow.created_at,
           resumeRow.updated_at,
         ],
@@ -300,9 +332,65 @@ export class SqliteResumeRepository implements ResumeRepository {
     })
   }
 
+  /**
+   * Metadata direct write. Only the patch keys that are present are written, so
+   * a title change cannot clear the target job.
+   */
+  async updateMetadata(id: ResumeId, patch: ResumeMetadataPatch, now: DateTime): Promise<void> {
+    const assignments: string[] = ['updated_at = $1']
+    const values: (string | number | null)[] = [now]
+    if (patch.title !== undefined) {
+      values.push(patch.title)
+      assignments.push(`title = $${values.length.toString()}`)
+    }
+    if (patch.targetJob !== undefined) {
+      values.push(patch.targetJob === null ? null : writeJsonEnvelope(patch.targetJob))
+      assignments.push(`target_job_json = $${values.length.toString()}`)
+    }
+    if (patch.conversationId !== undefined) {
+      values.push(patch.conversationId)
+      assignments.push(`conversation_id = $${values.length.toString()}`)
+    }
+    values.push(id)
+    const result = await this.#database.execute(
+      `UPDATE resume SET ${assignments.join(', ')} WHERE id = $${values.length.toString()}`,
+      values,
+    )
+    if (result.rowsAffected === 0) {
+      throw new DomainError('resumeNotFound', 'The resume does not exist.', {
+        entity: 'resume',
+        id,
+        blockers: [id],
+      })
+    }
+  }
+
+  /**
+   * Deletes the resume; revisions and snapshots cascade. The conversation and
+   * agent-run columns are bare text references in this schema, so they are
+   * cleared explicitly in the same transaction.
+   */
+  async delete(id: ResumeId): Promise<void> {
+    await this.#database.transaction(async (tx) => {
+      const result = await tx.execute('DELETE FROM resume WHERE id = $1', [id])
+      if (result.rowsAffected === 0) {
+        throw new DomainError('resumeNotFound', 'The resume does not exist.', {
+          entity: 'resume',
+          id,
+          blockers: [id],
+        })
+      }
+      await tx.execute(
+        'UPDATE conversation SET active_resume_id = NULL WHERE active_resume_id = $1',
+        [id],
+      )
+      await tx.execute('UPDATE agent_run SET resume_id = NULL WHERE resume_id = $1', [id])
+    })
+  }
+
   async #readRevisionAt(revisionId: string, resumeId: ResumeId): Promise<Revision> {
-    const rows = await this.#database.select<DocumentRevisionRow>(
-      'SELECT * FROM document_revision WHERE id = $1 AND resume_id = $2',
+    const rows = await this.#database.select<ResumeRevisionRow>(
+      'SELECT * FROM resume_revision WHERE id = $1 AND resume_id = $2',
       [revisionId, resumeId],
     )
     const row = rows[0]
@@ -313,15 +401,15 @@ export class SqliteResumeRepository implements ResumeRepository {
         revisionId,
       )
     }
-    return fromDocumentRevisionRow(row)
+    return fromRevisionRow(row)
   }
 
   async #insertRevision(tx: SqlDatabase, revision: Revision): Promise<void> {
-    const row = toDocumentRevisionRow(revision)
+    const row = toRevisionRow(revision)
     await tx.execute(
-      `INSERT INTO document_revision
-         (id, resume_id, seq, label, origin, run_id, blocks_json, page_setup_json, superseded_at, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO resume_revision
+         (id, resume_id, seq, label, origin, run_id, state_json, superseded_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         row.id,
         row.resume_id,
@@ -329,8 +417,7 @@ export class SqliteResumeRepository implements ResumeRepository {
         row.label,
         row.origin,
         row.run_id,
-        row.blocks_json,
-        row.page_setup_json,
+        row.state_json,
         row.superseded_at,
         row.created_at,
       ],
@@ -339,18 +426,17 @@ export class SqliteResumeRepository implements ResumeRepository {
 
   /**
    * Keeps the newest limit live revisions. The delete bound is the older of the
-   * window start and the cursor, so a cursor that somehow sits behind the window
-   * stretches the window back to reach it: the cursor and everything reachable
-   * from it by redo are never trimmed. Superseded rows are never deleted 鈥?an
-   * abandoned branch is kept for audit.
+   * window start and the cursor, so a cursor behind the window stretches the
+   * window back to reach it: the cursor and everything reachable from it by redo
+   * are never trimmed. Superseded rows are never deleted.
    */
   async #trimHistory(
     tx: SqlDatabase,
     resumeId: ResumeId,
     cursorRevisionId: RevisionId,
   ): Promise<void> {
-    const liveRows = await tx.select<RevisionSeqRow>(
-      `SELECT id, seq FROM document_revision
+    const liveRows = await tx.select<SeqRow>(
+      `SELECT id, seq FROM resume_revision
        WHERE resume_id = $1 AND superseded_at IS NULL ORDER BY seq ASC`,
       [resumeId],
     )
@@ -361,7 +447,7 @@ export class SqliteResumeRepository implements ResumeRepository {
     const oldestKept = newest[0]
     if (oldestKept === undefined) return
     await tx.execute(
-      `DELETE FROM document_revision
+      `DELETE FROM resume_revision
        WHERE resume_id = $1 AND superseded_at IS NULL AND seq < $2`,
       [resumeId, Math.min(oldestKept.seq, cursor.seq)],
     )
@@ -371,21 +457,21 @@ export class SqliteResumeRepository implements ResumeRepository {
     const rows = await tx.select<ResumeRow>('SELECT * FROM resume WHERE id = $1', [id])
     const row = rows[0]
     if (row === undefined) {
-      throw new DomainError('cursorNotOnLiveChain', 'No such resume.', {
+      throw new DomainError('resumeNotFound', 'The resume does not exist.', {
         entity: 'resume',
         id,
-        blockers: [],
+        blockers: [id],
       })
     }
     return row
   }
 
   async #readHistory(tx: SqlDatabase, id: ResumeId): Promise<readonly Revision[]> {
-    const rows = await tx.select<DocumentRevisionRow>(
-      'SELECT * FROM document_revision WHERE resume_id = $1 ORDER BY seq ASC',
+    const rows = await tx.select<ResumeRevisionRow>(
+      'SELECT * FROM resume_revision WHERE resume_id = $1 ORDER BY seq ASC',
       [id],
     )
-    return rows.map(fromDocumentRevisionRow)
+    return rows.map(fromRevisionRow)
   }
 
   async #readSnapshots(id: ResumeId): Promise<readonly ResumeSnapshot[]> {
@@ -393,13 +479,12 @@ export class SqliteResumeRepository implements ResumeRepository {
       'SELECT * FROM resume_snapshot WHERE resume_id = $1 ORDER BY seq ASC',
       [id],
     )
-    return rows.map(fromResumeSnapshotRow)
+    return rows.map(fromSnapshotRow)
   }
 
   /**
    * The cursor carries no foreign key by design, so a pointer to a missing or
-   * foreign revision is a storage fault rather than a null result: hydrating it
-   * would invent a document state nobody wrote.
+   * foreign revision is a storage fault rather than a null result.
    */
   #requireCursor(row: ResumeRow, revisions: readonly Revision[]): Revision {
     const cursor = revisions.find((revision) => revision.id === row.current_revision_id)
@@ -420,11 +505,8 @@ function groupByResumeId<TRow extends { readonly resume_id: string }>(
   const grouped = new Map<string, TRow[]>()
   for (const row of rows) {
     const existing = grouped.get(row.resume_id)
-    if (existing === undefined) {
-      grouped.set(row.resume_id, [row])
-    } else {
-      existing.push(row)
-    }
+    if (existing === undefined) grouped.set(row.resume_id, [row])
+    else existing.push(row)
   }
   return grouped
 }

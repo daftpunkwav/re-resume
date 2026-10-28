@@ -12,8 +12,8 @@
  *
  * The version map is forward-only. Versions 3 to 6 were registered while their
  * files were empty placeholders; their bodies stay byte-identical, and later
- * schemas ship as new versions: the information library at 7 and the
- * conversation runtime at 8.
+ * schemas ship as new versions: the information library at 7, the conversation
+ * runtime at 8 and the resume document at 9.
  *
  * Constraints:
  * - Each test opens a temporary file, because the plugin migrates a file on
@@ -43,6 +43,7 @@ const MIGRATION_FILES = [
   '006_drop_legacy.sql',
   '007_info.sql',
   '008_conversation.sql',
+  '009_resume.sql',
 ] as const
 
 /**
@@ -53,6 +54,9 @@ const RECREATED_RUN_TABLES = ['job_posting', 'agent_run', 'tool_invocation'] as 
 
 /** v1-only tables version 8 removes outright. */
 const REMOVED_V1_TABLES = ['variant', 'claim', 'document_revision'] as const
+
+/** Tables version 9 recreates with the resume composition shape. */
+const RESUME_TABLES = ['resume', 'resume_revision', 'resume_snapshot'] as const
 
 const scratchDirectories: string[] = []
 const openDatabases: DatabaseSync[] = []
@@ -131,6 +135,13 @@ INSERT INTO document_revision (
 ) VALUES (
   'legacy-revision', 'legacy-resume', 1, 'Initial', 'user', NULL,
   '{"v":1,"data":[]}', '{"v":1,"data":{}}', NULL, '2024-02-01T00:00:00.000Z'
+);
+
+INSERT INTO resume_snapshot (
+  id, resume_id, seq, materialized_json, created_at
+) VALUES (
+  'legacy-snapshot', 'legacy-resume', 1, '{"v":1,"data":{}}',
+  '2024-02-01T00:00:00.000Z'
 );
 
 INSERT INTO provider_config (
@@ -374,6 +385,75 @@ function expectConversationSchema(database: DatabaseSync): void {
   expect(() => insertRun.run('run-2')).toThrow()
 }
 
+/**
+ * The resume document schema added at version 9: the columns the row mappers
+ * read, the empty starting state, and the cascade that keeps revisions and
+ * snapshots owned by their resume.
+ */
+function expectResumeSchema(database: DatabaseSync): void {
+  expect(columnNames(database, 'resume')).toEqual([
+    'id',
+    'title',
+    'target_job_json',
+    'status',
+    'current_revision_id',
+    'conversation_id',
+    'created_at',
+    'updated_at',
+  ])
+  expect(columnNames(database, 'resume_revision')).toEqual([
+    'id',
+    'resume_id',
+    'seq',
+    'label',
+    'origin',
+    'run_id',
+    'state_json',
+    'superseded_at',
+    'created_at',
+  ])
+  expect(columnNames(database, 'resume_snapshot')).toEqual([
+    'id',
+    'resume_id',
+    'seq',
+    'frozen_state_json',
+    'materialized_json',
+    'created_at',
+  ])
+  expect(countRows(database, 'resume')).toBe(0)
+  expect(countRows(database, 'resume_revision')).toBe(0)
+  expect(countRows(database, 'resume_snapshot')).toBe(0)
+
+  database
+    .prepare(
+      `INSERT INTO resume (id, title, status, current_revision_id, created_at, updated_at)
+       VALUES ('resume-1', 'Resume', 'draft', 'revision-1',
+               '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    )
+    .run()
+  database
+    .prepare(
+      `INSERT INTO resume_revision
+         (id, resume_id, seq, label, origin, state_json, created_at)
+       VALUES ('revision-1', 'resume-1', 1, 'Initial', 'user',
+               '{"v":1,"data":{}}', '2026-01-01T00:00:00.000Z')`,
+    )
+    .run()
+  database
+    .prepare(
+      `INSERT INTO resume_snapshot
+         (id, resume_id, seq, frozen_state_json, materialized_json, created_at)
+       VALUES ('snapshot-1', 'resume-1', 1, '{"v":1,"data":{}}',
+               '{"v":1,"data":{}}', '2026-01-01T00:00:00.000Z')`,
+    )
+    .run()
+  // A resume owns its history: deleting the row removes both children.
+  database.prepare("DELETE FROM resume WHERE id = 'resume-1'").run()
+  expect(countRows(database, 'resume')).toBe(0)
+  expect(countRows(database, 'resume_revision')).toBe(0)
+  expect(countRows(database, 'resume_snapshot')).toBe(0)
+}
+
 describe('migrations applied in order', () => {
   it('upgrades a database that already holds the v1 schema', () => {
     const database = openScratchDatabase()
@@ -383,7 +463,7 @@ describe('migrations applied in order', () => {
 
     const applied = applyMigrations(database, MIGRATION_FILES.slice(1))
 
-    expect(applied).toEqual([2, 3, 4, 5, 6, 7, 8])
+    expect(applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9])
     // The v2 provider table replaces the legacy one rather than living beside
     // it: the old row has no fields the v2 shape could carry over.
     expect(countRows(database, 'provider_config')).toBe(0)
@@ -400,21 +480,28 @@ describe('migrations applied in order', () => {
       expect(tables, `${removed} must not survive version 8`).not.toContain(removed)
     }
     expectConversationSchema(database)
-    // Replacing those tables must not take the rest of the v1 data with it; the
-    // removal of the remaining legacy tables is version 6's work.
+    // Version 9 recreates the resume tables: the v1 resume, its document
+    // revision and its snapshot are gone, replaced by the composition model.
+    for (const resumeTable of RESUME_TABLES) {
+      expect(tables, `${resumeTable} must exist after version 9`).toContain(resumeTable)
+    }
+    expectResumeSchema(database)
+    // Replacing those tables must not take the other v1 data with it; the
+    // removal of the remaining legacy tables is version 10's work.
     expect(countRows(database, 'experience')).toBe(1)
-    expect(countRows(database, 'resume')).toBe(1)
+    expect(countRows(database, 'profile')).toBe(1)
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 
   it('creates the v2 schema on a fresh database', () => {
     const database = openScratchDatabase()
 
-    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
     expectInformationLibrarySchema(database)
     expectConversationSchema(database)
+    expectResumeSchema(database)
     for (const removed of REMOVED_V1_TABLES) {
       expect(tableNames(database), `${removed} must not exist`).not.toContain(removed)
     }
