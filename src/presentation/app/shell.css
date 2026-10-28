@@ -367,9 +367,12 @@
 /* Conversation region ---------------------------------------------------- */
 
 .conversation {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface-conversation);
 }
 
@@ -595,6 +598,13 @@
 }
 
 /* Drawer: below the compact breakpoint the dock floats over the conversation */
+
+/* The drawer floats over the workspace, not over the rail: the panel entries
+   are how a compact window switches what the drawer shows. */
+.shell[data-layout='compact'] .sidebar {
+  position: relative;
+  z-index: 42;
+}
 
 .shell[data-layout='compact'] .panel-dock {
   position: fixed;

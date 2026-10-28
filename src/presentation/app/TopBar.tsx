@@ -20,6 +20,7 @@ import { ModelPicker } from '../features/conversation/ModelPicker'
 import { FeatureIcon } from '../features/conversation/icons'
 import { formatRelativeTime } from '../features/conversation/time'
 import { useShellStore } from './stores/shellStore'
+import { useLayoutTier } from './useLayoutTier'
 
 export interface TopBarProps {
   /** True when the sidebar is showing as icons only. */
@@ -28,7 +29,9 @@ export interface TopBarProps {
 
 export function TopBar({ collapsed }: TopBarProps) {
   const rightPanel = useShellStore((state) => state.rightPanel)
+  const setRightPanel = useShellStore((state) => state.setRightPanel)
   const togglePanel = useShellStore((state) => state.togglePanel)
+  const tier = useLayoutTier()
   const toggleSidebar = useShellStore((state) => state.toggleSidebar)
   const conversations = useConversationStore((state) => state.conversations)
   const activeId = useConversationStore((state) => state.activeId)
@@ -52,6 +55,14 @@ export function TopBar({ collapsed }: TopBarProps) {
 
   const infoVisible = rightPanel === 'info' || rightPanel === 'both'
   const resumeVisible = rightPanel === 'resume' || rightPanel === 'both'
+  // The compact drawer shows one panel; composing both is a wide-window layout.
+  const selectPanel = (panel: 'info' | 'resume'): void => {
+    if (tier !== 'compact') {
+      togglePanel(panel)
+      return
+    }
+    setRightPanel(rightPanel === panel ? 'none' : panel)
+  }
 
   useEffect(() => {
     if (!editing) return
@@ -126,13 +137,17 @@ export function TopBar({ collapsed }: TopBarProps) {
           icon="id-card"
           label="简历信息面板"
           pressed={infoVisible}
-          onClick={() => togglePanel('info')}
+          aria-controls="panel-dock"
+          aria-expanded={infoVisible}
+          onClick={() => selectPanel('info')}
         />
         <IconButton
           icon="pen"
           label="简历创作面板"
           pressed={resumeVisible}
-          onClick={() => togglePanel('resume')}
+          aria-controls="panel-dock"
+          aria-expanded={resumeVisible}
+          onClick={() => selectPanel('resume')}
         />
         {conversation === null ? null : (
           <Tooltip label={runStatus === 'idle' ? '删除对话' : '停止生成后才能删除'} placement="bottom">

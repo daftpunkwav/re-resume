@@ -32,6 +32,7 @@ import { EntryEditorArea } from './EntryEditorArea'
 import type { EntryEditorHandle } from './EntryEditor'
 import { EntryListArea } from './EntryListArea'
 import { moduleSelectionLabel } from './formatInfoValues'
+import { resolveRevealSelection } from './infoReveal'
 import { useInfoLayoutTier } from './infoLayout'
 import { ModuleNav } from './ModuleNav'
 import { bindInfoPanel, consumePendingInfoSearchFocus } from './panelBridge'
@@ -96,6 +97,7 @@ export function InfoPanel({ onAddEntryToConversation }: InfoPanelProps) {
   const busy = useInfoStore((state) => state.busy)
   const error = useInfoStore((state) => state.error)
   const agentTouched = useInfoStore((state) => state.agentTouched)
+  const revealRequest = useInfoStore((state) => state.revealRequest)
 
   const panelRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -197,6 +199,21 @@ export function InfoPanel({ onAddEntryToConversation }: InfoPanelProps) {
     input.focus()
     input.select()
   })
+
+  // A write the assistant made while another panel was in front lands here:
+  // the module and entry it changed are selected, and the row keeps the short
+  // agent marker the store already knows how to clear.
+  useEffect(() => {
+    if (revealRequest === null || loading) return
+    const store = useInfoStore.getState()
+    const consumed = store.consumeReveal()
+    if (consumed === null) return
+    const resolved = resolveRevealSelection(store.entries, consumed)
+    if (resolved === null) return
+    store.selectModule(resolved.selection)
+    if (resolved.entryId !== null) store.selectEntry(resolved.entryId)
+    if (consumed.entryIds.length > 0) store.markAgentTouched(consumed.entryIds)
+  }, [revealRequest, loading])
 
   // In the two-pane layouts the inspector is always populated: choosing a
   // module opens its first entry instead of an empty editor.

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
+import { ApplicationServicesProvider } from '../../../../src/presentation/app/ApplicationServicesProvider'
 import { ToolCard } from '../../../../src/presentation/features/conversation/ToolCard'
 import type { Message } from '../../../../src/domain/conversation/Message'
 import { parseDateTime } from '../../../../src/domain/shared/DateTime'
@@ -20,6 +21,7 @@ import {
   asResumeId,
   asRevisionId,
 } from '../../../../src/domain/shared/branded-id'
+import { stubCompositionRoot } from '../../../support/stubCompositionRoot'
 
 const AT: DateTime = parseDateTime('2026-01-01T00:00:00.000Z') as DateTime
 
@@ -60,19 +62,26 @@ function toolMessage(overrides: {
   }
 }
 
-function expand(message: Message): void {
-  render(<ToolCard message={message} />)
-  fireEvent.click(screen.getByRole('button'))
+async function expand(message: Message): Promise<void> {
+  render(
+    <ApplicationServicesProvider
+      createRoot={async () => stubCompositionRoot()}
+      resolveSnapshotPath={async () => 'test.hold'}
+    >
+      <ToolCard message={message} />
+    </ApplicationServicesProvider>,
+  )
+  fireEvent.click(await screen.findByRole('button'))
 }
 
 describe('the undo rows of a tool card', () => {
-  it('offers undo for a library change', () => {
-    expand(toolMessage({ toolName: 'createInfoEntry', changeIds: ['change-1'] }))
+  it('offers undo for a library change', async () => {
+    await expand(toolMessage({ toolName: 'createInfoEntry', changeIds: ['change-1'] }))
     expect(screen.getByRole('button', { name: /撤销此项/ })).toBeInTheDocument()
   })
 
-  it('offers undo for a resume revision', () => {
-    expand(
+  it('offers undo for a resume revision', async () => {
+    await expand(
       toolMessage({
         toolName: 'writeResumeSummary',
         revisionId: 'revision-2',
@@ -82,8 +91,8 @@ describe('the undo rows of a tool card', () => {
     expect(screen.getByRole('button', { name: /撤销此项/ })).toBeInTheDocument()
   })
 
-  it('marks create-resume as irreversible and offers no undo', () => {
-    expand(
+  it('marks create-resume as irreversible and offers no undo', async () => {
+    await expand(
       toolMessage({
         toolName: 'createResume',
         revisionId: 'revision-1',

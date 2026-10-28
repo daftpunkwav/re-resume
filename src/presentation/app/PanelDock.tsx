@@ -20,7 +20,7 @@
  *   cannot be seen must not keep its buttons in the tab order.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent } from 'react'
 import {
   PANEL_WIDTH_MAX,
@@ -32,6 +32,10 @@ import { TabList } from './components/Tabs'
 import { InfoPanel } from '../features/info/InfoPanel'
 import { requestInfoPanelClose } from '../features/info/panelBridge'
 import { ResumePanel } from '../features/resume/ResumePanel'
+import {
+  addEntryToConversation,
+  addResumeToConversation,
+} from '../features/conversation/contextInjection'
 import { ResizeHandle } from './ResizeHandle'
 import type { LayoutTier } from './useLayoutTier'
 import { useShellStore } from './stores/shellStore'
@@ -56,7 +60,11 @@ const PANEL_TITLES: Readonly<Record<PanelKind, string>> = {
 const TWO_PANE_MIN_WIDTH = PANEL_WIDTH_MIN * 2
 
 function panelBody(kind: PanelKind) {
-  return kind === 'resume' ? <ResumePanel /> : <InfoPanel />
+  return kind === 'resume' ? (
+    <ResumePanel onAddResumeToConversation={addResumeToConversation} />
+  ) : (
+    <InfoPanel onAddEntryToConversation={addEntryToConversation} />
+  )
 }
 
 /**
@@ -158,8 +166,16 @@ export function PanelDock({ tier }: PanelDockProps) {
 
   const [activeTab, setActiveTab] = useState<PanelKind>('resume')
   const [splitRatio, setSplitRatio] = useState(0.5)
+  const dockRef = useRef<HTMLElement>(null)
 
   const open = rightPanel !== 'none'
+
+  // Below the compact breakpoint the drawer covers the conversation, so opening
+  // it moves the keyboard into it; Escape and the close button then return it.
+  useEffect(() => {
+    if (tier !== 'compact' || !open) return
+    dockRef.current?.focus()
+  }, [tier, open])
   const maximum = tier === 'wide' ? PANEL_WIDTH_MAX : PANEL_WIDTH_NARROW_MAX
   const storedWidth = Math.min(rightWidth, maximum)
   const both = rightPanel === 'both'
@@ -181,6 +197,8 @@ export function PanelDock({ tier }: PanelDockProps) {
 
   return (
     <aside
+      ref={dockRef}
+      id="panel-dock"
       className="panel-dock"
       data-open={open}
       aria-label="右侧面板"

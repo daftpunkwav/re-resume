@@ -136,7 +136,7 @@ import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReference
 import type { CanvasBlockId, CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { ProviderConfig } from '../domain/settings/ProviderConfig'
-import type { ChangeRecord } from '../domain/changes/ChangeRecord'
+import type { ChangeOp, ChangeRecord, ChangeScope } from '../domain/changes/ChangeRecord'
 import type { ChangeRecordId, RevisionId } from '../domain/shared/branded-id'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import type { MaterializedDocument } from '../domain/resume/ResumeSnapshot'
@@ -233,6 +233,11 @@ export interface ProviderService {
 export interface LibraryChangesService {
   readonly undo: (input: { readonly changeId: ChangeRecordId }) => Promise<ChangeRecord>
   /**
+   * Reads the recorded write for the transcript's locate action. Only the facts
+   * the interface points at are returned; the before/after payloads stay out.
+   */
+  readonly readChange: (changeId: ChangeRecordId) => Promise<ChangeRecordLocation | null>
+  /**
    * Reverses one resume revision the assistant produced, while it is still the
    * cursor. A later write refuses with `changeOutOfOrder`.
    */
@@ -240,6 +245,17 @@ export interface LibraryChangesService {
     readonly resumeId: ResumeId
     readonly revisionId: RevisionId
   }) => Promise<{ readonly label: string }>
+}
+
+/** One recorded write, reduced to the facts the interface shows or points at. */
+export interface ChangeRecordLocation {
+  readonly id: ChangeRecordId
+  readonly scope: ChangeScope
+  readonly entity: string
+  readonly entityId: string
+  readonly op: ChangeOp
+  readonly label: string
+  readonly undone: boolean
 }
 
 /**

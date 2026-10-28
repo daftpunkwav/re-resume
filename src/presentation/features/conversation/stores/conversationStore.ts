@@ -55,6 +55,7 @@ import { describeError } from '../../../app/errorMessages'
 import type { ReadableError } from '../../../app/errorMessages'
 import { showToast } from '../../../app/stores/toastStore'
 import { useSettingsStore } from '../../../app/stores/settingsStore'
+import { publishWorkspaceSignal } from '../workspaceEvents'
 import { useRunStore } from './runStore'
 
 /** How many stored messages one session opens; the newest N, oldest first. */
@@ -127,6 +128,8 @@ interface ConversationState {
   readonly attachmentError: ReadableError | null
   readonly undoBusy: ReadonlySet<string>
   readonly undone: ReadonlySet<string>
+  /** Increments when another panel attached a context and wants the composer focused. */
+  readonly composerFocusRequest: number
   connect(services: ConversationServices | null): void
   loadConversations(): Promise<void>
   /**
@@ -140,6 +143,8 @@ interface ConversationState {
   setComposerText(text: string): void
   addContext(context: MessageContext, label: string): void
   removeContext(context: MessageContext): void
+  /** Moves the keyboard to the composer after a chip was attached elsewhere. */
+  requestComposerFocus(): void
   /** Validates, ingests and appends the images to the composer. */
   attachFiles(files: readonly File[]): Promise<void>
   removeAttachment(attachmentId: AttachmentId): void
@@ -195,6 +200,7 @@ const EMPTY = {
   attachmentError: null,
   undoBusy: new Set<string>(),
   undone: new Set<string>(),
+  composerFocusRequest: 0,
 } as const satisfies Partial<ConversationState>
 
 /** Drops the ingest results of a composer that was reset while they ran. */
@@ -282,6 +288,10 @@ async function ingestImageFiles(
 export const useConversationStore = create<ConversationState>((set, get) => ({
   ...EMPTY,
 
+  requestComposerFocus() {
+    set({ composerFocusRequest: get().composerFocusRequest + 1 })
+  },
+
   connect(next) {
     if (services === next) return
     services = next
@@ -350,6 +360,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     messageGeneration += 1
     attachmentGeneration += 1
     useRunStore.getState().reset()
+    publishWorkspaceSignal({ kind: 'runSettled' })
     set({
       activeId: null,
       draft: true,
@@ -368,6 +379,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (current === null) return
     messageGeneration += 1
     useRunStore.getState().reset()
+    publishWorkspaceSignal({ kind: 'runSettled' })
     set({
       activeId: conversationId,
       draft: false,
@@ -619,6 +631,11 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       pendingUser: { text: clean, contexts, attachments },
       attachmentError: null,
     })
+    // The resume summary block and every resume tool read this identifier. It is
+    // the attached resume when the user attached one, so the chips and the
+    // document the turn is about cannot disagree.
+    const activeResumeId =
+      contexts.find((context) => context.kind === 'resume')?.refId ?? null
     useRunStore.getState().begin(conversationId)
     try {
       await current.conversation.runTurn(
@@ -632,7 +649,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
             attachmentIds: attachments.map((attachment) => attachment.id),
           },
           model: null,
-          activeResumeId: null,
+          activeResumeId,
         },
         (event) => get().applyEvent(event),
       )
@@ -659,6 +676,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     } finally {
       const started = useRunStore.getState().started
       useRunStore.getState().finish()
+      publishWorkspaceSignal({ kind: 'runSettled' })
       await Promise.all([get().loadMessagesFor(conversationId), get().loadConversations()])
       if (started) set({ pendingUser: null })
     }
@@ -693,12 +711,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       set({ error: describeError(failure) })
     } finally {
       useRunStore.getState().finish()
+      publishWorkspaceSignal({ kind: 'runSettled' })
       await Promise.all([get().loadMessagesFor(conversationId), get().loadConversations()])
     }
   },
 
   applyEvent(event) {
     useRunStore.getState().applyEvent(event)
+    // The workspace panels follow the same stream the transcript reduces. The
+    // bus keeps this store from importing the information and resume features.
+    publishWorkspaceSignal({ kind: 'agentEvent', event })
     switch (event.type) {
       case 'runStarted':
         set({ pendingUser: null })
@@ -809,6 +831,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       })
       showToast('success', '已撤销这次修改')
       void get().refreshContextEntries()
+      publishWorkspaceSignal({ kind: 'changesUndone', scope: 'library' })
       return true
     } catch (failure) {
       set((state) => {
@@ -836,6 +859,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         }
       })
       showToast('success', '已撤销这次修改')
+      publishWorkspaceSignal({ kind: 'changesUndone', scope: 'resume' })
       return true
     } catch (failure) {
       set((state) => {

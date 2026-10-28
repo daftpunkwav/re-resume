@@ -15,7 +15,7 @@
  *   shell reads the stores directly, and the regions read their own slices.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import {
   clampUiScale,
@@ -40,6 +40,7 @@ import { showToast } from './stores/toastStore'
 import { applyAppearance } from './theme/applyAppearance'
 import { useLayoutTier } from './useLayoutTier'
 import { TopBar } from './TopBar'
+import { WorkspaceIntegration } from './WorkspaceIntegration'
 import { ConversationView } from '../features/conversation/ConversationView'
 
 /** Below the wide breakpoint two panes would each fall under their minimum. */
@@ -58,6 +59,10 @@ export function AppShell() {
   const rightWidth = useShellStore((state) => state.rightWidth)
   const setRightPanel = useShellStore((state) => state.setRightPanel)
   const settingsOpen = useShellStore((state) => state.settingsOpen)
+  // The element that opened the dock, so closing it can give the keyboard back
+  // to the control the reader used rather than dropping focus on the document.
+  const panelReturnFocus = useRef<HTMLElement | null>(null)
+  const previousPanel = useRef(rightPanel)
 
   const collapsed = tier === 'compact' || collapsedPreference
   const maximum = tier === 'wide' ? PANEL_WIDTH_MAX : PANEL_WIDTH_NARROW_MAX
@@ -113,6 +118,21 @@ export function AppShell() {
     },
   })
 
+  useEffect(() => {
+    const previous = previousPanel.current
+    previousPanel.current = rightPanel
+    if (previous === 'none' && rightPanel !== 'none') {
+      const active = document.activeElement
+      panelReturnFocus.current = active instanceof HTMLElement ? active : null
+      return
+    }
+    if (previous === 'none' || rightPanel !== 'none') return
+    const target = panelReturnFocus.current
+    panelReturnFocus.current = null
+    if (target !== null && target.isConnected) target.focus()
+    else focusRegion('conversation')
+  }, [rightPanel])
+
   // The colour scheme can follow the operating system; a change there has to
   // reach the document even while nothing else about the settings changes.
   useEffect(() => {
@@ -152,6 +172,7 @@ export function AppShell() {
           rather than a panel drawn over a still-interactive page. */}
       <div className="shell-body" aria-hidden={settingsOpen || undefined}>
         <Sidebar collapsed={collapsed} />
+        <WorkspaceIntegration />
         <main className="workspace">
           <TopBar collapsed={collapsed} />
           <div className="workspace-body">

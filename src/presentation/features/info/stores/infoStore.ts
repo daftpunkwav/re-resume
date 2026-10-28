@@ -52,6 +52,19 @@ export const AGENT_TOUCH_MS = 2000
 /** The agent-write marker an entry row shows while the highlight lasts. */
 export type AgentTouchKind = 'created' | 'updated'
 
+/**
+ * A pending request to show one changed value. The workspace integration queues
+ * it after opening the panel; the mounted panel consumes it once the library it
+ * reads is on screen, so a write that lands while the panel is closed is still
+ * revealed when the panel opens.
+ */
+export interface InfoRevealRequest {
+  readonly entryIds: readonly InfoEntryId[]
+  readonly moduleKind: InfoModuleKind | null
+  readonly customModuleId: CustomModuleId | null
+  readonly nonce: number
+}
+
 export interface ModuleSelection {
   readonly moduleKind: InfoModuleKind
   readonly customModuleId: CustomModuleId | null
@@ -70,6 +83,8 @@ interface InfoState {
   readonly error: ReadableError | null
   /** Entry id → what the agent did to it; present for `AGENT_TOUCH_MS`. */
   readonly agentTouched: Readonly<Record<string, AgentTouchKind>>
+  /** The reveal waiting to be applied by the mounted panel. */
+  readonly revealRequest: InfoRevealRequest | null
   connect(service: InfoService): void
   refresh(): Promise<void>
   selectModule(selection: ModuleSelection): void
@@ -78,6 +93,14 @@ interface InfoState {
   clearError(): void
   markAgentTouched(ids: readonly InfoEntryId[], kind?: AgentTouchKind): void
   clearAgentTouches(): void
+  /** Queues a reveal; the panel applies it after its next read. */
+  requestReveal(request: {
+    readonly entryIds?: readonly InfoEntryId[]
+    readonly moduleKind?: InfoModuleKind | null
+    readonly customModuleId?: CustomModuleId | null
+  }): void
+  /** Reads and clears the queued reveal. */
+  consumeReveal(): InfoRevealRequest | null
   createEntry(input: Omit<CreateInfoEntryInput, 'origin'>): Promise<CreateInfoEntryOutput>
   updateEntry(input: {
     readonly entryId: InfoEntryId
@@ -118,6 +141,7 @@ interface EmptyState {
   readonly busy: boolean
   readonly error: ReadableError | null
   readonly agentTouched: Readonly<Record<string, AgentTouchKind>>
+  readonly revealRequest: InfoRevealRequest | null
 }
 
 const EMPTY_STATE: EmptyState = {
@@ -131,6 +155,7 @@ const EMPTY_STATE: EmptyState = {
   busy: false,
   error: null,
   agentTouched: {},
+  revealRequest: null,
 }
 
 let service: InfoService | null = null
@@ -245,7 +270,7 @@ function clearTouchTimer(id: string): void {
   agentTouchTimers.delete(id)
 }
 
-export const useInfoStore = create<InfoState>((set) => ({
+export const useInfoStore = create<InfoState>((set, get) => ({
   ...EMPTY_STATE,
 
   connect(nextService) {
@@ -299,6 +324,24 @@ export const useInfoStore = create<InfoState>((set) => ({
   clearAgentTouches() {
     for (const id of [...agentTouchTimers.keys()]) clearTouchTimer(id)
     set({ agentTouched: {} })
+  },
+
+  requestReveal(request) {
+    set({
+      revealRequest: {
+        entryIds: request.entryIds ?? [],
+        moduleKind: request.moduleKind ?? null,
+        customModuleId: request.customModuleId ?? null,
+        nonce: (get().revealRequest?.nonce ?? 0) + 1,
+      },
+    })
+  },
+
+  consumeReveal() {
+    const request: InfoRevealRequest | null = get().revealRequest
+    if (request === null) return null
+    set({ revealRequest: null })
+    return request
   },
 
   createEntry(input) {
@@ -370,6 +413,11 @@ export const useInfoStore = create<InfoState>((set) => ({
     })
   },
 }))
+
+/** True once a panel has connected this store to a root's facade. */
+export function isInfoStoreConnected(): boolean {
+  return service !== null
+}
 
 /** Test hook: forgets the connected service, the selection and every pending highlight. */
 export function resetInfoStore(): void {

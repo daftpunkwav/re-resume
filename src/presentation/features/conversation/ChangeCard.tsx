@@ -12,6 +12,8 @@
  *   conversation error, so the reader can retry after the blocking change.
  */
 
+import { useServices } from '../../app/ApplicationServicesProvider'
+import { revealLibraryChange, revealResumeRevision } from './revealChange'
 import { useConversationStore } from './stores/conversationStore'
 import { FeatureIcon } from './icons'
 import type { ChangeRecordId, ResumeId, RevisionId } from '../../../domain/shared/branded-id'
@@ -22,6 +24,7 @@ export interface ChangeCardProps {
 }
 
 export function ChangeCard({ changeId, label }: ChangeCardProps) {
+  const services = useServices()
   const undone = useConversationStore((state) => state.undone.has(changeId))
   const busy = useConversationStore((state) => state.undoBusy.has(changeId))
   const undoChange = useConversationStore((state) => state.undoChange)
@@ -33,6 +36,9 @@ export function ChangeCard({ changeId, label }: ChangeCardProps) {
       busy={busy}
       onUndo={() => {
         void undoChange(changeId)
+      }}
+      onLocate={() => {
+        void revealLibraryChange(services, changeId)
       }}
     />
   )
@@ -58,6 +64,7 @@ export function RevisionCard({ resumeId, revisionId, label }: RevisionCardProps)
       onUndo={() => {
         void undoRevision(resumeId, revisionId)
       }}
+      onLocate={() => revealResumeRevision(resumeId, revisionId)}
     />
   )
 }
@@ -67,13 +74,22 @@ interface UndoRowProps {
   readonly undone: boolean
   readonly busy: boolean
   readonly onUndo: () => void
+  readonly onLocate: () => void
 }
 
-function UndoRow({ label, undone, busy, onUndo }: UndoRowProps) {
+function UndoRow({ label, undone, busy, onUndo, onLocate }: UndoRowProps) {
   return (
     <div className={undone ? 'change-row change-row-undone' : 'change-row'}>
       <FeatureIcon name={undone ? 'check-circle' : 'pencil'} size={13} />
       <span className="change-row-label">{label}</span>
+      <button
+        type="button"
+        className="change-row-locate"
+        onClick={onLocate}
+        aria-label={`定位到「${label}」`}
+      >
+        定位
+      </button>
       {undone ? (
         <span className="change-row-state">已撤销</span>
       ) : (

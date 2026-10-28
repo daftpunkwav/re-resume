@@ -74,6 +74,10 @@ function readReplay(): PreviewConversationOptions {
       }
     case 'plain':
       return { script: PREVIEW_CONVERSATION_SCRIPT }
+    // The tool chain at a human pace, so the panels can be watched while the
+    // assistant writes; the default replay runs the same chain without pauses.
+    case 'tools':
+      return { turns: PREVIEW_TOOL_CHAIN_TURNS, pauseMs: 500 }
     default:
       return { turns: PREVIEW_TOOL_CHAIN_TURNS }
   }

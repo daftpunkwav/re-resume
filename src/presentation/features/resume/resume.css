@@ -301,7 +301,9 @@
 
 .studio-revision-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
+  row-gap: 4px;
   align-items: center;
   justify-content: space-between;
   padding: 5px var(--panel-gutter);
@@ -309,10 +311,14 @@
   background: var(--surface-panel);
 }
 
+/* The action group gained a conversation entry; a dock pane narrower than the
+   two groups lets them wrap instead of clipping the last button. */
 .studio-revision-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   align-items: center;
+  justify-content: flex-end;
   min-width: 0;
 }
 
@@ -338,6 +344,9 @@
   background: var(--surface-hover);
   color: var(--text-primary);
 }
+
+/* The action group gained a conversation entry; a dock pane narrower than
+   the two groups lets them wrap instead of clipping the last button. */
 
 .studio-revision-label {
   overflow: hidden;

@@ -27,15 +27,17 @@ export function ResumePanelReady({
   resume,
   activeTab,
   onTabChange,
+  onAddToConversation,
 }: {
   readonly resume: Resume
   readonly activeTab: StudioTab
   readonly onTabChange: (tab: StudioTab) => void
+  readonly onAddToConversation?: (resume: Resume) => void
 }) {
   return (
     <div className="resume-panel" data-frozen={resume.status === 'frozen' ? 'true' : undefined}>
       <ResumeLifecycle />
-      <ResumeToolbar />
+      <ResumeToolbar onAddToConversation={onAddToConversation} />
       <ResumeNotices />
       <div className="studio-canvas">
         <CanvasViewport />

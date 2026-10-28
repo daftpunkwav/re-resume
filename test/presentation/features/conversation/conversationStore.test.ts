@@ -99,7 +99,7 @@ function createHarness(): Harness {
       conversation,
       info,
       settings: createAppSettingsService({ repository: settingsRepository }),
-      libraryChanges: { undo, undoRevision },
+      libraryChanges: { undo, undoRevision, readChange: async () => null },
     },
   }
 }
@@ -202,6 +202,31 @@ describe('conversationStore send flow', () => {
     const contexts = useConversationStore.getState().contextsByMessage[user?.id ?? '']
     expect(contexts).toEqual([{ kind: 'entry', refId: 'entry-1' }])
     expect(useConversationStore.getState().composer.contexts).toEqual([])
+  })
+
+  it('names the attached resume as the active resume of the turn', async () => {
+    const harness = createHarness()
+    harness.bed.model.enqueue({ chunks: [{ type: 'text', textDelta: '收到。' }] })
+    await connect(harness)
+    await flush()
+
+    useConversationStore
+      .getState()
+      .addContext({ kind: 'resume', refId: asResumeId('resume-1') }, '简历：前端实习简历')
+    useConversationStore.getState().setComposerText('按这份简历调整')
+    await useConversationStore.getState().send()
+    await flush()
+
+    const rows = (
+      harness.bed.runs as unknown as { readonly rows: ReadonlyMap<string, { resumeId: string | null }> }
+    ).rows
+    const runs = [...rows.values()]
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.resumeId).toBe('resume-1')
+    const user = useConversationStore.getState().messages[0]
+    expect(useConversationStore.getState().contextsByMessage[user?.id ?? '']).toEqual([
+      { kind: 'resume', refId: 'resume-1' },
+    ])
   })
 
   it('keeps the partial answer and records the cancellation', async () => {

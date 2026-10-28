@@ -47,6 +47,7 @@ import type {
   ResumeId,
   ResumeOverrideId,
   ResumeSectionId,
+  RevisionId,
 } from '../../../domain/shared/branded-id'
 import type { ResolvedStyles } from '../../../application/resume/materializeDocument'
 import { resolveStyles } from '../../../application/resume/materializeDocument'
@@ -103,6 +104,13 @@ export interface SectionRequest {
   readonly nonce: number
 }
 
+/** One agent write to reveal: the resume, the revision it produced, one delivery. */
+export interface ResumeRevealRequest {
+  readonly resumeId: ResumeId
+  readonly revisionId: RevisionId | null
+  readonly nonce: number
+}
+
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 type ListStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -142,6 +150,8 @@ interface ResumeStudioState {
 
   readonly highlightedSectionIds: readonly ResumeSectionId[]
   readonly agentBusy: boolean
+  /** The agent write waiting to be revealed by the mounted studio. */
+  readonly revealRequest: ResumeRevealRequest | null
 
   attach(services: ResumeStudioServices): void
   detach(): void
@@ -198,6 +208,12 @@ interface ResumeStudioState {
 
   flashAgentSections(sectionIds: readonly ResumeSectionId[]): void
   clearAgentHighlight(): void
+  /** Marks the studio busy while a write tool runs and clears the marker after. */
+  setAgentBusy(busy: boolean): void
+  /** Queues an agent write for the mounted studio to reveal. */
+  requestAgentReveal(input: { readonly resumeId: ResumeId; readonly revisionId: RevisionId | null }): void
+  /** Reads and clears the queued reveal. */
+  consumeReveal(): ResumeRevealRequest | null
 }
 
 /** A single pending highlight timer; a second burst replaces the first. */
@@ -245,6 +261,7 @@ function emptyStudio(): Pick<
   | 'sectionRequest'
   | 'highlightedSectionIds'
   | 'agentBusy'
+  | 'revealRequest'
 > {
   return {
     list: [],
@@ -272,6 +289,7 @@ function emptyStudio(): Pick<
     sectionRequest: null,
     highlightedSectionIds: [],
     agentBusy: false,
+    revealRequest: null,
   }
 }
 
@@ -617,11 +635,17 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
 
     attach(services) {
       clearAgentHighlightTimer()
+      // A reveal queued while the dock was closed must survive the mount: it is
+      // the request that makes the panel show the write that opened it.
+      const pendingReveal = get().revealRequest
+      const pendingBusy = get().agentBusy
       set({
         ...emptyStudio(),
         services: bindServices(services),
         epoch: get().epoch + 1,
         zoom: 1,
+        revealRequest: pendingReveal,
+        agentBusy: pendingBusy,
       })
     },
 
@@ -959,7 +983,10 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
     flashAgentSections(sectionIds) {
       clearAgentHighlightTimer()
       if (sectionIds.length === 0) {
-        set({ highlightedSectionIds: [], agentBusy: false })
+        // Nothing to point at, but the run that asked for the highlight may
+        // still be writing: the busy marker belongs to the run lifecycle, not
+        // to one reveal, so this branch only clears the highlight.
+        set({ highlightedSectionIds: [] })
         return
       }
       set({ highlightedSectionIds: sectionIds, agentBusy: true })
@@ -972,6 +999,28 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
     clearAgentHighlight() {
       clearAgentHighlightTimer()
       set({ highlightedSectionIds: [], agentBusy: false })
+    },
+
+    setAgentBusy(busy) {
+      if (get().agentBusy === busy) return
+      set({ agentBusy: busy })
+    },
+
+    requestAgentReveal(input) {
+      set({
+        revealRequest: {
+          resumeId: input.resumeId,
+          revisionId: input.revisionId,
+          nonce: (get().revealRequest?.nonce ?? 0) + 1,
+        },
+      })
+    },
+
+    consumeReveal() {
+      const request = get().revealRequest
+      if (request === null) return null
+      set({ revealRequest: null })
+      return request
     },
   }
 })

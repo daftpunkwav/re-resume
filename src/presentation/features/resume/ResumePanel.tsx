@@ -14,6 +14,8 @@
 
 import { useState } from 'react'
 
+import type { Resume } from '../../../domain/resume/Resume'
+
 import { useServices } from '../../app/ApplicationServicesProvider'
 import { useResumeStore } from './resumeStore'
 import {
@@ -25,10 +27,16 @@ import {
 } from './ResumePanelStates'
 import { ResumePanelReady } from './ResumePanelReady'
 import { resumePanelStateOf } from './resumePanelState'
+import { useResumeAgentReveal } from './agentReveal'
 import { useStudioBootstrap, useStudioUndoShortcuts } from './useResumePanelLifecycle'
 import './resume.css'
 
-export function ResumePanel() {
+export interface ResumePanelProps {
+  /** Adds the open resume to the next turn; absent when the shell has no caller. */
+  readonly onAddResumeToConversation?: (resume: Resume) => void
+}
+
+export function ResumePanel({ onAddResumeToConversation }: ResumePanelProps = {}) {
   const services = useServices()
   const list = useResumeStore((state) => state.list)
   const listStatus = useResumeStore((state) => state.listStatus)
@@ -42,6 +50,7 @@ export function ResumePanel() {
 
   useStudioBootstrap({ resume: services.resume, info: services.info })
   useStudioUndoShortcuts()
+  useResumeAgentReveal()
 
   const state = resumePanelStateOf({
     listStatus,
@@ -81,5 +90,12 @@ export function ResumePanel() {
     )
   }
   if (resume === null) return <StudioMissingResume />
-  return <ResumePanelReady resume={resume} activeTab={activeTab} onTabChange={setActiveTab} />
+  return (
+    <ResumePanelReady
+      resume={resume}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onAddToConversation={onAddResumeToConversation}
+    />
+  )
 }
