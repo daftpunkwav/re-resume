@@ -19,10 +19,8 @@
 //!   webview could point outside the destination's own directory.
 //! - Only a destination the plugin's runtime scope already covers is written,
 //!   and this command grants nothing. In the export flow that grant is the path
-//!   the save dialog returned; the scope also holds what the open dialog
-//!   recorded (the capability file grants it for imports), and such a path
-//!   passes too. The check therefore bounds writes to paths a user picked in a
-//!   dialog, not to the save dialog's choice alone.
+//!   the save dialog returned, so the check bounds writes to a path the user
+//!   picked, not to any path the webview names by itself.
 
 use std::fs::OpenOptions;
 use std::io::Write;
