@@ -12,16 +12,19 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
   background: var(--surface-conversation);
 }
 
 .conversation-stage {
   position: relative;
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .conversation-view .conversation-scroll {
@@ -173,7 +176,7 @@
   gap: 4px;
   padding: 2px 8px;
   border-radius: var(--radius-full);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-size-sm);
 }
 
@@ -312,7 +315,7 @@
 }
 
 .markdown a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -425,7 +428,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent);
+  color: var(--accent-text);
   white-space: nowrap;
 }
 
@@ -615,7 +618,7 @@
   flex-shrink: 0;
   padding: 2px 8px;
   border-radius: var(--radius-full);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-size-xs);
 }
 
@@ -626,7 +629,7 @@
 /* Composer --------------------------------------------------------------- */
 
 .composer-region {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   padding: var(--space-2) var(--space-8) var(--space-4);
   background: var(--surface-conversation);
 }
@@ -650,7 +653,7 @@
 }
 
 .composer:focus-within {
-  border-color: var(--accent);
+  border-color: var(--accent-text);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
@@ -818,7 +821,7 @@
 }
 
 .provider-option-mark {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .provider-probe {
@@ -924,7 +927,7 @@
   flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .quick-action-copy {
@@ -961,6 +964,29 @@
   color: var(--text-secondary);
   font-size: var(--text-size-sm);
   overflow-wrap: anywhere;
+}
+
+/* A long transcript mounts its newest window only; the button reveals one page
+   of older turns at a time. */
+.transcript-older {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0 var(--space-4);
+}
+
+.transcript-older-button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: var(--text-size-xs);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.transcript-older-button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 /* Transcript extras ------------------------------------------------------ */
@@ -1149,7 +1175,7 @@
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .conversation-row-actions {
@@ -1230,7 +1256,7 @@
 .sidebar-empty-action {
   align-self: flex-start;
   margin-top: 2px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-size-xs);
 }
 
@@ -1248,7 +1274,7 @@
 }
 
 .topbar-title-button:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .topbar-title-input {
@@ -1436,7 +1462,7 @@
   border: 2px dashed var(--accent);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-size-sm);
   pointer-events: none;
 }

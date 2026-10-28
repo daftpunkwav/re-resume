@@ -185,7 +185,7 @@ export function Composer({ inputRef }: ComposerProps) {
           </div>
           <div className="composer-toolbar-trailing">
             <span className="composer-hint" id="composer-hint">
-              可粘贴或拖入截图 · Enter 发送 · Shift + Enter 换行
+              Enter 发送 · Shift + Enter 换行
             </span>
             {busy ? (
               <Button

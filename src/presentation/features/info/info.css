@@ -285,7 +285,6 @@
   display: inline-flex;
   gap: 2px;
   transform: translateY(-50%);
-  opacity: 0.75;
   pointer-events: none;
 }
 
@@ -404,7 +403,7 @@
 .info-mark {
   border-radius: 2px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* A row in the one-column layout opens the editor, so it carries a chevron;
@@ -626,9 +625,9 @@
 }
 
 .info-present-on {
-  border-color: var(--accent);
+  border-color: var(--accent-text);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .info-present-on .info-present-dot {
@@ -952,7 +951,7 @@
 
 .info-module-field-required input {
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-text);
 }
 
 .info-module-field :disabled {

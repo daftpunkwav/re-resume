@@ -83,6 +83,16 @@ function readReplay(): PreviewConversationOptions {
   }
 }
 
+/**
+ * The preview variant without a configured model service. The empty-state
+ * warning and its actions are taller than the configured welcome, so the layout
+ * needs a fixture that exercises them; `?providers=none` selects it.
+ */
+function readUnconfiguredProviders(): boolean {
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('providers') === 'none'
+}
+
 /** The library and resume capabilities over the shared preview state. */
 function createPreviewLibraryServices(state: PreviewConversationState): {
   readonly info: CompositionRoot['info']
@@ -135,8 +145,11 @@ function createPreviewLibraryServices(state: PreviewConversationState): {
 function createPreviewProviders(deps: {
   readonly settings: AppSettingsRepository
   readonly secrets: SecretStore
+  readonly unconfigured: boolean
 }): ProviderService {
-  const providers = new InMemoryProviderConfigRepository(PREVIEW_PROVIDERS)
+  const providers = new InMemoryProviderConfigRepository(
+    deps.unconfigured ? [] : PREVIEW_PROVIDERS,
+  )
   const clock = new FakeClock()
   const ids = new SequentialIdGenerator('preview-provider')
   return createProviderService({
@@ -169,9 +182,14 @@ interface PreviewState {
 let windowState: PreviewState | null = null
 
 function createPreviewState(): PreviewState {
-  const settings = new InMemoryAppSettingsRepository(PREVIEW_SETTINGS)
+  const unconfigured = readUnconfiguredProviders()
+  const settings = new InMemoryAppSettingsRepository(
+    unconfigured ? { ...PREVIEW_SETTINGS, activeProviderId: null } : PREVIEW_SETTINGS,
+  )
   const secrets = new InMemorySecretStore(
-    PREVIEW_PROVIDERS.map((config) => [config.secretRef, PREVIEW_PROVIDER_CREDENTIAL] as const),
+    unconfigured
+      ? []
+      : PREVIEW_PROVIDERS.map((config) => [config.secretRef, PREVIEW_PROVIDER_CREDENTIAL] as const),
   )
   const conversation = createPreviewConversationService(readReplay())
   const library = createPreviewLibraryServices(conversation.state)
@@ -183,7 +201,7 @@ function createPreviewState(): PreviewState {
     resume: library.resume,
     libraryChanges: library.libraryChanges,
     export: library.export,
-    providers: createPreviewProviders({ settings, secrets }),
+    providers: createPreviewProviders({ settings, secrets, unconfigured }),
     seed: createSeedDataService({
       settings,
       info: library.info,

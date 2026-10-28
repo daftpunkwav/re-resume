@@ -11,7 +11,7 @@
  *   the jump button is the way back.
  */
 
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { IconButton } from '../../app/components/IconButton'
 import type { Attachment } from '../../../domain/conversation/Attachment'
 import type { Message } from '../../../domain/conversation/Message'
@@ -24,6 +24,15 @@ import { useRunStore } from './stores/runStore'
 import { ToolCard } from './ToolCard'
 
 const SKELETON_ROWS = 3
+
+/**
+ * The window of turns the transcript mounts. The store keeps up to 2000
+ * messages per conversation, but only the newest window is in the DOM: the rest
+ * stay stored and are revealed a page at a time, so scroll and typing cost stay
+ * independent of the stored history.
+ */
+export const INITIAL_VISIBLE_GROUPS = 80
+export const LOAD_OLDER_GROUPS = 80
 
 /** Shared empty list so a message without images keeps a stable memo prop. */
 const NO_ATTACHMENTS: readonly Attachment[] = []
@@ -47,6 +56,12 @@ export function MessageList() {
   const retryableId = useMemo(() => retryableAssistantId(messages), [messages])
   const contentKey = messages.length + (pendingUser === null ? 0 : 1)
   const { containerRef, atBottom, jumpToBottom, followIfAtBottom } = useStickToBottom(contentKey)
+  // Only the newest window of turns is mounted. A conversation may hold up to
+  // 2000 messages, and mounting all of them would make scroll and input cost
+  // grow with the stored history; older turns are revealed a page at a time.
+  const [visibleGroupCount, setVisibleGroupCount] = useState(INITIAL_VISIBLE_GROUPS)
+  const hiddenGroupCount = Math.max(0, groups.length - visibleGroupCount)
+  const visibleGroups = hiddenGroupCount === 0 ? groups : groups.slice(hiddenGroupCount)
 
   // An image paints after the message row exists (its bytes are read on mount),
   // which grows the transcript without changing the message count. Watching the
@@ -146,6 +161,18 @@ export function MessageList() {
           </div>
         ) : null}
 
+        {hiddenGroupCount === 0 ? null : (
+          <div className="transcript-older">
+            <button
+              type="button"
+              className="transcript-older-button"
+              onClick={() => setVisibleGroupCount((count) => count + LOAD_OLDER_GROUPS)}
+            >
+              显示更早的 {Math.min(hiddenGroupCount, LOAD_OLDER_GROUPS).toString()} 条对话
+            </button>
+          </div>
+        )}
+
         {blank ? (
           <div className="transcript-blank">
             <FeatureIcon name="sparkles" size={20} />
@@ -154,7 +181,7 @@ export function MessageList() {
           </div>
         ) : null}
 
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <section className="message-group" key={group.key} aria-label="一轮对话">
             {group.user === null ? null : (
               <MessageItem

@@ -143,14 +143,12 @@ export function ResumeLifecycle() {
             className="studio-resume-button"
             aria-haspopup="dialog"
             aria-expanded={listOpen}
-            aria-label={`当前简历：${resume.title}`}
+            aria-label={`当前简历：${resume.title}${resumeStatusLabel(resume.status)}`}
             onClick={() => setListOpen((open) => !open)}
           >
             <span className="studio-resume-title">{resume.title}</span>
             <Badge tone={frozen ? 'info' : 'neutral'}>{resumeStatusLabel(resume.status)}</Badge>
-            <span className="studio-chevron" aria-hidden="true">
-              ▾
-            </span>
+            <span className="studio-chevron" aria-hidden="true" />
           </button>
           <Popover open={listOpen} label="切换简历" align="start" onClose={() => setListOpen(false)}>
             <p className="popover-title">简历</p>

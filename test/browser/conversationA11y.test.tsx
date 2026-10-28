@@ -19,7 +19,7 @@ import '../../src/presentation/features/conversation/conversation.css'
 
 function accentColour(): string {
   const probe = document.createElement('span')
-  probe.style.color = 'var(--accent)'
+  probe.style.color = 'var(--accent-text)'
   document.body.append(probe)
   const colour = getComputedStyle(probe).color
   probe.remove()

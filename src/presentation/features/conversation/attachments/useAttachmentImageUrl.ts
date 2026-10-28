@@ -21,7 +21,7 @@
 import { useEffect, useState } from 'react'
 import type { Attachment } from '../../../../domain/conversation/Attachment'
 import { useServices } from '../../../app/ApplicationServicesProvider'
-import { createPreviewUrl, filePreviewUrl, revokePreviewUrl } from './attachmentFormat'
+import { createThumbnailUrl, filePreviewUrl, revokePreviewUrl } from './attachmentFormat'
 
 export type AttachmentImageState =
   | { readonly kind: 'idle' }
@@ -51,12 +51,16 @@ export function useAttachmentImageUrl(
     let url: string | null = null
     void services.conversation
       .readAttachmentBytes(attachment.id)
-      .then((bytes) => {
-        if (cancelled) return
-        url = createPreviewUrl(bytes, attachment.mimeType)
+      .then(async (bytes) => {
+        const thumbnail = await createThumbnailUrl(bytes, attachment.mimeType)
+        if (cancelled) {
+          revokePreviewUrl(thumbnail)
+          return
+        }
+        url = thumbnail
         setLoaded({
           id: attachment.id,
-          state: url === null ? { kind: 'unavailable' } : { kind: 'ready', url },
+          state: thumbnail === null ? { kind: 'unavailable' } : { kind: 'ready', url: thumbnail },
         })
       })
       .catch(() => {

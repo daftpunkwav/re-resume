@@ -163,7 +163,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
           <button
             type="button"
             className="sidebar-item sidebar-settings"
-            aria-label="设置"
+            aria-label={`设置 ${primaryModifierLabel()} + ,`}
             aria-current={settingsOpen ? 'page' : undefined}
             onClick={() => openSettings()}
           >
@@ -171,7 +171,11 @@ export function Sidebar({ collapsed }: SidebarProps) {
             {collapsed ? null : (
               <>
                 <span className="sidebar-item-label">设置</span>
-                <ShortcutKeys keys={[primaryModifierLabel(), ',']} />
+                {/* Decorative: the visible shortcut hint must not change the
+                    button's accessible name ("设置"). */}
+                <span aria-hidden="true">
+                  <ShortcutKeys keys={[primaryModifierLabel(), ',']} />
+                </span>
               </>
             )}
           </button>

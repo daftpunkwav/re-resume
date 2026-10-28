@@ -68,3 +68,8 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # The browser flows drive the preview assembly in a real Chromium; the
+      # browser install step above already fetched it.
+      - name: End-to-end tests
+        run: pnpm run test:e2e

@@ -71,6 +71,52 @@ export function filePreviewUrl(file: File): string | null {
   return url
 }
 
+/** Longest edge a thumbnail decodes to. A transcript shows the image far below
+ * its original resolution, so the browser only ever decodes this many pixels. */
+export const THUMBNAIL_MAX_EDGE = 320
+
+/**
+ * A display-sized object URL for image bytes. The original image is decoded
+ * once through `createImageBitmap`, redrawn at no more than `maxEdge` pixels on
+ * its longest side and re-encoded; the full-resolution bitmap is closed before
+ * returning, so a 12-megapixel screenshot does not stay resident for the life of
+ * the message. Platforms without the two APIs get the original bytes instead.
+ */
+export async function createThumbnailUrl(
+  bytes: Uint8Array,
+  mimeType: string,
+  maxEdge = THUMBNAIL_MAX_EDGE,
+): Promise<string | null> {
+  const original = createPreviewUrl(bytes, mimeType)
+  if (original === null) return null
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return original
+  const blob = new Blob([bytes as BufferSource], { type: mimeType })
+  let bitmap: ImageBitmap | null = null
+  try {
+    bitmap = await createImageBitmap(blob)
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (context === null) return original
+    context.drawImage(bitmap, 0, 0, width, height)
+    const encoded = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.85)
+    })
+    if (encoded === null) return original
+    if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(original)
+    return URL.createObjectURL(encoded)
+  } catch {
+    // An unsupported codec or a malformed image must still paint its chip.
+    return original
+  } finally {
+    bitmap?.close()
+  }
+}
+
 export function revokePreviewUrl(url: string | null): void {
   if (url !== null && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
 }
