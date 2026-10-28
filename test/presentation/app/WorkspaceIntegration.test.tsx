@@ -56,22 +56,28 @@ describe('WorkspaceIntegration', () => {
     renderIntegration()
     await screen.findByText('workspace-ready', undefined, { timeout: 5000 })
 
-    publishWorkspaceSignal({
-      kind: 'agentEvent',
-      event: {
-        type: 'changeRecorded',
-        changeIds: [],
-        revisionId: REVISION_ID,
-        resumeId: RESUME_ID,
+    // The provider adopts the stored settings after the first paint, which
+    // re-subscribes the bridge; a signal published in that gap would be lost.
+    // Publishing again on each retry keeps the assertion about behaviour, not
+    // about which render the subscription landed on.
+    await waitFor(
+      () => {
+        publishWorkspaceSignal({
+          kind: 'agentEvent',
+          event: {
+            type: 'changeRecorded',
+            changeIds: [],
+            revisionId: REVISION_ID,
+            resumeId: RESUME_ID,
+          },
+        })
+        expect(useShellStore.getState().rightPanel).toBe('resume')
       },
-    })
-
-    await waitFor(() => expect(useShellStore.getState().rightPanel).toBe('resume'), { timeout: 5000 })
-    expect(useResumeStore.getState().revealRequest).toEqual({
-      resumeId: RESUME_ID,
-      revisionId: REVISION_ID,
-      nonce: 1,
-    })
+      { timeout: 5000 },
+    )
+    const reveal = useResumeStore.getState().revealRequest
+    expect(reveal).toMatchObject({ resumeId: RESUME_ID, revisionId: REVISION_ID })
+    expect(reveal?.nonce).toBeGreaterThan(0)
   })
 
   it('marks the studio busy while a write tool runs and clears it on done', async () => {

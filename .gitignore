@@ -98,3 +98,7 @@ logs/
 
 # Rewritten history is not a source commit
 .git.backup-*/
+
+test-results/
+playwright-report/
+blob-report/

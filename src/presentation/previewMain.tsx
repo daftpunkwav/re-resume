@@ -25,4 +25,9 @@ export function mountPreviewWindow(container: HTMLElement): void {
       </ApplicationServicesProvider>
     </StrictMode>,
   )
+  // The end-to-end harness measures first paint against this mark; two animation
+  // frames put it after the first painted frame rather than after React's commit.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => performance.mark('boot:interactive'))
+  })
 }
