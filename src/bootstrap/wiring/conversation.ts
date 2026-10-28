@@ -31,6 +31,12 @@ import type { FileStore } from '../../domain/conversation/ports/FileStore'
 import type { AgentRunRepository } from '../../domain/generation/ports/AgentRunRepository'
 import type { JobPostingRepository } from '../../domain/generation/ports/JobPostingRepository'
 import type { ToolInvocationRepository } from '../../domain/generation/ports/ToolInvocationRepository'
+import type { ChangeLogRepository } from '../../domain/changes/ports/ChangeLogRepository'
+import type { CustomModuleRepository } from '../../domain/info/ports/CustomModuleRepository'
+import type { InfoEntryReferenceQuery } from '../../domain/info/ports/InfoEntryReferenceQuery'
+import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepository'
+import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
+import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
 import type { ModelProvider } from '../../domain/generation/ports/ModelProvider'
 import type { ProviderConfig } from '../../domain/settings/ProviderConfig'
 import type { ProviderConfigRepository } from '../../domain/settings/ports/ProviderConfigRepository'
@@ -62,9 +68,9 @@ import { recoverInterruptedRuns } from '../../application/generation/recoverInte
 import type { RecoverySummary } from '../../application/generation/recoverInterruptedRuns'
 import { retryRun } from '../../application/generation/retryRun'
 import { runAgentTurn } from '../../application/generation/runAgentTurn'
+import { buildToolRegistry } from '../../application/generation/buildToolRegistry'
 import type { RunAgentTurnInput } from '../../application/generation/runAgentTurn'
 import type { ActiveRunRegistry } from '../../application/generation/activeRunRegistry'
-import type { ToolRegistry } from '../../domain/generation/ports/ToolRegistry'
 import { UnconfiguredModelProvider } from '../../infrastructure/http/ProviderAdapters/UnconfiguredModelProvider'
 import { OpenAiCompatibleProvider } from '../../infrastructure/http/ProviderAdapters/OpenAiCompatibleProvider'
 import { AnthropicProvider } from '../../infrastructure/http/ProviderAdapters/AnthropicProvider'
@@ -83,8 +89,19 @@ export interface ConversationRepositories {
   readonly fileStore: FileStore
 }
 
+/** The library and resume ports the tool pack writes through. */
+export interface ConversationLibrary {
+  readonly entries: InfoEntryRepository
+  readonly customModules: CustomModuleRepository
+  readonly references: InfoEntryReferenceQuery
+  readonly resumes: ResumeRepository
+  readonly changes: ChangeLogRepository
+  readonly measurer: TextMeasurer
+}
+
 export interface ConversationWiringOptions {
   readonly repositories: ConversationRepositories
+  readonly library: ConversationLibrary
   readonly clock: Clock
   readonly ids: IdGenerator
   readonly model: ModelProvider
@@ -131,23 +148,36 @@ export interface ConversationService {
   recoverInterruptedRuns(): Promise<RecoverySummary>
 }
 
-export interface ConversationServiceInput extends ConversationWiringOptions {
-  readonly registry: ToolRegistry
-}
+export type ConversationServiceInput = ConversationWiringOptions
 
 export function createConversationService(input: ConversationServiceInput): ConversationService {
   const {
     repositories,
+    library,
     clock,
     ids,
     model,
     titleModel,
     activeRuns,
     secrets,
-    registry,
     maxOutputTokens,
     onWarning,
   } = input
+  const registry = buildToolRegistry({
+    model,
+    entries: library.entries,
+    customModules: library.customModules,
+    references: library.references,
+    resumes: library.resumes,
+    changes: library.changes,
+    jobPostings: repositories.jobPostings,
+    runs: repositories.runs,
+    attachments: repositories.attachments,
+    fileStore: repositories.fileStore,
+    measurer: library.measurer,
+    clock,
+    ids,
+  })
   const turnDeps = (signal: AbortSignal, emit: (event: AgentEvent) => void) => ({
     model,
     titleModel,
@@ -160,6 +190,11 @@ export function createConversationService(input: ConversationServiceInput): Conv
     jobPostings: repositories.jobPostings,
     attachments: repositories.attachments,
     fileStore: repositories.fileStore,
+    infoEntries: library.entries,
+    customModules: library.customModules,
+    resumes: library.resumes,
+    changes: library.changes,
+    measurer: library.measurer,
     clock,
     ids,
     emit,

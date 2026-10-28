@@ -13,14 +13,17 @@ import type { LibraryChangesService } from '../capabilities'
 import type { ChangeLogRepository } from '../../domain/changes/ports/ChangeLogRepository'
 import type { CustomModuleRepository } from '../../domain/info/ports/CustomModuleRepository'
 import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepository'
+import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
 import type { Clock } from '../../domain/shared/Clock'
 import { createLibraryChangeInverseWriter } from '../../application/changes/libraryChangeInverseWriter'
 import { undoLibraryChange } from '../../application/changes/undoLibraryChange'
+import { undoRevision } from '../../application/generation/tools/undoTools'
 
 export interface LibraryChangesWiring {
   readonly changes: ChangeLogRepository
   readonly entries: InfoEntryRepository
   readonly customModules: CustomModuleRepository
+  readonly resumes: ResumeRepository
   readonly clock: Clock
 }
 
@@ -30,5 +33,6 @@ export function createLibraryChangesService(
   const inverse = createLibraryChangeInverseWriter(wiring)
   return {
     undo: (input) => undoLibraryChange({ changes: wiring.changes, inverse, clock: wiring.clock }, input),
+    undoRevision: (input) => undoRevision({ resumes: wiring.resumes }, input),
   }
 }
