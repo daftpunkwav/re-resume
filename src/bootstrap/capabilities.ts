@@ -15,6 +15,46 @@
  * - A capability is added here when the interface can call it, not before.
  */
 
+import type {
+  CreateCustomModuleInput,
+  CreateCustomModuleOutput,
+} from '../application/info/createCustomModule'
+import type {
+  CreateInfoEntryInput,
+  CreateInfoEntryOutput,
+} from '../application/info/createInfoEntry'
+import type {
+  DeleteCustomModuleInput,
+  DeleteCustomModuleOutput,
+} from '../application/info/deleteCustomModule'
+import type {
+  DeleteInfoEntryInput,
+  DeleteInfoEntryOutput,
+} from '../application/info/deleteInfoEntry'
+import type {
+  ListInfoEntriesInput,
+  ListInfoEntriesOutput,
+} from '../application/info/listInfoEntries'
+import type {
+  ReorderCustomModulesInput,
+  ReorderCustomModulesOutput,
+} from '../application/info/reorderCustomModules'
+import type {
+  ReorderInfoEntriesInput,
+  ReorderInfoEntriesOutput,
+} from '../application/info/reorderInfoEntries'
+import type {
+  SearchInfoEntriesInput,
+  SearchInfoEntriesOutput,
+} from '../application/info/searchInfoEntries'
+import type {
+  UpdateCustomModuleInput,
+  UpdateCustomModuleOutput,
+} from '../application/info/updateCustomModule'
+import type {
+  UpdateInfoEntryInput,
+  UpdateInfoEntryOutput,
+} from '../application/info/updateInfoEntry'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 
@@ -35,9 +75,37 @@ export interface AppSettingsService {
   readonly save: (patch: Partial<AppSettings>) => Promise<AppSettings>
 }
 
+/**
+ * The information library as the interface sees it: the library use cases,
+ * already bound to their repositories, clock and identifier source. The facade
+ * hands out domain values and throws `DomainError` for a refusal; it hides which
+ * storage answers.
+ */
+export interface InfoService {
+  readonly listEntries: (input?: ListInfoEntriesInput) => Promise<ListInfoEntriesOutput>
+  readonly searchEntries: (input: SearchInfoEntriesInput) => Promise<SearchInfoEntriesOutput>
+  readonly createEntry: (input: CreateInfoEntryInput) => Promise<CreateInfoEntryOutput>
+  readonly updateEntry: (input: UpdateInfoEntryInput) => Promise<UpdateInfoEntryOutput>
+  readonly deleteEntry: (input: DeleteInfoEntryInput) => Promise<DeleteInfoEntryOutput>
+  readonly reorderEntries: (input: ReorderInfoEntriesInput) => Promise<ReorderInfoEntriesOutput>
+  readonly createCustomModule: (
+    input: CreateCustomModuleInput,
+  ) => Promise<CreateCustomModuleOutput>
+  readonly updateCustomModule: (
+    input: UpdateCustomModuleInput,
+  ) => Promise<UpdateCustomModuleOutput>
+  readonly deleteCustomModule: (
+    input: DeleteCustomModuleInput,
+  ) => Promise<DeleteCustomModuleOutput>
+  readonly reorderCustomModules: (
+    input: ReorderCustomModulesInput,
+  ) => Promise<ReorderCustomModulesOutput>
+}
+
 export interface CompositionRoot {
   readonly appInfo: AppInfo
   readonly settings: AppSettingsService
+  readonly info: InfoService
   /**
    * The encrypted credential store. The interface reaches it through the
    * provider settings once those exist; the root owns the handle so the window

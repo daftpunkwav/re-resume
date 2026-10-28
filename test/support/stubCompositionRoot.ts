@@ -6,12 +6,23 @@
  */
 
 import type { CompositionRoot } from '../../src/bootstrap/capabilities'
+import { createInfoService } from '../../src/bootstrap/wiring/info'
 import { DEFAULT_APP_SETTINGS } from '../../src/domain/settings/AppSettings'
 import type { AppSettings } from '../../src/domain/settings/AppSettings'
 import { InMemorySecretStore } from '../../src/infrastructure/preview/inMemoryRepositories'
+import {
+  InMemoryChangeLogRepository,
+  InMemoryCustomModuleRepository,
+  InMemoryEntryReferenceQuery,
+  InMemoryInfoEntryRepository,
+} from '../../src/infrastructure/preview/inMemoryInfoRepositories'
+import { FixedClock, SequentialIdGenerator } from './fakeEnvironment'
 
 export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): CompositionRoot {
   const settings: AppSettings = DEFAULT_APP_SETTINGS
+  const changes = new InMemoryChangeLogRepository()
+  const entries = new InMemoryInfoEntryRepository(changes)
+  const customModules = new InMemoryCustomModuleRepository(entries, changes)
   return {
     appInfo: {
       version: '0.0.0-test',
@@ -24,6 +35,13 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
       read: async () => settings,
       save: async (patch) => ({ ...settings, ...patch }),
     },
+    info: createInfoService({
+      entries,
+      customModules,
+      references: new InMemoryEntryReferenceQuery(),
+      clock: new FixedClock(),
+      ids: new SequentialIdGenerator('stub'),
+    }),
     secrets: new InMemorySecretStore(),
     shutdown: async () => undefined,
     ...overrides,
