@@ -42,6 +42,7 @@ import { createLibraryChangesService } from './wiring/changes'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
+import { TauriAttachmentStore } from '../infrastructure/attachments/TauriAttachmentStore'
 import type { ManagedSqlDatabase } from '../infrastructure/persistence/sqlite'
 import { SqliteAppSettingsRepository } from '../infrastructure/persistence/settings/SqliteAppSettingsRepository'
 import { SqliteProviderConfigRepository } from '../infrastructure/persistence/settings/SqliteProviderConfigRepository'
@@ -131,29 +132,11 @@ async function resolveDatabaseFile(): Promise<string | null> {
 }
 
 /**
- * Attachment storage in the native build. The Tauri-backed store belongs to the
- * attachment work; until a root provides one, ingesting an attachment fails
- * with this reason instead of writing bytes somewhere that is not the
- * application's attachment directory.
+ * Builds the conversation repositories over the shared file store. The root
+ * constructs one native attachment store and hands it here, so the ingest path,
+ * the backup document and the orphan sweep all read and write the same
+ * attachment directory.
  */
-class UnavailableAttachmentStore implements FileStore {
-  async write(_storageName: string, _bytes: Uint8Array): Promise<void> {
-    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
-  }
-
-  async read(_storageName: string): Promise<Uint8Array> {
-    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
-  }
-
-  async delete(_storageName: string): Promise<void> {
-    throw new Error('当前版本尚未接入本地附件存储，附件功能不可用。')
-  }
-
-  async list(): Promise<readonly string[]> {
-    return []
-  }
-}
-
 function createConversationRepositories(
   database: ManagedSqlDatabase,
   fileStore: FileStore,
@@ -399,7 +382,7 @@ export async function createCompositionRoot(
       ids,
       stronghold: options.stronghold,
     })
-    const fileStore = new UnavailableAttachmentStore()
+    const fileStore = new TauriAttachmentStore()
     const conversationRepositories = createConversationRepositories(database, fileStore)
     const measuredLibrary: Omit<ConversationLibrary, 'measurer'> = {
       entries: repositories.entries,
