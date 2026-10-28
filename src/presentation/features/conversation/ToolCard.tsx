@@ -19,16 +19,27 @@ import { useId, useState } from 'react'
 import { Badge } from '../../app/components/Badge'
 import { Spinner } from '../../app/components/Spinner'
 import { useRunStore } from './stores/runStore'
-import { ChangeCard } from './ChangeCard'
+import { ChangeCard, RevisionCard } from './ChangeCard'
 import { FeatureIcon } from './icons'
 import type { Message } from '../../../domain/conversation/Message'
-import type { ChangeRecordId } from '../../../domain/shared/branded-id'
+import type {
+  ChangeRecordId,
+  ResumeId,
+  RevisionId,
+} from '../../../domain/shared/branded-id'
 
 const RISK_LABELS = {
   read: '读取',
   write: '修改',
   draft: '草稿',
 } as const
+
+/**
+ * Tools whose write deliberately has no undo (a resume cannot be deleted from a
+ * card; its metadata is not part of the revision history). The card says so
+ * instead of offering an operation the use case would refuse.
+ */
+const IRREVERSIBLE_TOOLS: ReadonlySet<string> = new Set(['createResume', 'updateResume'])
 
 type ToolStatus = 'running' | 'failed' | 'ok'
 
@@ -104,9 +115,22 @@ interface ToolCardBodyProps {
   readonly argsSummary: string
   readonly detail: string
   readonly changeIds: readonly ChangeRecordId[]
+  readonly revisionId: RevisionId | null
+  readonly resumeId: ResumeId | null
+  readonly irreversible: boolean
 }
 
-function ToolCardBody({ bodyId, argsSummary, detail, changeIds }: ToolCardBodyProps) {
+function ToolCardBody({
+  bodyId,
+  argsSummary,
+  detail,
+  changeIds,
+  revisionId,
+  resumeId,
+  irreversible,
+}: ToolCardBodyProps) {
+  const revisionUndoable = !irreversible && revisionId !== null && resumeId !== null
+  const undoableCount = changeIds.length + (revisionUndoable ? 1 : 0)
   return (
     <div className="tool-card-body" id={bodyId}>
       {argsSummary === '' ? null : (
@@ -120,15 +144,25 @@ function ToolCardBody({ bodyId, argsSummary, detail, changeIds }: ToolCardBodyPr
       ) : (
         <p className="tool-card-detail">{detail}</p>
       )}
-      {changeIds.length === 0 ? null : (
+      {irreversible ? (
+        <p className="tool-card-empty">此操作不进入撤销历史，可在简历列表中调整或删除。</p>
+      ) : null}
+      {undoableCount === 0 ? null : (
         <div className="change-list">
           {changeIds.map((changeId, index) => (
             <ChangeCard
               key={changeId}
               changeId={changeId}
-              label={changeLabel(changeIds.length, index)}
+              label={changeLabel(undoableCount, index)}
             />
           ))}
+          {revisionUndoable && revisionId !== null && resumeId !== null ? (
+            <RevisionCard
+              resumeId={resumeId}
+              revisionId={revisionId}
+              label={changeLabel(undoableCount, changeIds.length)}
+            />
+          ) : null}
         </div>
       )}
     </div>
@@ -156,7 +190,11 @@ export function ToolCard({ message }: ToolCardProps) {
   const status: ToolStatus = running ? 'running' : failed ? 'failed' : 'ok'
   const detail = live !== undefined && live.summary !== '' ? live.summary : payload.detail
   const argsSummary = running && live !== undefined ? live.argsSummary : ''
-  const expandable = detail !== '' || argsSummary !== '' || payload.changeIds.length > 0
+  const irreversible = IRREVERSIBLE_TOOLS.has(payload.toolName)
+  const revisionUndoable =
+    !irreversible && payload.revisionId !== null && payload.resumeId !== null
+  const undoable = payload.changeIds.length > 0 || revisionUndoable
+  const expandable = detail !== '' || argsSummary !== '' || undoable || irreversible
 
   return (
     <article
@@ -180,6 +218,9 @@ export function ToolCard({ message }: ToolCardProps) {
           argsSummary={argsSummary}
           detail={detail}
           changeIds={payload.changeIds}
+          revisionId={payload.revisionId}
+          resumeId={payload.resumeId}
+          irreversible={irreversible}
         />
       ) : null}
     </article>
