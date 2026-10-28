@@ -13,7 +13,8 @@
  * The version map is forward-only. Versions 3 to 6 were registered while their
  * files were empty placeholders; their bodies stay byte-identical, and later
  * schemas ship as new versions: the information library at 7, the conversation
- * runtime at 8 and the resume document at 9.
+ * runtime at 8 and the resume document at 9. Version 10 removes the v1 tables
+ * those rebuilds left behind.
  *
  * Constraints:
  * - Each test opens a temporary file, because the plugin migrates a file on
@@ -44,6 +45,7 @@ const MIGRATION_FILES = [
   '007_info.sql',
   '008_conversation.sql',
   '009_resume.sql',
+  '010_drop_legacy.sql',
 ] as const
 
 /**
@@ -57,6 +59,35 @@ const REMOVED_V1_TABLES = ['variant', 'claim', 'document_revision'] as const
 
 /** Tables version 9 recreates with the resume composition shape. */
 const RESUME_TABLES = ['resume', 'resume_revision', 'resume_snapshot'] as const
+
+/**
+ * v1-only tables version 10 removes. `claim` and `variant` are already gone
+ * after version 8; version 10 still drops them defensively.
+ */
+const LEGACY_ONLY_TABLES = ['claim', 'variant', 'experience', 'profile'] as const
+
+/**
+ * Every v2 table. Version 10 must leave each one present and queryable: a DROP
+ * that names a v2 table would otherwise surface only at runtime.
+ */
+const V2_TABLES = [
+  'app_settings',
+  'provider_config',
+  'custom_module',
+  'info_entry',
+  'change_record',
+  'conversation',
+  'message',
+  'message_attachment',
+  'message_context',
+  'attachment',
+  'job_posting',
+  'agent_run',
+  'tool_invocation',
+  'resume',
+  'resume_revision',
+  'resume_snapshot',
+] as const
 
 const scratchDirectories: string[] = []
 const openDatabases: DatabaseSync[] = []
@@ -192,6 +223,110 @@ INSERT INTO tool_invocation (
 ) VALUES (
   'legacy-invocation', 'legacy-run', 'searchExperiences', 'read',
   '{"v":1,"data":"{}"}', NULL, 'executed', '2024-02-01T00:00:00.000Z'
+);
+`)
+}
+
+/**
+ * One row in every v2 table, so version 10 can be shown to remove only the v1
+ * names. The set covers both the tables rebuilt from v1 same-name tables
+ * (provider configuration, postings, runs, invocations, resumes) and the tables
+ * the rebuild added.
+ */
+function insertV2Rows(database: DatabaseSync): void {
+  database.exec(`
+INSERT INTO app_settings (id, settings_json, updated_at)
+VALUES ('default', '{"v":1,"data":{}}', '2026-01-01T00:00:00.000Z');
+
+INSERT INTO provider_config (
+  id, name, kind, base_url, model_id, secret_ref, supports_images,
+  is_active, created_at, updated_at
+) VALUES (
+  'provider-1', 'Main', 'openai-compatible', 'https://api.example.com/v1',
+  'model-1', 'provider:provider-1', NULL, 1,
+  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO custom_module (id, name, fields_json, sort_order, created_at, updated_at)
+VALUES (
+  'module-1', 'Side project', '{"v":1,"data":[]}', 1,
+  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO info_entry (
+  id, module_kind, custom_module_id, title, fields_json, sort_order,
+  origin, source_run_id, created_at, updated_at
+) VALUES (
+  'entry-1', 'custom', 'module-1', 'Side project', '{"v":1,"data":{}}', 1,
+  'user', NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO change_record (
+  id, scope, entity, entity_id, op, before_json, after_json, origin, label,
+  undone_at, created_at
+) VALUES (
+  'change-1', 'library', 'infoEntry', 'entry-1', 'create', NULL,
+  '{"v":1,"data":{}}', 'user', 'Created entry', NULL,
+  '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO conversation (id, title, pinned, created_at, updated_at)
+VALUES (
+  'conversation-1', '新对话', 0,
+  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO attachment (
+  id, kind, mime_type, byte_size, storage_name, sha256, created_at
+) VALUES (
+  'attachment-1', 'image', 'image/png', 4, 'attachment-1.png',
+  '${'a'.repeat(64)}', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO message (
+  id, conversation_id, seq, kind, status, markdown, created_at, updated_at
+) VALUES (
+  'message-1', 'conversation-1', 1, 'user', 'complete', '',
+  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO message_attachment (message_id, attachment_id, position)
+VALUES ('message-1', 'attachment-1', 0);
+
+INSERT INTO message_context (message_id, kind, ref_id, position)
+VALUES ('message-1', 'entry', 'entry-1', 0);
+
+INSERT INTO job_posting (id, raw_text, created_at)
+VALUES ('posting-1', 'Legacy job description', '2026-01-01T00:00:00.000Z');
+
+INSERT INTO agent_run (id, conversation_id, status, started_at)
+VALUES ('run-1', 'conversation-1', 'completed', '2026-01-01T00:00:00.000Z');
+
+INSERT INTO tool_invocation (
+  id, run_id, tool_name, risk, args_json, status, created_at
+) VALUES (
+  'invocation-1', 'run-1', 'searchInfoEntries', 'read',
+  '{"v":1,"data":{}}', 'ok', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO resume (id, title, status, current_revision_id, created_at, updated_at)
+VALUES (
+  'resume-1', 'Resume', 'draft', 'revision-1',
+  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO resume_revision (
+  id, resume_id, seq, label, origin, state_json, created_at
+) VALUES (
+  'revision-1', 'resume-1', 1, 'Initial', 'user', '{"v":1,"data":{}}',
+  '2026-01-01T00:00:00.000Z'
+);
+
+INSERT INTO resume_snapshot (
+  id, resume_id, seq, frozen_state_json, materialized_json, created_at
+) VALUES (
+  'snapshot-1', 'resume-1', 1, '{"v":1,"data":{}}', '{"v":1,"data":{}}',
+  '2026-01-01T00:00:00.000Z'
 );
 `)
 }
@@ -454,6 +589,21 @@ function expectResumeSchema(database: DatabaseSync): void {
   expect(countRows(database, 'resume_snapshot')).toBe(0)
 }
 
+/** The v1-only tables version 10 removes; every one must be gone afterwards. */
+function expectLegacyTablesRemoved(database: DatabaseSync): void {
+  const tables = tableNames(database)
+  for (const legacy of LEGACY_ONLY_TABLES) {
+    expect(tables, `${legacy} must not survive version 10`).not.toContain(legacy)
+  }
+}
+
+/** The v2 schema after version 10: every table still exists and answers a query. */
+function expectV2TablesQueryable(database: DatabaseSync): void {
+  for (const table of V2_TABLES) {
+    expect(() => countRows(database, table), `${table} must survive version 10`).not.toThrow()
+  }
+}
+
 describe('migrations applied in order', () => {
   it('upgrades a database that already holds the v1 schema', () => {
     const database = openScratchDatabase()
@@ -463,7 +613,7 @@ describe('migrations applied in order', () => {
 
     const applied = applyMigrations(database, MIGRATION_FILES.slice(1))
 
-    expect(applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9])
+    expect(applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10])
     // The v2 provider table replaces the legacy one rather than living beside
     // it: the old row has no fields the v2 shape could carry over.
     expect(countRows(database, 'provider_config')).toBe(0)
@@ -486,17 +636,18 @@ describe('migrations applied in order', () => {
       expect(tables, `${resumeTable} must exist after version 9`).toContain(resumeTable)
     }
     expectResumeSchema(database)
-    // Replacing those tables must not take the other v1 data with it; the
-    // removal of the remaining legacy tables is version 10's work.
-    expect(countRows(database, 'experience')).toBe(1)
-    expect(countRows(database, 'profile')).toBe(1)
+    // Version 10 removes the v1 tables the rebuild left behind, and nothing
+    // else: the experience row and the profile seed go with their tables, while
+    // every v2 table stays present and queryable.
+    expectLegacyTablesRemoved(database)
+    expectV2TablesQueryable(database)
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 
   it('creates the v2 schema on a fresh database', () => {
     const database = openScratchDatabase()
 
-    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(applyMigrations(database, MIGRATION_FILES)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     expect(countRows(database, 'provider_config')).toBe(0)
     expectSettingsSchema(database)
     expectInformationLibrarySchema(database)
@@ -505,6 +656,32 @@ describe('migrations applied in order', () => {
     for (const removed of REMOVED_V1_TABLES) {
       expect(tableNames(database), `${removed} must not exist`).not.toContain(removed)
     }
+    expectLegacyTablesRemoved(database)
+    expectV2TablesQueryable(database)
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+
+  it('keeps the v2 rows and tolerates a repeated run of version 10', () => {
+    const database = openScratchDatabase()
+
+    applyMigrations(
+      database,
+      MIGRATION_FILES.filter((file) => file !== '010_drop_legacy.sql'),
+    )
+    insertV2Rows(database)
+    const v2Counts = new Map(
+      V2_TABLES.map((table) => [table, countRows(database, table)] as const),
+    )
+
+    expect(applyMigrations(database, ['010_drop_legacy.sql'])).toEqual([10])
+    expectLegacyTablesRemoved(database)
+    for (const [table, count] of v2Counts) {
+      expect(countRows(database, table), `${table} must keep its v2 rows`).toBe(count)
+    }
+    // The plugin records an applied version, so it does not rerun it; if an
+    // interrupted run does repeat the file, every removal is guarded by
+    // IF EXISTS and the second run is a no-op.
+    expect(() => applyMigrations(database, ['010_drop_legacy.sql'])).not.toThrow()
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 })

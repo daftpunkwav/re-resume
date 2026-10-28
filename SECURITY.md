@@ -23,7 +23,7 @@ agent task, and then only to the model service endpoint configured in settings.
 
 ## Security-relevant surfaces
 
-- **Local data at rest.** Experience records, resumes, revisions and snapshots
+- **Local data at rest.** Information entries, resumes, revisions and snapshots
   live in an unencrypted SQLite file on disk. Anyone with access to the user's
   account can read them.
 - **Provider credentials.** API keys are held in an encrypted store unlocked by a

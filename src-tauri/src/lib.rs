@@ -38,8 +38,9 @@ const DATABASE_URL: &str = "sqlite:re-resume.db";
 /// body is immutable: the plugin's ledger validates the checksum of every
 /// version a database recorded, so a new schema is a new version rather than an
 /// edit of an existing one. Version 3 was registered empty and stays empty; the
-/// information library schema is version 7, the conversation runtime version 8
-/// and the resume document schema version 9.
+/// information library schema is version 7, the conversation runtime version 8,
+/// the resume document schema version 9 and the removal of the superseded v1
+/// tables version 10.
 const MIGRATION_001_INIT: &str =
     include_str!("../../src/infrastructure/persistence/migrations/001_init.sql");
 const MIGRATION_002_SETTINGS: &str =
@@ -58,6 +59,8 @@ const MIGRATION_008_CONVERSATION: &str =
     include_str!("../../src/infrastructure/persistence/migrations/008_conversation.sql");
 const MIGRATION_009_RESUME: &str =
     include_str!("../../src/infrastructure/persistence/migrations/009_resume.sql");
+const MIGRATION_010_DROP_LEGACY: &str =
+    include_str!("../../src/infrastructure/persistence/migrations/010_drop_legacy.sql");
 
 /// Name of the file holding the Stronghold key-derivation salt. The salt is not
 /// a secret — it is the Argon2 parameter that makes a password produce the same
@@ -77,8 +80,9 @@ const STRONGHOLD_SALT_FILE: &str = "stronghold-salt.bin";
 /// Versions 3 to 6 were registered while their files held a comment only, and
 /// those bodies are immutable once a database records them. Feature schemas
 /// therefore arrive as new versions: version 7 creates the information library
-/// tables and version 8 the conversation schema, without changing any applied
-/// body.
+/// tables, version 8 the conversation schema and version 9 the resume document,
+/// without changing any applied body. Version 10 removes the v1 tables that the
+/// earlier versions left behind.
 fn migrations() -> Vec<Migration> {
     vec![
         Migration {
@@ -133,6 +137,12 @@ fn migrations() -> Vec<Migration> {
             version: 9,
             description: "resume composition document",
             sql: MIGRATION_009_RESUME,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "drop superseded v1 tables",
+            sql: MIGRATION_010_DROP_LEGACY,
             kind: MigrationKind::Up,
         },
     ]

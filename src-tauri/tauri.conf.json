@@ -128,7 +128,7 @@
     "active": true,
     "category": "Productivity",
     "shortDescription": "Local-first resume workbench",
-    "longDescription": "ReResume builds and edits resumes against a local experience library, with no account and no server.",
+    "longDescription": "ReResume builds and edits resumes against a local information library, with no account and no server.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

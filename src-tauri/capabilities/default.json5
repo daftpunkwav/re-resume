@@ -63,16 +63,16 @@
     // `*://*`: it would hand the webview the whole network.
 
     // --- File dialogs ---------------------------------------------------
-    // Choosing where an exported PDF or DOCX is written. Export is the only
+    // Choosing where an exported PDF is written. Export is the only
     // user-initiated file write in the application. Both dialogs record the
     // paths the user picks in the file system plugin's runtime scope; that
     // record is what `export::publish_export` (src-tauri/src/export.rs) checks
     // a destination against. The record is not a write permission of its own.
     "dialog:allow-save",
 
-    // Selecting an existing file to bring into the experience library. `allow-message`
-    // and `allow-confirm` are not granted: no frontend feature renders a native
-    // message or a native confirmation today.
+    // Selecting an existing file. `allow-message` and `allow-confirm` are not
+    // granted: no frontend feature renders a native message or a native
+    // confirmation today.
     "dialog:allow-open",
 
     // --- File system ----------------------------------------------------
