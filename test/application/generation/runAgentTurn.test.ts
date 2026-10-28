@@ -13,7 +13,6 @@ import {
   runAgentTurn,
 } from '../../../src/application/generation/runAgentTurn'
 import type { RunAgentTurnDeps, RunAgentTurnInput } from '../../../src/application/generation/runAgentTurn'
-import { buildToolRegistry } from '../../../src/application/generation/buildToolRegistry'
 import type { AgentEvent } from '../../../src/domain/generation/AgentEvent'
 import type { Conversation } from '../../../src/domain/conversation/Conversation'
 import type { Message } from '../../../src/domain/conversation/Message'
@@ -71,7 +70,7 @@ function turnDeps(
   return {
     model: bed.model,
     titleModel: null,
-    registry: buildToolRegistry(),
+    registry: bed.registry,
     conversations: bed.conversations,
     messages: bed.messages,
     messageContexts: bed.messageContexts,
@@ -80,6 +79,11 @@ function turnDeps(
     jobPostings: bed.jobPostings,
     attachments: bed.attachments,
     fileStore: bed.fileStore,
+    infoEntries: bed.entries,
+    customModules: bed.customModules,
+    resumes: bed.resumes,
+    changes: bed.changes,
+    measurer: bed.measurer,
     clock: bed.clock,
     ids: bed.ids,
     emit: bed.emit,

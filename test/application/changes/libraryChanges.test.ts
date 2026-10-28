@@ -29,6 +29,7 @@ import { SqliteCustomModuleRepository } from '../../../src/infrastructure/persis
 import { SqliteInfoEntryRepository } from '../../../src/infrastructure/persistence/info/SqliteInfoEntryRepository'
 import { InMemoryEntryReferenceQuery } from '../../../src/infrastructure/preview/inMemoryInfoRepositories'
 import { customFieldsFixture, validRawFields } from '../../support/infoFixtures'
+import { InMemoryResumeRepository } from '../../../src/infrastructure/preview/inMemoryResumeRepository'
 import { FixedClock, SequentialIdGenerator } from '../../support/fakeEnvironment'
 import {
   applyInfoSchema,
@@ -60,6 +61,7 @@ beforeEach(() => {
     changes,
     entries,
     customModules,
+    resumes: new InMemoryResumeRepository(clock),
     clock,
   })
 })

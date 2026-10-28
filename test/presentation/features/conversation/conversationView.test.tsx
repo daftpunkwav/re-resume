@@ -21,7 +21,7 @@ import { useShellStore } from '../../../../src/presentation/app/stores/shellStor
 import { createPreviewRoot } from '../../../../src/bootstrap/previewRoot'
 import { createConversationService } from '../../../../src/bootstrap/wiring/conversation'
 import { ActiveRunRegistry } from '../../../../src/application/generation/activeRunRegistry'
-import { buildToolRegistry } from '../../../../src/application/generation/buildToolRegistry'
+import { ResumeEntryReferences } from '../../../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import { ModelCallError } from '../../../../src/infrastructure/http/ProviderAdapters/errors'
 import type { CompositionRoot } from '../../../../src/bootstrap/capabilities'
 import { stubCompositionRoot } from '../../../support/stubCompositionRoot'
@@ -51,13 +51,20 @@ function conversationServiceFor(bed: ConversationBed) {
       invocations: bed.invocations,
       fileStore: bed.fileStore,
     },
+    library: {
+      entries: bed.entries,
+      customModules: bed.customModules,
+      references: new ResumeEntryReferences(bed.resumes),
+      resumes: bed.resumes,
+      changes: bed.changes,
+      measurer: bed.measurer,
+    },
     clock: bed.clock,
     ids: bed.ids,
     model: bed.model,
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
-    registry: buildToolRegistry(),
   })
 }
 

@@ -15,7 +15,7 @@ import { createConversationService } from '../../../../src/bootstrap/wiring/conv
 import { createInfoService } from '../../../../src/bootstrap/wiring/info'
 import { createAppSettingsService } from '../../../../src/bootstrap/wiring/appSettings'
 import { ActiveRunRegistry } from '../../../../src/application/generation/activeRunRegistry'
-import { buildToolRegistry } from '../../../../src/application/generation/buildToolRegistry'
+import { ResumeEntryReferences } from '../../../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import {
   InMemoryChangeLogRepository,
   InMemoryCustomModuleRepository,
@@ -54,13 +54,20 @@ function createHarness(): Harness {
       invocations: bed.invocations,
       fileStore: bed.fileStore,
     },
+    library: {
+      entries: bed.entries,
+      customModules: bed.customModules,
+      references: new ResumeEntryReferences(bed.resumes),
+      resumes: bed.resumes,
+      changes: bed.changes,
+      measurer: bed.measurer,
+    },
     clock: bed.clock,
     ids: bed.ids,
     model: bed.model,
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
-    registry: buildToolRegistry(),
   })
   const changes = new InMemoryChangeLogRepository()
   const entries = new InMemoryInfoEntryRepository(changes)
@@ -80,6 +87,9 @@ function createHarness(): Harness {
       }),
       libraryChanges: {
         undo: async () => {
+          throw new Error('not used in this test')
+        },
+        undoRevision: async () => {
           throw new Error('not used in this test')
         },
       },
