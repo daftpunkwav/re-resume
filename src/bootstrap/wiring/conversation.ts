@@ -105,6 +105,14 @@ export interface ConversationService {
   deleteConversation(input: { readonly conversationId: ConversationId }): Promise<void>
   listConversations(): Promise<ListConversationsOutput>
   listMessages(conversationId: ConversationId, limit: number): Promise<readonly Message[]>
+  /**
+   * The context chips of the user turns in the same window the transcript was
+   * read with, keyed by message. A message without chips is absent from the map.
+   */
+  listMessageContexts(
+    conversationId: ConversationId,
+    limit: number,
+  ): Promise<ReadonlyMap<MessageId, readonly MessageContext[]>>
   appendMessage(input: AppendMessageInput): Promise<Message>
   autoTitle(input: {
     readonly conversationId: ConversationId
@@ -173,6 +181,18 @@ export function createConversationService(input: ConversationServiceInput): Conv
       listConversations({ conversations: repositories.conversations, clock }),
     listMessages: (conversationId, limit) =>
       repositories.messages.listByConversation(conversationId, limit),
+    listMessageContexts: async (conversationId, limit) => {
+      // The transcript view and the context chips are read together; chips only
+      // exist on user turns, and the map skips turns that carry none.
+      const messages = await repositories.messages.listByConversation(conversationId, limit)
+      const contexts = new Map<MessageId, readonly MessageContext[]>()
+      for (const message of messages) {
+        if (message.kind !== 'user') continue
+        const attached = await repositories.messageContexts.listByMessage(message.id)
+        if (attached.length > 0) contexts.set(message.id, attached)
+      }
+      return contexts
+    },
     appendMessage: (command) =>
       appendMessage(
         {

@@ -14,6 +14,9 @@ import { AppShell } from '../../../src/presentation/app/AppShell'
 import { DEFAULT_APP_SETTINGS } from '../../../src/domain/settings/AppSettings'
 import { useSettingsStore } from '../../../src/presentation/app/stores/settingsStore'
 import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
+import { useConversationStore } from '../../../src/presentation/features/conversation/stores/conversationStore'
+import { useProviderStore } from '../../../src/presentation/features/conversation/stores/providerStore'
+import { useRunStore } from '../../../src/presentation/features/conversation/stores/runStore'
 import { stubCompositionRoot } from '../../support/stubCompositionRoot'
 
 function setWindowWidth(width: number): void {
@@ -33,14 +36,14 @@ function renderShell() {
 }
 
 /**
- * Render the shell and wait until the boot promise has settled and the passive
- * effects that install its window listeners have run. `findByRole` can observe
- * the committed DOM before those effects run, so a resize or shortcut dispatched
- * right after render would otherwise race the listener installation.
+ * Render the shell and wait until the boot promise has settled, the session list
+ * has been read and the most recent session is open. `findByRole` can observe the
+ * committed DOM before those passive effects run, so a resize or shortcut
+ * dispatched right after render would otherwise race the listener installation.
  */
 async function renderShellReady(): Promise<ReturnType<typeof render>> {
   const result = renderShell()
-  await screen.findByRole('heading', { name: '从一段对话开始' })
+  await screen.findByRole('heading', { name: '梳理我的实习经历' })
   await act(async () => {
     await new Promise((resolve) => {
       setTimeout(resolve, 0)
@@ -61,6 +64,25 @@ function resetStores(): void {
     draftEpoch: 0,
     lastOpenPanel: 'resume',
   })
+  useConversationStore.setState({
+    conversations: [],
+    groups: null,
+    activeId: null,
+    draft: false,
+    messages: [],
+    messagesStatus: 'idle',
+    listStatus: 'idle',
+    error: null,
+    pendingUser: null,
+    composer: { text: '', contexts: [] },
+    contextsByMessage: {},
+    contextEntries: {},
+    enterIds: new Set<string>(),
+    undoBusy: new Set<string>(),
+    undone: new Set<string>(),
+  })
+  useProviderStore.setState({ providers: [], activeProviderId: null, status: 'idle', error: null })
+  useRunStore.getState().reset()
 }
 
 beforeEach(() => {
@@ -79,8 +101,10 @@ describe('AppShell', () => {
     const shell = container.querySelector('.shell')
     expect(shell).toHaveAttribute('data-layout', 'wide')
     expect(screen.getByRole('complementary', { name: '工作台侧边栏' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '新对话' })).toBeInTheDocument()
-    expect(screen.getByText('还没有对话')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '梳理我的实习经历' })).toBeInTheDocument()
+    // The stored sessions are grouped in the sidebar instead of the old empty slot.
+    expect(screen.getByRole('region', { name: '置顶' })).toBeInTheDocument()
+    expect(screen.getByText('为字节跳动前端岗位准备简历')).toBeInTheDocument()
   })
 
   it('opens the information panel from the sidebar and closes it again', async () => {
@@ -142,14 +166,19 @@ describe('AppShell', () => {
     expect(useSettingsStore.getState().settings.uiScale).toBe(1)
   })
 
-  it('adds a conversation draft and focuses the conversation region', async () => {
+  it('starts a new draft and focuses the conversation region', async () => {
     const user = userEvent.setup({ delay: null })
     await renderShellReady()
 
     await user.click(screen.getByRole('button', { name: '新建对话' }))
 
     expect(useShellStore.getState().draftEpoch).toBe(1)
-    expect(document.querySelector('[data-region="conversation"]')).toBe(document.activeElement)
+    // The draft replaces the stored transcript with the welcome region and puts
+    // the caret where the first message will be typed.
+    expect(await screen.findByRole('heading', { name: '从一段对话开始' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '输入消息' })),
+    )
   })
 
   it('collapses the sidebar and draws the dock over the conversation at 960px', async () => {
@@ -185,11 +214,13 @@ describe('AppShell', () => {
     )
   })
 
-  it('opens the model section from the model chip', async () => {
+  it('opens the model section from the set-up entry when no service is configured', async () => {
     const user = userEvent.setup({ delay: null })
     await renderShellReady()
 
-    await user.click(screen.getByRole('button', { name: /打开模型服务设置/ }))
+    // The model control, the composer hint and the welcome action all lead to the
+    // same section; any of them is the setup path.
+    await user.click((await screen.findAllByRole('button', { name: /配置模型服务/ }))[0] as HTMLElement)
 
     const dialog = await screen.findByRole('dialog', { name: '设置' })
     expect(within(dialog).getByRole('heading', { name: '模型服务' })).toBeInTheDocument()

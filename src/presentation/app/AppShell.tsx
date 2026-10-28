@@ -28,7 +28,7 @@ import {
 } from '../../domain/settings/AppSettings'
 import { ToastRegion } from './components/Toast'
 import { requestInfoPanelClose, requestInfoSearchFocus } from '../features/info/panelBridge'
-import { ConversationPlaceholder } from './placeholders/ConversationPlaceholder'
+
 import { PanelDock } from './PanelDock'
 import { SettingsOverlay } from './settings/SettingsOverlay'
 import { useGlobalShortcuts } from './shortcuts'
@@ -40,6 +40,7 @@ import { showToast } from './stores/toastStore'
 import { applyAppearance } from './theme/applyAppearance'
 import { useLayoutTier } from './useLayoutTier'
 import { TopBar } from './TopBar'
+import { ConversationView } from '../features/conversation/ConversationView'
 
 /** Below the wide breakpoint two panes would each fall under their minimum. */
 const TWO_PANE_MIN_WIDTH = PANEL_WIDTH_MIN * 2
@@ -161,7 +162,7 @@ export function AppShell() {
               aria-label="简历助手"
               onFocus={() => useShellStore.getState().setFocusDomain('conversation')}
             >
-              <ConversationPlaceholder />
+              <ConversationView />
             </section>
             {tier === 'compact' && rightPanel !== 'none' ? (
               <div

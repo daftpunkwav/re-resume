@@ -29,12 +29,16 @@ import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import {
   createConversationService,
+  createProviderFromConfig,
   readActiveProviderSecret,
   resolveActiveProvider,
 } from './wiring/conversation'
 import type { ConversationRepositories } from './wiring/conversation'
 import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
 import { buildToolRegistry } from '../application/generation/buildToolRegistry'
+import { PROVIDER_CONNECTION_TIMEOUT_MS } from '../application/settings/providerConfiguration'
+import { createProviderService } from './wiring/providers'
+import { createLibraryChangesService } from './wiring/changes'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
@@ -48,6 +52,7 @@ import { ResumeEntryReferences } from '../infrastructure/persistence/resume/Resu
 import { loadBundledFontRegistry } from '../infrastructure/measurement/BundledFontRegistry'
 import { createFontkitTextMeasurer } from '../infrastructure/measurement/FontkitTextMeasurer'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
+import { SqliteChangeRecordRepository } from '../infrastructure/persistence/info/SqliteChangeRecordRepository'
 import { SqliteAttachmentRepository } from '../infrastructure/persistence/conversation/SqliteAttachmentRepository'
 import { SqliteAgentRunRepository } from '../infrastructure/persistence/conversation/SqliteAgentRunRepository'
 import { SqliteConversationRepository } from '../infrastructure/persistence/conversation/SqliteConversationRepository'
@@ -226,6 +231,33 @@ async function createConversationRuntime(input: {
   return conversation
 }
 
+/** Binds the provider use cases to the settings row and the encrypted secrets. */
+function createProviderRuntime(input: {
+  readonly providers: SqliteProviderConfigRepository
+  readonly settings: SqliteAppSettingsRepository
+  readonly secrets: StrongholdSecretStore
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): ReturnType<typeof createProviderService> {
+  // The probe talks to the same API as a turn, so it shares the transport
+  // contract; the root keeps one client per surface instead of reaching for a
+  // global.
+  const http = createTauriHttpClient()
+  return createProviderService({
+    providers: input.providers,
+    settings: input.settings,
+    secrets: input.secrets,
+    clock: input.clock,
+    ids: input.ids,
+    createProvider: (config, apiKey) =>
+      createProviderFromConfig(config, apiKey, {
+        http,
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        connectTimeoutMs: PROVIDER_CONNECTION_TIMEOUT_MS,
+      }),
+  })
+}
+
 /** Binds the resume use cases to the database, the library and the measurer. */
 function createResumeRuntime(input: {
   readonly database: ManagedSqlDatabase
@@ -250,6 +282,95 @@ function createResumeRuntime(input: {
   })
 }
 
+/** The port implementations one native root owns for its whole lifetime. */
+interface RootRepositories {
+  readonly settings: SqliteAppSettingsRepository
+  readonly customModules: SqliteCustomModuleRepository
+  readonly entries: SqliteInfoEntryRepository
+  readonly changes: SqliteChangeRecordRepository
+  readonly resumes: SqliteResumeRepository
+  readonly providerConfigs: SqliteProviderConfigRepository
+  readonly secrets: StrongholdSecretStore
+}
+
+function createRootRepositories(input: {
+  readonly database: ManagedSqlDatabase
+  readonly clock: Clock
+  readonly ids: IdGenerator
+  readonly stronghold: CompositionRootOptions['stronghold']
+}): RootRepositories {
+  const customModules = new SqliteCustomModuleRepository(input.database)
+  return {
+    settings: new SqliteAppSettingsRepository(input.database, input.clock),
+    customModules,
+    entries: new SqliteInfoEntryRepository(input.database, customModules),
+    changes: new SqliteChangeRecordRepository(input.database),
+    resumes: new SqliteResumeRepository(input.database, input.clock, input.ids),
+    providerConfigs: new SqliteProviderConfigRepository(input.database),
+    secrets: new StrongholdSecretStore(input.stronghold),
+  }
+}
+
+/** The library and the resume capabilities, bound to the same repository set. */
+function createLibraryRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly repositories: RootRepositories
+  readonly measurer: TextMeasurer
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): Pick<CompositionRoot, 'info' | 'resume' | 'libraryChanges'> {
+  const info = createInfoService({
+    entries: input.repositories.entries,
+    customModules: input.repositories.customModules,
+    references: new ResumeEntryReferences(input.repositories.resumes),
+    clock: input.clock,
+    ids: input.ids,
+  })
+  return {
+    info,
+    resume: createResumeRuntime({
+      database: input.database,
+      resumes: input.repositories.resumes,
+      entries: input.repositories.entries,
+      customModules: input.repositories.customModules,
+      updateInfoEntry: info.updateEntry,
+      measurer: input.measurer,
+      clock: input.clock,
+      ids: input.ids,
+    }),
+    libraryChanges: createLibraryChangesService({
+      changes: input.repositories.changes,
+      entries: input.repositories.entries,
+      customModules: input.repositories.customModules,
+      clock: input.clock,
+    }),
+  }
+}
+
+/** The conversation capability and the provider settings that select its model. */
+async function createAgentRuntime(input: {
+  readonly database: ManagedSqlDatabase
+  readonly repositories: RootRepositories
+  readonly clock: Clock
+  readonly ids: IdGenerator
+}): Promise<Pick<CompositionRoot, 'conversation' | 'providers'>> {
+  const conversation = await createConversationRuntime({
+    database: input.database,
+    providerConfigs: input.repositories.providerConfigs,
+    secrets: input.repositories.secrets,
+    clock: input.clock,
+    ids: input.ids,
+  })
+  const providers = createProviderRuntime({
+    providers: input.repositories.providerConfigs,
+    settings: input.repositories.settings,
+    secrets: input.repositories.secrets,
+    clock: input.clock,
+    ids: input.ids,
+  })
+  return { conversation, providers }
+}
+
 export async function createCompositionRoot(
   options: CompositionRootOptions,
 ): Promise<CompositionRoot> {
@@ -261,44 +382,21 @@ export async function createCompositionRoot(
   })
 
   try {
-    const settingsRepository = new SqliteAppSettingsRepository(database, clock)
-    const customModuleRepository = new SqliteCustomModuleRepository(database)
-    const infoEntries = new SqliteInfoEntryRepository(database, customModuleRepository)
     const ids = new RandomIdGenerator()
-    const resumes = new SqliteResumeRepository(database, clock, ids)
-    const providerConfigs = new SqliteProviderConfigRepository(database)
-    const secrets = new StrongholdSecretStore(options.stronghold)
-    const conversation = await createConversationRuntime({
+    const repositories = createRootRepositories({
       database,
-      providerConfigs,
-      secrets,
       clock,
       ids,
+      stronghold: options.stronghold,
     })
-    const databaseFile = await resolveDatabaseFile()
-    const info = createInfoService({
-      entries: infoEntries,
-      customModules: customModuleRepository,
-      references: new ResumeEntryReferences(resumes),
-      clock,
-      ids,
-    })
+    const agent = await createAgentRuntime({ database, repositories, clock, ids })
+    const library = createLibraryRuntime({ database, repositories, measurer, clock, ids })
     return {
-      appInfo: describeAppInfo({ runtime: 'tauri', databaseFile }),
-      settings: createAppSettingsService({ repository: settingsRepository }),
-      info,
-      resume: createResumeRuntime({
-        database,
-        resumes,
-        entries: infoEntries,
-        customModules: customModuleRepository,
-        updateInfoEntry: info.updateEntry,
-        measurer,
-        clock,
-        ids,
-      }),
-      conversation,
-      secrets,
+      appInfo: describeAppInfo({ runtime: 'tauri', databaseFile: await resolveDatabaseFile() }),
+      settings: createAppSettingsService({ repository: repositories.settings }),
+      ...library,
+      ...agent,
+      secrets: repositories.secrets,
       shutdown: async (): Promise<void> => {
         await database.close()
       },

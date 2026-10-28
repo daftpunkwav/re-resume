@@ -59,7 +59,8 @@ describe('createPreviewRoot', () => {
     const root = createPreviewRoot()
 
     const listed = await root.conversation.listConversations()
-    expect(listed.conversations).toHaveLength(1)
+    expect(listed.conversations).toHaveLength(3)
+    expect(listed.groups.today.length + listed.groups.last7Days.length).toBeGreaterThan(0)
     const messages = await root.conversation.listMessages(listed.conversations[0]!.id, 10)
     expect(messages.length).toBeGreaterThan(0)
   })

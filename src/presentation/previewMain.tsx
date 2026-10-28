@@ -18,7 +18,7 @@ export function mountPreviewWindow(container: HTMLElement): void {
   createRoot(container).render(
     <StrictMode>
       <ApplicationServicesProvider
-        createRoot={async () => createPreviewRoot()}
+        createRoot={async () => createPreviewRoot({ preserveState: true })}
         resolveSnapshotPath={async () => 'preview-credentials.hold'}
       >
         <AppShell />

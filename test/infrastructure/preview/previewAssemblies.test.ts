@@ -25,6 +25,8 @@ import {
 import { PREVIEW_SCRIPT } from '../../../src/infrastructure/preview/fixtures'
 import {
   PREVIEW_CONVERSATION_ID,
+  PREVIEW_OLDER_CONVERSATION_ID,
+  PREVIEW_PINNED_CONVERSATION_ID,
   PREVIEW_RUN_ID,
 } from '../../../src/infrastructure/preview/fixtures.conversation'
 import { createPreviewConversationService } from '../../../src/bootstrap/previewConversation'
@@ -135,15 +137,22 @@ describe('InMemorySecretStore', () => {
 })
 
 describe('the preview conversation assembly', () => {
-  it('serves the seeded conversation, transcript and run', async () => {
+  it('serves the seeded conversations, transcript and run', async () => {
     const { service } = createPreviewConversationService()
 
     const listed = await service.listConversations()
     expect(listed.conversations.map((conversation) => conversation.id)).toEqual([
+      PREVIEW_PINNED_CONVERSATION_ID,
       PREVIEW_CONVERSATION_ID,
+      PREVIEW_OLDER_CONVERSATION_ID,
     ])
     const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 10)
-    expect(messages.map((message) => message.kind)).toEqual(['user', 'tool', 'assistant'])
+    expect(messages.map((message) => message.kind)).toEqual([
+      'user',
+      'tool',
+      'tool',
+      'assistant',
+    ])
     expect(messages.every((message) => message.runId === PREVIEW_RUN_ID || message.seq === 1)).toBe(
       true,
     )
@@ -173,7 +182,7 @@ describe('the preview conversation assembly', () => {
     expect(events.at(-1)).toBe('done')
     const messages = await service.listMessages(PREVIEW_CONVERSATION_ID, 20)
     const assistant = [...messages].reverse().find((message) => message.kind === 'assistant')
-    expect(assistant?.markdown).toContain('信息库')
+    expect(assistant?.markdown).toContain('岗位重点')
     expect(assistant?.status).toBe('complete')
   })
 
@@ -188,7 +197,9 @@ describe('the preview conversation assembly', () => {
     await service.deleteConversation({ conversationId: created.id })
     const listed = await service.listConversations()
     expect(listed.conversations.map((conversation) => conversation.id)).toEqual([
+      PREVIEW_PINNED_CONVERSATION_ID,
       PREVIEW_CONVERSATION_ID,
+      PREVIEW_OLDER_CONVERSATION_ID,
     ])
   })
 })

@@ -135,12 +135,26 @@ import type {
 import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReferenceQuery'
 import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
+import type { ProviderConfig } from '../domain/settings/ProviderConfig'
+import type { ChangeRecord } from '../domain/changes/ChangeRecord'
+import type { ChangeRecordId } from '../domain/shared/branded-id'
 import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import type { MissingReference } from '../domain/resume/MissingReference'
 import type { Resume } from '../domain/resume/Resume'
 import type { Revision } from '../domain/resume/Revision'
 import type { TemplateDefinition } from '../domain/resume/Template'
 import type { ResumeId } from '../domain/shared/branded-id'
+import type {
+  ListProvidersOutput,
+  SavedProvider,
+} from '../application/settings/providerConfiguration'
+import type { SaveProviderInput } from '../application/settings/saveProvider'
+import type { DeleteProviderInput } from '../application/settings/deleteProvider'
+import type { SetActiveProviderInput } from '../application/settings/setActiveProvider'
+import type {
+  ProviderConnectionTestResult,
+  TestProviderConnectionInput,
+} from '../application/settings/testProviderConnection'
 import type { ConversationService } from './wiring/conversation'
 
 /** Build information shown in the about section. Every field is a fact about the running build. */
@@ -158,6 +172,30 @@ export interface AppInfo {
 export interface AppSettingsService {
   readonly read: () => Promise<AppSettings>
   readonly save: (patch: Partial<AppSettings>) => Promise<AppSettings>
+}
+
+/**
+ * The configured model services as the interface sees them. A credential is
+ * never returned: saving stores it in the secure store, and the connection test
+ * reports only whether the service answers and how long it took.
+ */
+export interface ProviderService {
+  readonly listProviders: () => Promise<ListProvidersOutput>
+  readonly saveProvider: (input: SaveProviderInput) => Promise<SavedProvider>
+  readonly deleteProvider: (input: DeleteProviderInput) => Promise<void>
+  readonly setActiveProvider: (input: SetActiveProviderInput) => Promise<ProviderConfig>
+  readonly testProviderConnection: (
+    input: TestProviderConnectionInput,
+  ) => Promise<ProviderConnectionTestResult>
+}
+
+/**
+ * The recorded writes the assistant performed and the user can take back. The
+ * undo rules (not already undone, still the newest change of its entity) live in
+ * the use case behind this facade.
+ */
+export interface LibraryChangesService {
+  readonly undo: (input: { readonly changeId: ChangeRecordId }) => Promise<ChangeRecord>
 }
 
 /**
@@ -262,6 +300,10 @@ export interface CompositionRoot {
   readonly conversation: ConversationService
   readonly info: InfoService
   readonly resume: ResumeService
+  /** Configured model services and the one serving requests. */
+  readonly providers: ProviderService
+  /** Reversal of the library writes the assistant performed. */
+  readonly libraryChanges: LibraryChangesService
   /**
    * The encrypted credential store. The interface reaches it through the
    * provider settings once those exist; the root owns the handle so the window

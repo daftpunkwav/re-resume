@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file previewRoot
  * @description The composition root used by the browser preview. It answers
  * the same contract as the native root, backed by memory instead of SQLite, so
@@ -16,6 +16,8 @@
  *   production bundle does not contain this module.
  * - Areas added later extend this file by one wiring import and one spread;
  *   the root's contract stays in `capabilities.ts`.
+ * - `?script=slow|failure` chooses the replay the scripted model uses; nothing
+ *   else about the preview changes.
  */
 
 import type { CompositionRoot } from './capabilities'
@@ -23,8 +25,14 @@ import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService } from './wiring/appSettings'
 import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
+import { createLibraryChangesService } from './wiring/changes'
+import { createProviderService } from './wiring/providers'
+import type { ProviderService } from './capabilities'
+import type { AppSettingsRepository } from '../domain/settings/ports/AppSettingsRepository'
+import type { SecretStore } from '../domain/generation/ports/SecretStore'
 import {
   InMemoryAppSettingsRepository,
+  InMemoryProviderConfigRepository,
   InMemorySecretStore,
 } from '../infrastructure/preview/inMemoryRepositories'
 import {
@@ -39,7 +47,19 @@ import {
 import { FixtureTextMeasurer } from '../infrastructure/measurement/FixtureTextMeasurer'
 import { InMemoryResumeRepository } from '../infrastructure/preview/inMemoryResumeRepository'
 import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
-import { PREVIEW_SETTINGS } from '../infrastructure/preview/fixtures'
+import {
+  PREVIEW_PROBE_SCRIPT,
+  PREVIEW_PROVIDER_CREDENTIAL,
+  PREVIEW_PROVIDERS,
+  PREVIEW_SETTINGS,
+} from '../infrastructure/preview/fixtures'
+import {
+  PREVIEW_CHANGE_RECORD,
+  PREVIEW_CONVERSATION_SCRIPT,
+  PREVIEW_FAILURE_MESSAGE,
+  PREVIEW_FAILURE_SCRIPT,
+  PREVIEW_SLOW_SCRIPT,
+} from '../infrastructure/preview/fixtures.conversation'
 import {
   PREVIEW_INFO_CUSTOM_MODULES,
   PREVIEW_INFO_ENTRIES,
@@ -49,28 +69,58 @@ import {
   InMemoryAttachmentRepository,
   InMemoryJobPostingRepository,
 } from '../infrastructure/preview/inMemoryConversationRepositories'
+import { ScriptedModelProvider } from '../infrastructure/preview/ScriptedModelProvider'
 import { createPreviewConversationService } from './previewConversation'
+import type { PreviewConversationOptions } from './previewConversation'
 
-export function createPreviewRoot(): CompositionRoot {
+/** The replay selected by `?script=`; the default script answers normally. */
+function readReplay(): PreviewConversationOptions {
+  if (typeof window === 'undefined') return {}
+  const script = new URLSearchParams(window.location.search).get('script')
+  switch (script) {
+    case 'slow':
+      return { script: PREVIEW_SLOW_SCRIPT, pauseMs: 420 }
+    case 'failure':
+      return {
+        script: PREVIEW_FAILURE_SCRIPT,
+        pauseMs: 160,
+        failure: {
+          message: PREVIEW_FAILURE_MESSAGE,
+          retryable: true,
+          status: 503,
+          afterChunks: PREVIEW_FAILURE_SCRIPT.length,
+        },
+      }
+    default:
+      return { script: PREVIEW_CONVERSATION_SCRIPT }
+  }
+}
+
+/**
+ * The preview library, its change log and the undo service share one set of
+ * repositories: undoing a preview write is visible to the information panel the
+ * same way it is in the native root.
+ */
+function createPreviewLibrary(): {
+  readonly info: CompositionRoot['info']
+  readonly libraryChanges: CompositionRoot['libraryChanges']
+  readonly resume: CompositionRoot['resume']
+} {
   const clock = new FakeClock()
-  const settingsRepository = new InMemoryAppSettingsRepository(PREVIEW_SETTINGS)
-  const measurer = new FixtureTextMeasurer()
-
-  const changes = new InMemoryChangeLogRepository()
+  const ids = new SequentialIdGenerator('preview-info')
+  const changes = new InMemoryChangeLogRepository([PREVIEW_CHANGE_RECORD])
   const entries = new InMemoryInfoEntryRepository(changes)
   const customModules = new InMemoryCustomModuleRepository(entries, changes)
   entries.seed(PREVIEW_INFO_ENTRIES)
   customModules.seed(PREVIEW_INFO_CUSTOM_MODULES)
-
   const resumes = new InMemoryResumeRepository(clock)
   resumes.seed(PREVIEW_RESUMES)
-
   const info = createInfoService({
     entries,
     customModules,
     references: new ResumeEntryReferences(resumes),
     clock,
-    ids: new SequentialIdGenerator('preview-info'),
+    ids,
   })
   const resume = createResumeService({
     resumes,
@@ -79,21 +129,89 @@ export function createPreviewRoot(): CompositionRoot {
     jobPostings: new InMemoryJobPostingRepository(),
     attachments: new InMemoryAttachmentRepository(),
     updateInfoEntry: info.updateEntry,
-    measurer,
+    measurer: new FixtureTextMeasurer(),
     clock,
     ids: new SequentialIdGenerator('preview-resume'),
   })
-  const { service: conversation } = createPreviewConversationService()
-
   return {
-    appInfo: describeAppInfo({ runtime: 'browser', databaseFile: null }),
-    settings: createAppSettingsService({ repository: settingsRepository }),
     info,
     resume,
-    conversation,
-    secrets: new InMemorySecretStore(),
-    shutdown: async (): Promise<void> => undefined,
+    libraryChanges: createLibraryChangesService({ changes, entries, customModules, clock }),
   }
 }
 
+function createPreviewProviders(deps: {
+  readonly settings: AppSettingsRepository
+  readonly secrets: SecretStore
+}): ProviderService {
+  const providers = new InMemoryProviderConfigRepository(PREVIEW_PROVIDERS)
+  const clock = new FakeClock()
+  const ids = new SequentialIdGenerator('preview-provider')
+  return createProviderService({
+    providers,
+    settings: deps.settings,
+    secrets: deps.secrets,
+    clock,
+    ids,
+    // The preview has no network. The probe replays one frame, which is what a
+    // reachable endpoint would deliver, so the connection state is rendered
+    // truthfully for the harness even though no socket is opened.
+    createProvider: () =>
+      new ScriptedModelProvider({ id: 'preview-probe', script: PREVIEW_PROBE_SCRIPT }),
+  })
+}
 
+/** The memory state a preview window keeps across a settings rebuild. */
+interface PreviewState {
+  readonly settings: InMemoryAppSettingsRepository
+  readonly secrets: InMemorySecretStore
+  readonly conversation: CompositionRoot['conversation']
+  readonly info: CompositionRoot['info']
+  readonly resume: CompositionRoot['resume']
+  readonly libraryChanges: CompositionRoot['libraryChanges']
+  readonly providers: ProviderService
+}
+
+let windowState: PreviewState | null = null
+
+function createPreviewState(): PreviewState {
+  const settings = new InMemoryAppSettingsRepository(PREVIEW_SETTINGS)
+  const secrets = new InMemorySecretStore(
+    PREVIEW_PROVIDERS.map((config) => [config.secretRef, PREVIEW_PROVIDER_CREDENTIAL] as const),
+  )
+  const library = createPreviewLibrary()
+  return {
+    settings,
+    secrets,
+    conversation: createPreviewConversationService(readReplay()).service,
+    info: library.info,
+    resume: library.resume,
+    libraryChanges: library.libraryChanges,
+    providers: createPreviewProviders({ settings, secrets }),
+  }
+}
+
+export interface PreviewRootOptions {
+  /**
+   * Keep the memory state across roots. The preview window sets this so a
+   * settings rebuild behaves like the native window, whose database survives the
+   * rebuild; a fresh call (a screenshot harness, a test) gets its own state.
+   */
+  readonly preserveState?: boolean
+}
+
+export function createPreviewRoot(options: PreviewRootOptions = {}): CompositionRoot {
+  if (options.preserveState === true) windowState ??= createPreviewState()
+  const state = windowState ?? createPreviewState()
+  return {
+    appInfo: describeAppInfo({ runtime: 'browser', databaseFile: null }),
+    settings: createAppSettingsService({ repository: state.settings }),
+    info: state.info,
+    resume: state.resume,
+    conversation: state.conversation,
+    providers: state.providers,
+    libraryChanges: state.libraryChanges,
+    secrets: state.secrets,
+    shutdown: async (): Promise<void> => undefined,
+  }
+}
