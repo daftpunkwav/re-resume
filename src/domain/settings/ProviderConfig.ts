@@ -36,6 +36,27 @@ export function isProviderKind(value: unknown): value is ProviderKind {
   return typeof value === 'string' && (PROVIDER_KINDS as readonly string[]).includes(value)
 }
 
+/**
+ * Model-name prefixes of OpenAI-compatible models without image input. Used
+ * only when the provider row leaves `supportsImages` null, which is the
+ * "let the model name decide" setting in the form.
+ */
+const TEXT_ONLY_MODEL_PATTERN = /^(gpt-3\.5|text-|o1-mini)/i
+
+/**
+ * Whether a configured provider accepts image parts: the row's explicit answer,
+ * or the model-name heuristic when it has none. Anthropic's message models all
+ * accept images; the older OpenAI text models do not. The adapter factory and
+ * the model-service list both read this one rule.
+ */
+export function resolveImageSupport(
+  config: Pick<ProviderConfig, 'kind' | 'modelId' | 'supportsImages'>,
+): boolean {
+  if (config.supportsImages !== null) return config.supportsImages
+  if (config.kind === 'anthropic') return true
+  return !TEXT_ONLY_MODEL_PATTERN.test(config.modelId)
+}
+
 /** The secure-store reference this provider's credential is stored under. */
 export function providerSecretRef(providerId: string): string {
   return `provider:${providerId}`

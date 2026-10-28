@@ -510,3 +510,21 @@ export const PREVIEW_TOOL_CHAIN_TURNS: readonly ScriptedTurn[] = [
       '右侧简历面板可以查看结果；每张写操作卡片都能单独撤销。',
     ]),
 ]
+
+/**
+ * The answer a screenshot gets in the preview. It names what the assistant can
+ * see and what it would do next, so the image turn is visibly handled by the
+ * multimodal path rather than echoing the text-only script.
+ */
+export const PREVIEW_VISION_SCRIPT: readonly ModelChunk[] = [
+  { type: 'text', textDelta: '我看到你发来的岗位截图了。\n\n' },
+  {
+    type: 'text',
+    textDelta:
+      '我会先把截图里的岗位名称、职责与要求整理成结构化信息，再据此从信息库里挑选合适的项目经历。\n\n',
+  },
+  {
+    type: 'text',
+    textDelta: '如果截图里有看不清的字，我会直接向你确认，不会自己补全。',
+  },
+]

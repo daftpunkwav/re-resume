@@ -80,6 +80,12 @@ const streamPaintListeners = new Set<() => void>()
 
 /** Moves the scroll position to the bottom of the region. */
 export function scrollToBottom(container: HTMLElement, smooth: boolean): void {
+  // A scroll call that cannot move the position still queues a scroll event, and
+  // that event can arrive after the content grew past the viewport (an image
+  // painting late): it would report distance > 0 and unstick the reader. Only
+  // move when there is somewhere to move.
+  const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+  if (distance <= 0) return
   // jsdom has no layout engine and no scrollTo; assigning the position is the
   // same intent and keeps the component testable outside a real browser.
   if (typeof container.scrollTo !== 'function') {
@@ -97,6 +103,8 @@ export interface StickToBottom {
   /** True while the reader is at (or near) the newest message. */
   readonly atBottom: boolean
   readonly jumpToBottom: () => void
+  /** Re-pins the transcript after out-of-band content growth (an image load). */
+  readonly followIfAtBottom: () => void
 }
 
 /**
@@ -108,10 +116,16 @@ export function useStickToBottom(contentKey: number): StickToBottom {
   const containerRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   const stick = useRef(true)
+  // The last position this hook saw. Content growth can fire a scroll event
+  // without moving the position; only a changed position means the reader
+  // scrolled, and only that may unstick the transcript.
+  const lastTop = useRef(0)
 
   const onScroll = useCallback(() => {
     const element = containerRef.current
     if (element === null) return
+    if (element.scrollTop === lastTop.current) return
+    lastTop.current = element.scrollTop
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight
     const next = distance < 48
     stick.current = next
@@ -129,6 +143,7 @@ export function useStickToBottom(contentKey: number): StickToBottom {
     const element = containerRef.current
     if (element === null || !stick.current) return
     scrollToBottom(element, false)
+    lastTop.current = element.scrollTop
   }, [contentKey])
 
   const jumpToBottom = useCallback(() => {
@@ -137,9 +152,19 @@ export function useStickToBottom(contentKey: number): StickToBottom {
     stick.current = true
     setAtBottom(true)
     scrollToBottom(element, true)
+    window.setTimeout(() => {
+      lastTop.current = element.scrollTop
+    }, 0)
   }, [])
 
-  return { containerRef, atBottom, jumpToBottom }
+  const followIfAtBottom = useCallback(() => {
+    const element = containerRef.current
+    if (element === null || !stick.current) return
+    scrollToBottom(element, false)
+    lastTop.current = element.scrollTop
+  }, [])
+
+  return { containerRef, atBottom, jumpToBottom, followIfAtBottom }
 }
 
 export interface InlineRename {

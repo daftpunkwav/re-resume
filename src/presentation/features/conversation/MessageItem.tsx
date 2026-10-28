@@ -14,8 +14,10 @@
 import { memo } from 'react'
 import { Tooltip } from '../../app/components/Tooltip'
 import { showToast } from '../../app/stores/toastStore'
+import type { Attachment } from '../../../domain/conversation/Attachment'
 import type { Message } from '../../../domain/conversation/Message'
 import type { MessageContext } from '../../../domain/conversation/MessageContext'
+import { MessageAttachments } from './attachments/MessageAttachments'
 import { copyToClipboard } from './clipboard'
 import { ContextChip } from './ContextChip'
 import { labelForContext } from './stores/conversationStore'
@@ -28,6 +30,8 @@ export interface MessageItemProps {
   readonly message: Message
   /** Chips the user attached to this turn; only user messages carry them. */
   readonly contexts?: readonly MessageContext[]
+  /** Images attached to this turn; only user messages carry them. */
+  readonly attachments?: readonly Attachment[]
   readonly contextEntries: Readonly<Record<string, string>>
   readonly usage?: TokenUsage
   /** True for a message the last reload appended; plays the 120 ms entrance. */
@@ -205,6 +209,7 @@ function formatTokenTotal(usage: TokenUsage): string {
 export interface UserBubbleProps {
   readonly text: string
   readonly contexts: readonly MessageContext[]
+  readonly attachments: readonly Attachment[]
   readonly contextEntries: Readonly<Record<string, string>>
   readonly enter: boolean
   readonly messageId?: string
@@ -234,6 +239,7 @@ function MessageContextChips({ contexts, contextEntries }: MessageContextChipsPr
 export function UserBubble({
   text,
   contexts,
+  attachments,
   contextEntries,
   enter,
   messageId,
@@ -252,7 +258,8 @@ export function UserBubble({
       data-message-id={messageId}
     >
       <div className="message-user-body">
-        <p className="message-user-text">{text}</p>
+        {text === '' ? null : <p className="message-user-text">{text}</p>}
+        <MessageAttachments attachments={attachments} />
         {contexts.length === 0 ? null : (
           <MessageContextChips contexts={contexts} contextEntries={contextEntries} />
         )}
@@ -261,11 +268,18 @@ export function UserBubble({
   )
 }
 
-function UserMessage({ message, contexts, contextEntries, enter }: MessageItemProps) {
+function UserMessage({
+  message,
+  contexts,
+  attachments,
+  contextEntries,
+  enter,
+}: MessageItemProps) {
   return (
     <UserBubble
       text={message.markdown}
       contexts={contexts ?? []}
+      attachments={attachments ?? []}
       contextEntries={contextEntries}
       enter={enter}
       messageId={message.id}

@@ -12,6 +12,7 @@
 
 import type { ProviderConfigurationDeps, ListProvidersOutput } from './providerConfiguration'
 import { readProviderCredential } from './providerConfiguration'
+import { resolveImageSupport } from '../../domain/settings/ProviderConfig'
 
 export async function listProviders(
   deps: ProviderConfigurationDeps,
@@ -25,6 +26,7 @@ export async function listProviders(
     providers.push({
       config,
       hasCredential: (await readProviderCredential(deps, config)) !== null,
+      supportsImages: resolveImageSupport(config),
     })
   }
   return { providers, activeProviderId }

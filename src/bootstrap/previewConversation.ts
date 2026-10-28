@@ -45,6 +45,7 @@ import {
   PREVIEW_MESSAGE_CONTEXTS,
   PREVIEW_RUN,
   PREVIEW_TOOL_INVOCATION,
+  PREVIEW_VISION_SCRIPT,
   PREVIEW_WRITE_TOOL_INVOCATION,
 } from '../infrastructure/preview/fixtures.conversation'
 import {
@@ -57,7 +58,10 @@ import type {
   ScriptedFailure,
   ScriptedTurn,
 } from '../infrastructure/preview/ScriptedModelProvider'
-import type { ModelChunk } from '../domain/generation/ports/ModelProvider'
+import type {
+  ChatRequest,
+  ModelChunk,
+} from '../domain/generation/ports/ModelProvider'
 import type { TextMeasurer } from '../domain/resume/ports/TextMeasurer'
 import type { ConversationLibrary } from './wiring/conversation'
 import { createConversationService } from './wiring/conversation'
@@ -145,6 +149,32 @@ export interface PreviewConversationOptions {
   readonly state?: PreviewConversationState
 }
 
+/** True when a request carries an image part, which the preview answers specially. */
+function requestHasImage(request: ChatRequest): boolean {
+  return request.messages.some((message) =>
+    message.parts.some((part) => part.kind === 'image'),
+  )
+}
+
+/**
+ * Answers any request that carries a screenshot with the vision script, so the
+ * preview shows the multimodal path instead of a scripted tool chain that never
+ * looked at the image. Other requests keep their per-request replay.
+ */
+function turnsWithVisionAnswer(
+  turns: readonly ScriptedTurn[],
+): readonly ScriptedTurn[] {
+  return turns.map(
+    (turn): ScriptedTurn =>
+      (request, requestIndex) =>
+        requestHasImage(request)
+          ? PREVIEW_VISION_SCRIPT
+          : typeof turn === 'function'
+            ? turn(request, requestIndex)
+            : turn,
+  )
+}
+
 export interface PreviewConversationAssembly {
   readonly service: ConversationService
   readonly activeRuns: ActiveRunRegistry
@@ -159,9 +189,10 @@ export function createPreviewConversationService(
   const model = new ScriptedModelProvider({
     id: 'preview',
     modelId: 'preview-scripted',
-    supportsImages: false,
+    supportsImages: true,
     script: options.script ?? [],
-    turns: options.turns,
+    turns:
+      options.turns === undefined ? undefined : turnsWithVisionAnswer(options.turns),
     pauseMs: options.pauseMs,
     failure: options.failure,
   })

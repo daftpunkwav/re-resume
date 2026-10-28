@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo } from 'react'
 import { IconButton } from '../../app/components/IconButton'
+import type { Attachment } from '../../../domain/conversation/Attachment'
 import type { Message } from '../../../domain/conversation/Message'
 import { FeatureIcon } from './icons'
 import { MessageItem, UserBubble } from './MessageItem'
@@ -24,6 +25,9 @@ import { ToolCard } from './ToolCard'
 
 const SKELETON_ROWS = 3
 
+/** Shared empty list so a message without images keeps a stable memo prop. */
+const NO_ATTACHMENTS: readonly Attachment[] = []
+
 export function MessageList() {
   const messages = useConversationStore((state) => state.messages)
   const pendingUser = useConversationStore((state) => state.pendingUser)
@@ -33,6 +37,8 @@ export function MessageList() {
   const enterIds = useConversationStore((state) => state.enterIds)
   const activeId = useConversationStore((state) => state.activeId)
   const retry = useConversationStore((state) => state.retry)
+  const attachmentsById = useConversationStore((state) => state.attachmentsById)
+  const ensureAttachments = useConversationStore((state) => state.ensureAttachments)
   const assistantMessageId = useRunStore((state) => state.assistantMessageId)
   const runStatus = useRunStore((state) => state.status)
   const usageByMessage = useRunStore((state) => state.usageByMessage)
@@ -40,7 +46,57 @@ export function MessageList() {
   const groups = useMemo(() => groupMessages(messages), [messages])
   const retryableId = useMemo(() => retryableAssistantId(messages), [messages])
   const contentKey = messages.length + (pendingUser === null ? 0 : 1)
-  const { containerRef, atBottom, jumpToBottom } = useStickToBottom(contentKey)
+  const { containerRef, atBottom, jumpToBottom, followIfAtBottom } = useStickToBottom(contentKey)
+
+  // An image paints after the message row exists (its bytes are read on mount),
+  // which grows the transcript without changing the message count. Watching the
+  // rows keeps the reader pinned to the newest answer in that case too.
+  useEffect(() => {
+    const element = containerRef.current
+    if (element === null || typeof ResizeObserver !== 'function') return
+    const observer = new ResizeObserver(() => followIfAtBottom())
+    const observed = new WeakSet<Element>()
+    const observeAll = (): void => {
+      for (const child of element.children) {
+        if (observed.has(child)) continue
+        observed.add(child)
+        observer.observe(child)
+      }
+    }
+    observeAll()
+    const mutations = new MutationObserver(observeAll)
+    mutations.observe(element, { childList: true })
+    return () => {
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [containerRef, followIfAtBottom])
+
+  // The rows of every attachment the transcript names are read once per id;
+  // the map below is stable until a row arrives, so memoised messages keep
+  // their props.
+  const attachmentIds = useMemo(
+    () => [...new Set(messages.flatMap((message) => message.attachmentIds))],
+    [messages],
+  )
+  useEffect(() => {
+    if (attachmentIds.length > 0) void ensureAttachments(attachmentIds)
+  }, [attachmentIds, ensureAttachments])
+
+  const attachmentsByMessage = useMemo(() => {
+    const map = new Map<string, readonly Attachment[]>()
+    for (const message of messages) {
+      if (message.attachmentIds.length === 0) continue
+      map.set(
+        message.id,
+        message.attachmentIds.flatMap((id) => {
+          const attachment = attachmentsById[id]
+          return attachment === undefined ? [] : [attachment]
+        }),
+      )
+    }
+    return map
+  }, [messages, attachmentsById])
 
   // Streaming text does not change `messages`; the frame sampler reports here so
   // the transcript follows the growing answer without subscribing to the deltas.
@@ -104,6 +160,7 @@ export function MessageList() {
               <MessageItem
                 message={group.user}
                 contexts={contextsByMessage[group.user.id]}
+                attachments={attachmentsByMessage.get(group.user.id) ?? NO_ATTACHMENTS}
                 contextEntries={contextEntries}
                 enter={enterIds.has(group.user.id)}
                 streaming={false}
@@ -140,6 +197,7 @@ export function MessageList() {
           <UserBubble
             text={pendingUser.text}
             contexts={pendingUser.contexts}
+            attachments={pendingUser.attachments}
             contextEntries={contextEntries}
             enter={false}
             pending

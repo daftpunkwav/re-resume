@@ -29,6 +29,12 @@ import type {
 } from '../../../../bootstrap/capabilities'
 import type { ConversationService } from '../../../../bootstrap/wiring/conversation'
 import type { Conversation } from '../../../../domain/conversation/Conversation'
+import type { Attachment } from '../../../../domain/conversation/Attachment'
+import {
+  assertAttachmentAllowed,
+  assertMessageAttachmentsAllowed,
+  attachmentKindForMime,
+} from '../../../../domain/conversation/Attachment'
 import type {
   ConversationGroups,
   ListConversationsOutput,
@@ -36,7 +42,9 @@ import type {
 import type { Message } from '../../../../domain/conversation/Message'
 import type { MessageContext } from '../../../../domain/conversation/MessageContext'
 import type { AgentEvent } from '../../../../domain/generation/AgentEvent'
+import { isDomainError } from '../../../../domain/shared/DomainError'
 import type {
+  AttachmentId,
   ChangeRecordId,
   ResumeId,
   RevisionId,
@@ -57,6 +65,20 @@ export interface ComposerContext {
   readonly context: MessageContext
   readonly label: string
 }
+
+/**
+ * One attachment of the composer. The file is kept while the draft lives so the
+ * chip can paint a thumbnail without reading the stored bytes back; a restored
+ * draft (after a failed send) carries the stored attachment only and the chip
+ * reads its bytes through the capability.
+ */
+export interface ComposerAttachment {
+  readonly attachment: Attachment
+  readonly file: File | null
+}
+
+/** Loading state of one message attachment, keyed by attachment id. */
+export type AttachmentLoadStatus = 'loading' | 'ready' | 'failed'
 
 export interface ConversationServices {
   readonly conversation: ConversationService
@@ -88,11 +110,21 @@ interface ConversationState {
   readonly pendingUser: {
     readonly text: string
     readonly contexts: readonly MessageContext[]
+    readonly attachments: readonly Attachment[]
   } | null
   readonly composer: {
     readonly text: string
     readonly contexts: readonly ComposerContext[]
+    readonly attachments: readonly ComposerAttachment[]
   }
+  /** Attachment rows the transcript renders, keyed by id. */
+  readonly attachmentsById: Readonly<Record<string, Attachment>>
+  /** Attachment rows being read for the transcript, keyed by id. */
+  readonly attachmentLoad: Readonly<Record<string, AttachmentLoadStatus>>
+  /** Number of images being ingested; the composer cannot send while non-zero. */
+  readonly attachmentIngesting: number
+  /** The last ingest refusal; a chip in the composer shows the reason. */
+  readonly attachmentError: ReadableError | null
   readonly undoBusy: ReadonlySet<string>
   readonly undone: ReadonlySet<string>
   connect(services: ConversationServices | null): void
@@ -108,8 +140,21 @@ interface ConversationState {
   setComposerText(text: string): void
   addContext(context: MessageContext, label: string): void
   removeContext(context: MessageContext): void
+  /** Validates, ingests and appends the images to the composer. */
+  attachFiles(files: readonly File[]): Promise<void>
+  removeAttachment(attachmentId: AttachmentId): void
+  clearAttachmentError(): void
+  /** Reads the rows of the transcript's attachment ids into the cache. */
+  ensureAttachments(attachmentIds: readonly AttachmentId[]): Promise<void>
   send(): Promise<void>
-  sendMessage(text: string, contexts: readonly MessageContext[]): Promise<void>
+  /** Sends a message; used by the composer and by the job-screenshot dialog. */
+  sendMessage(
+    text: string,
+    contexts: readonly MessageContext[],
+    attachments?: readonly Attachment[],
+  ): Promise<void>
+  /** Ingests files for a one-off message (the job screenshot dialog) and sends. */
+  sendWithFiles(text: string, files: readonly File[]): Promise<boolean>
   cancel(): Promise<void>
   retry(messageId: Message['id']): Promise<void>
   applyEvent(event: AgentEvent): void
@@ -143,10 +188,23 @@ const EMPTY = {
   messagesStatus: 'idle',
   error: null,
   pendingUser: null,
-  composer: { text: '', contexts: [] },
+  composer: { text: '', contexts: [], attachments: [] },
+  attachmentsById: {},
+  attachmentLoad: {},
+  attachmentIngesting: 0,
+  attachmentError: null,
   undoBusy: new Set<string>(),
   undone: new Set<string>(),
 } as const satisfies Partial<ConversationState>
+
+/** Drops the ingest results of a composer that was reset while they ran. */
+let attachmentGeneration = 0
+
+/** Drops the attachment-row reads of a root that is no longer mounted. */
+let attachmentReadGeneration = 0
+
+/** Serialises composer ingestion so two quick pastes see one draft. */
+let attachQueue: Promise<void> = Promise.resolve()
 
 /** The opens: only the newest request may write what the region shows. */
 function contextLabelFor(context: MessageContext, entries: Readonly<Record<string, string>>): string {
@@ -160,6 +218,67 @@ function contextLabelFor(context: MessageContext, entries: Readonly<Record<strin
   }
 }
 
+interface IngestResult {
+  readonly accepted: readonly ComposerAttachment[]
+  readonly errors: readonly string[]
+}
+
+/**
+ * Validates the images the composer received and stores them. The rules are the
+ * attachment domain's (MIME whitelist, per-file ceiling, per-message count and
+ * total); a file that fails one rule is reported and the rest are still tried,
+ * so dropping five files adds the valid ones and names what was refused.
+ */
+async function ingestImageFiles(
+  conversation: ConversationService,
+  files: readonly File[],
+  existing: readonly Attachment[],
+): Promise<IngestResult> {
+  const accepted: ComposerAttachment[] = []
+  const errors: string[] = []
+  for (const file of files) {
+    const label = file.name === '' ? '剪贴板图片' : `「${file.name}」`
+    try {
+      if (attachmentKindForMime(file.type) !== 'image') {
+        errors.push(`${label}不是支持的图片格式，请使用 JPG、PNG、WebP 或 GIF。`)
+        continue
+      }
+      assertAttachmentAllowed(file.type, file.size)
+      assertMessageAttachmentsAllowed([
+        ...existing.map((attachment) => ({
+          mimeType: attachment.mimeType,
+          byteSize: attachment.byteSize,
+        })),
+        ...accepted.map((entry) => ({
+          mimeType: entry.attachment.mimeType,
+          byteSize: entry.attachment.byteSize,
+        })),
+        { mimeType: file.type, byteSize: file.size },
+      ])
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const attachment = await conversation.ingestAttachment({
+        kind: 'image',
+        mimeType: file.type,
+        bytes,
+      })
+      const alreadyAttached =
+        existing.some((known) => known.id === attachment.id) ||
+        accepted.some((entry) => entry.attachment.id === attachment.id)
+      if (!alreadyAttached) accepted.push({ attachment, file })
+    } catch (failure) {
+      // The domain's refusal names the limit that was crossed; the generic
+      // code-to-text mapping would collapse it to "附件超出大小限制" and lose
+      // which rule and which file the reader has to fix.
+      errors.push(
+        `${label}${
+          isDomainError(failure) ? failure.message : describeError(failure).message
+        }`,
+      )
+    }
+  }
+  return { accepted, errors }
+}
+
 export const useConversationStore = create<ConversationState>((set, get) => ({
   ...EMPTY,
 
@@ -169,6 +288,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     useRunStore.getState().reset()
     messageGeneration += 1
     listGeneration += 1
+    attachmentGeneration += 1
+    attachmentReadGeneration += 1
     set({ ...EMPTY })
     if (next === null) return
     void get().loadConversations()
@@ -227,6 +348,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   startDraft(mode = 'reset') {
     messageGeneration += 1
+    attachmentGeneration += 1
     useRunStore.getState().reset()
     set({
       activeId: null,
@@ -236,7 +358,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       pendingUser: null,
       ...(mode === 'reset' ? { error: null } : {}),
       enterIds: new Set<string>(),
-      composer: { text: '', contexts: [] },
+      composer: { text: '', contexts: [], attachments: [] },
+      attachmentError: null,
     })
   },
 
@@ -345,21 +468,137 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }))
   },
 
-  async send() {
-    const state = get()
-    if (state.composer.text.trim() === '') return
-    const contexts = state.composer.contexts.map((chip) => chip.context)
-    // The composer is cleared once the turn is known to be on its way; a failure
-    // before that point leaves the draft where the user can send it again.
-    await get().sendMessage(state.composer.text, contexts)
+  attachFiles(files) {
+    if (services === null || files.length === 0) return Promise.resolve()
+    const generation = attachmentGeneration
+    const run = async (): Promise<void> => {
+      if (generation !== attachmentGeneration || services === null) return
+      const current = services
+      const existing = get().composer.attachments.map((entry) => entry.attachment)
+      set((state) => ({
+        attachmentIngesting: state.attachmentIngesting + files.length,
+        attachmentError: null,
+      }))
+      const { accepted, errors } = await ingestImageFiles(current.conversation, files, existing)
+      if (generation !== attachmentGeneration) return
+      set((state) => ({
+        attachmentIngesting: Math.max(0, state.attachmentIngesting - files.length),
+        composer:
+          accepted.length === 0
+            ? state.composer
+            : {
+                ...state.composer,
+                attachments: [...state.composer.attachments, ...accepted],
+              },
+        attachmentError:
+          errors.length === 0 ? null : { message: errors.join(' '), blockers: [] },
+      }))
+    }
+    // Two quick pastes must not both validate against the same draft: the
+    // second runs after the first appended its images, so the count and the
+    // total still hold.
+    const queued = attachQueue.then(run, run)
+    attachQueue = queued.catch(() => undefined)
+    return queued
   },
 
-  async sendMessage(text, contexts) {
+  removeAttachment(attachmentId) {
+    set((state) => ({
+      composer: {
+        ...state.composer,
+        attachments: state.composer.attachments.filter(
+          (entry) => entry.attachment.id !== attachmentId,
+        ),
+      },
+    }))
+  },
+
+  clearAttachmentError() {
+    set({ attachmentError: null })
+  },
+
+  async ensureAttachments(attachmentIds) {
+    const current = services
+    if (current === null || attachmentIds.length === 0) return
+    const generation = attachmentReadGeneration
+    const state = get()
+    const missing = [...new Set(attachmentIds)].filter(
+      (id) => state.attachmentsById[id] === undefined && state.attachmentLoad[id] !== 'loading',
+    )
+    if (missing.length === 0) return
+    set((current2) => ({
+      attachmentLoad: {
+        ...current2.attachmentLoad,
+        ...Object.fromEntries(missing.map((id) => [id, 'loading' as const])),
+      },
+    }))
+    try {
+      const found = await current.conversation.listAttachments(missing)
+      if (generation !== attachmentReadGeneration) return
+      set((current2) => {
+        const attachmentsById = { ...current2.attachmentsById }
+        const attachmentLoad = { ...current2.attachmentLoad }
+        for (const attachment of found) {
+          attachmentsById[attachment.id] = attachment
+          attachmentLoad[attachment.id] = 'ready'
+        }
+        for (const id of missing) {
+          if (attachmentsById[id] === undefined) attachmentLoad[id] = 'failed'
+        }
+        return { attachmentsById, attachmentLoad }
+      })
+    } catch {
+      if (generation !== attachmentReadGeneration) return
+      set((current2) => ({
+        attachmentLoad: {
+          ...current2.attachmentLoad,
+          ...Object.fromEntries(missing.map((id) => [id, 'failed' as const])),
+        },
+      }))
+    }
+  },
+
+  async send() {
+    const state = get()
+    if (useRunStore.getState().status !== 'idle') return
+    const contexts = state.composer.contexts.map((chip) => chip.context)
+    const attachments = state.composer.attachments.map((entry) => entry.attachment)
+    if (state.composer.text.trim() === '' && attachments.length === 0) return
+    // The composer is cleared once the turn is known to be on its way; a failure
+    // before that point leaves the draft where the user can send it again.
+    await get().sendMessage(state.composer.text, contexts, attachments)
+  },
+
+  async sendWithFiles(text, files) {
+    const current = services
+    if (current === null) return false
+    const generation = attachmentGeneration
+    set((state) => ({
+      attachmentIngesting: state.attachmentIngesting + files.length,
+      attachmentError: null,
+    }))
+    const { accepted, errors } = await ingestImageFiles(current.conversation, files, [])
+    if (generation !== attachmentGeneration) return false
+    set((state) => ({
+      attachmentIngesting: Math.max(0, state.attachmentIngesting - files.length),
+      attachmentError:
+        errors.length === 0 ? null : { message: errors.join(' '), blockers: [] },
+    }))
+    if (errors.length > 0 || accepted.length === 0) return false
+    await get().sendMessage(
+      text,
+      [],
+      accepted.map((entry) => entry.attachment),
+    )
+    return true
+  },
+
+  async sendMessage(text, contexts, attachments = []) {
     const current = services
     if (current === null) return
     if (useRunStore.getState().status !== 'idle') return
     const clean = text.trim()
-    if (clean === '') return
+    if (clean === '' && attachments.length === 0) return
     let conversationId = get().activeId
     set({ error: null })
     if (conversationId === null) {
@@ -376,8 +615,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       }
     }
     set({
-      composer: { text: '', contexts: [] },
-      pendingUser: { text: clean, contexts },
+      composer: { text: '', contexts: [], attachments: [] },
+      pendingUser: { text: clean, contexts, attachments },
+      attachmentError: null,
     })
     useRunStore.getState().begin(conversationId)
     try {
@@ -389,6 +629,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
             kind: 'user',
             markdown: clean,
             contexts,
+            attachmentIds: attachments.map((attachment) => attachment.id),
           },
           model: null,
           activeResumeId: null,
@@ -399,13 +640,17 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       set({ error: describeError(failure) })
       if (!useRunStore.getState().started) {
         // Nothing was persisted before the failure: the draft stays usable,
-        // including the chips the user attached to it.
+        // including the chips and images the user attached to it.
         set({
           composer: {
             text: clean,
             contexts: contexts.map((context) => ({
               context,
               label: contextLabelFor(context, get().contextEntries),
+            })),
+            attachments: attachments.map((attachment) => ({
+              attachment,
+              file: null,
             })),
           },
           pendingUser: null,

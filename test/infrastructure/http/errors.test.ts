@@ -16,7 +16,7 @@ import {
   readRetryAfterSeconds,
   truncateDetail,
 } from '../../../src/infrastructure/http/ProviderAdapters/errors'
-import { inferImageSupport } from '../../../src/infrastructure/http/ProviderAdapters/imageSupport'
+import { resolveImageSupport } from '../../../src/domain/settings/ProviderConfig'
 import {
   UNCONFIGURED_PROVIDER_MESSAGE,
   UnconfiguredModelProvider,
@@ -74,11 +74,11 @@ describe('retry classification', () => {
 
 describe('image-support inference', () => {
   it('treats Anthropic as image capable and filters the old OpenAI text models', () => {
-    expect(inferImageSupport('anthropic', 'claude-sonnet')).toBe(true)
-    expect(inferImageSupport('openai-compatible', 'gpt-4o')).toBe(true)
-    expect(inferImageSupport('openai-compatible', 'gpt-3.5-turbo')).toBe(false)
-    expect(inferImageSupport('openai-compatible', 'text-embedding-3')).toBe(false)
-    expect(inferImageSupport('openai-compatible', 'o1-mini')).toBe(false)
+    expect(resolveImageSupport({ kind: 'anthropic', modelId: 'claude-sonnet', supportsImages: null })).toBe(true)
+    expect(resolveImageSupport({ kind: 'openai-compatible', modelId: 'gpt-4o', supportsImages: null })).toBe(true)
+    expect(resolveImageSupport({ kind: 'openai-compatible', modelId: 'gpt-3.5-turbo', supportsImages: null })).toBe(false)
+    expect(resolveImageSupport({ kind: 'openai-compatible', modelId: 'text-embedding-3', supportsImages: null })).toBe(false)
+    expect(resolveImageSupport({ kind: 'openai-compatible', modelId: 'o1-mini', supportsImages: null })).toBe(false)
   })
 })
 

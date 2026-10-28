@@ -43,8 +43,9 @@ import type { ProviderConfigRepository } from '../../domain/settings/ports/Provi
 import type { SecretStore } from '../../domain/generation/ports/SecretStore'
 import type { Clock } from '../../domain/shared/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
-import type { ConversationId, MessageId } from '../../domain/shared/branded-id'
+import type { AttachmentId, ConversationId, MessageId } from '../../domain/shared/branded-id'
 import type { Result } from '../../domain/shared/Result'
+import { DomainError } from '../../domain/shared/DomainError'
 import { appendMessage } from '../../application/conversation/appendMessage'
 import type { AppendMessageInput } from '../../application/conversation/appendMessage'
 import { autoTitleConversation } from '../../application/conversation/autoTitle'
@@ -74,7 +75,7 @@ import type { ActiveRunRegistry } from '../../application/generation/activeRunRe
 import { UnconfiguredModelProvider } from '../../infrastructure/http/ProviderAdapters/UnconfiguredModelProvider'
 import { OpenAiCompatibleProvider } from '../../infrastructure/http/ProviderAdapters/OpenAiCompatibleProvider'
 import { AnthropicProvider } from '../../infrastructure/http/ProviderAdapters/AnthropicProvider'
-import { inferImageSupport } from '../../infrastructure/http/ProviderAdapters/imageSupport'
+import { resolveImageSupport } from '../../domain/settings/ProviderConfig'
 import type { HttpClient } from '../../infrastructure/http/TauriHttpClient'
 
 /** The repositories the conversation area owns. */
@@ -136,6 +137,14 @@ export interface ConversationService {
     readonly firstUserMessage: string
   }): Promise<Conversation>
   ingestAttachment(input: IngestAttachmentInput): Promise<Attachment>
+  /**
+   * The attachment rows of one message's ids, in the message's order. A row
+   * that no longer exists is skipped rather than failing the transcript: a
+   * message can outlive a file whose row an older sweep removed.
+   */
+  listAttachments(attachmentIds: readonly AttachmentId[]): Promise<readonly Attachment[]>
+  /** The stored bytes of one attachment; the transcript renders the thumbnail. */
+  readAttachmentBytes(attachmentId: AttachmentId): Promise<Uint8Array>
   runTurn(input: RunAgentTurnInput, emit: (event: AgentEvent) => void): Promise<AgentRun>
   retryRun(
     input: { readonly conversationId: ConversationId; readonly messageId: MessageId },
@@ -255,6 +264,26 @@ export function createConversationService(input: ConversationServiceInput): Conv
         },
         command,
       ),
+    listAttachments: async (attachmentIds) => {
+      if (attachmentIds.length === 0) return []
+      const found = await repositories.attachments.listByIds(attachmentIds)
+      const byId = new Map(found.map((attachment) => [attachment.id, attachment]))
+      return attachmentIds.flatMap((id) => {
+        const attachment = byId.get(id)
+        return attachment === undefined ? [] : [attachment]
+      })
+    },
+    readAttachmentBytes: async (attachmentId) => {
+      const attachment = await repositories.attachments.findById(attachmentId)
+      if (attachment === null) {
+        throw new DomainError('attachmentNotFound', '找不到这个附件。', {
+          entity: 'attachment',
+          id: attachmentId,
+          blockers: [attachmentId],
+        })
+      }
+      return repositories.fileStore.read(attachment.storageName)
+    },
     runTurn: (command, emit) =>
       activeRuns.run(command.conversationId, (signal) =>
         runAgentTurn(turnDeps(signal, emit), command),
@@ -300,7 +329,7 @@ export function createProviderFromConfig(
   apiKey: string,
   options: ProviderFactoryOptions,
 ): ModelProvider {
-  const supportsImages = config.supportsImages ?? inferImageSupport(config.kind, config.modelId)
+  const supportsImages = resolveImageSupport(config)
   if (config.kind === 'anthropic') {
     return new AnthropicProvider({
       id: config.id,

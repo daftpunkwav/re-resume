@@ -6,12 +6,15 @@
  *
  * Constraints:
  * - Every quick action does what it says. The job-description action opens a
- *   paste dialog and sends the pasted text as the first user turn; the sample
- *   action imports the sample library; the last one switches to the information
- *   panel.
+ *   dialog for pasted text or screenshots and sends what the user provides as
+ *   the first user turn; the sample action imports the sample library; the last
+ *   one switches to the information panel.
+ * - The screenshot path is for a model that reads images: the model picker's
+ *   answer is read before sending, and the confirmation is blocked with the
+ *   reason instead of letting a turn start that must fail.
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useApplicationRebuild, useServices } from '../../app/ApplicationServicesProvider'
 import { Button } from '../../app/components/Button'
 import { Dialog } from '../../app/components/Dialog'
@@ -21,6 +24,14 @@ import { messageOf } from '../../app/settings/settingsErrors'
 import { useSettingsStore } from '../../app/stores/settingsStore'
 import { useShellStore } from '../../app/stores/shellStore'
 import { showToast } from '../../app/stores/toastStore'
+import {
+  MAX_ATTACHMENT_BYTE_SIZE,
+  MAX_MESSAGE_ATTACHMENT_BYTE_SIZE,
+  MAX_MESSAGE_ATTACHMENT_COUNT,
+} from '../../../domain/conversation/Attachment'
+import { formatAttachmentSize } from './attachments/attachmentFormat'
+import { AttachmentFileChip } from './attachments/AttachmentFileChip'
+import { IMAGE_INPUT_ACCEPT, useImageIntake } from './attachments/useImageIntake'
 import type { FeatureIconName } from './icons'
 import { FeatureIcon } from './icons'
 import { useProviderStore } from './stores/providerStore'
@@ -33,19 +44,88 @@ interface QuickAction {
   readonly onClick: () => void
 }
 
+/** The instruction a screenshot-only turn carries; the assistant reads the image. */
+const JOB_SCREENSHOT_INSTRUCTION = '帮我针对这个岗位做简历'
+
+interface PlannedFiles {
+  readonly files: readonly File[]
+  readonly error: string | null
+}
+
+/**
+ * Applies the message attachment limits to a file selection before the dialog
+ * stores anything, so the reader is told about a refused file while it is still
+ * their choice. A duplicate file is skipped rather than counted twice.
+ */
+function planJobScreenshotFiles(
+  current: readonly File[],
+  incoming: readonly File[],
+): PlannedFiles {
+  const files = [...current]
+  let total = files.reduce((sum, file) => sum + file.size, 0)
+  let error: string | null = null
+  for (const file of incoming) {
+    if (files.some((known) => known.name === file.name && known.size === file.size)) continue
+    if (files.length >= MAX_MESSAGE_ATTACHMENT_COUNT) {
+      error = `一条消息最多携带 ${String(MAX_MESSAGE_ATTACHMENT_COUNT)} 张图片。`
+      break
+    }
+    if (file.size > MAX_ATTACHMENT_BYTE_SIZE) {
+      error = `单张图片不能超过 ${formatAttachmentSize(MAX_ATTACHMENT_BYTE_SIZE)}。`
+      continue
+    }
+    if (total + file.size > MAX_MESSAGE_ATTACHMENT_BYTE_SIZE) {
+      error = `一条消息的图片总大小不能超过 ${formatAttachmentSize(MAX_MESSAGE_ATTACHMENT_BYTE_SIZE)}。`
+      break
+    }
+    files.push(file)
+    total += file.size
+  }
+  return { files, error }
+}
+
 export function EmptyConversation() {
   const sendMessage = useConversationStore((state) => state.sendMessage)
+  const sendWithFiles = useConversationStore((state) => state.sendWithFiles)
+  const attachmentError = useConversationStore((state) => state.attachmentError)
+  const attachmentIngesting = useConversationStore((state) => state.attachmentIngesting)
+  const clearAttachmentError = useConversationStore((state) => state.clearAttachmentError)
   const providerStatus = useProviderStore((state) => state.status)
   const providers = useProviderStore((state) => state.providers)
+  const activeProviderId = useProviderStore((state) => state.activeProviderId)
   const setRightPanel = useShellStore((state) => state.setRightPanel)
   const openSettings = useShellStore((state) => state.openSettings)
   const [pasting, setPasting] = useState(false)
   const [jobPosting, setJobPosting] = useState('')
+  const [files, setFiles] = useState<readonly File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
   const missingModel = providerStatus === 'ready' && providers.length === 0
   const services = useServices()
   const rebuild = useApplicationRebuild()
   const sampleDataSeeded = useSettingsStore((state) => state.settings.sampleDataSeeded)
   const [seeding, setSeeding] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const activeProvider =
+    providers.find((entry) => entry.config.id === activeProviderId) ?? null
+  const modelRefusesImages = activeProvider !== null && !activeProvider.supportsImages
+
+  const addFiles = (incoming: readonly File[]): void => {
+    const planned = planJobScreenshotFiles(files, incoming)
+    setFileError(planned.error)
+    setFiles(planned.files)
+  }
+
+  const imageIntake = useImageIntake(addFiles, sending, fileInputRef)
+
+  const closeDialog = (): void => {
+    if (sending) return
+    setPasting(false)
+    setFiles([])
+    setFileError(null)
+    clearAttachmentError()
+  }
 
   const seed = async (): Promise<void> => {
     if (seeding) return
@@ -61,12 +141,39 @@ export function EmptyConversation() {
     }
   }
 
+  const confirmJobDescription = async (): Promise<void> => {
+    const text = jobPosting.trim()
+    if (text === '' && files.length === 0) return
+    if (files.length > 0 && modelRefusesImages) return
+    setSending(true)
+    try {
+      if (files.length === 0) {
+        setPasting(false)
+        setJobPosting('')
+        await sendMessage(text, [])
+        return
+      }
+      const sent = await sendWithFiles(text === '' ? JOB_SCREENSHOT_INSTRUCTION : text, files)
+      if (!sent) return
+      setPasting(false)
+      setJobPosting('')
+      setFiles([])
+      setFileError(null)
+      clearAttachmentError()
+    } finally {
+      setSending(false)
+    }
+  }
+
   const quickActions: readonly QuickAction[] = [
     {
       icon: 'clipboard',
       title: '粘贴岗位描述',
-      description: '把招聘要求发给助手，让它按岗位整理简历。',
-      onClick: () => setPasting(true),
+      description: '粘贴招聘要求，或上传岗位截图，让助手按岗位整理简历。',
+      onClick: () => {
+        clearAttachmentError()
+        setPasting(true)
+      },
     },
     ...(sampleDataSeeded
       ? []
@@ -87,6 +194,9 @@ export function EmptyConversation() {
       onClick: () => setRightPanel('info'),
     },
   ]
+
+  const busy = sending || attachmentIngesting > 0
+  const errorText = fileError ?? attachmentError?.message ?? null
 
   return (
     <div className="conversation-empty">
@@ -139,25 +249,82 @@ export function EmptyConversation() {
       <Dialog
         open={pasting}
         title="粘贴岗位描述"
-        description="把招聘页面上的岗位描述粘贴到这里，作为这段对话的第一条消息。"
+        description="粘贴招聘页面的文字，或上传岗位截图。发送后助手会据此理解岗位。"
         confirmLabel="发送给助手"
-        busy={jobPosting.trim() === ''}
-        onClose={() => setPasting(false)}
+        busy={busy}
+        onClose={closeDialog}
         onConfirm={() => {
-          const text = jobPosting.trim()
-          if (text === '') return
-          setPasting(false)
-          setJobPosting('')
-          void sendMessage(text, [])
+          void confirmJobDescription()
         }}
       >
-        <TextAreaField
-          label="岗位描述"
-          rows={8}
-          value={jobPosting}
-          placeholder="例如：负责前端页面开发，熟悉 React 与 TypeScript……"
-          onChange={(event) => setJobPosting(event.target.value)}
-        />
+        <div
+          onPaste={imageIntake.onPaste}
+          onDragEnter={imageIntake.onDragEnter}
+          onDragOver={imageIntake.onDragOver}
+          onDragLeave={imageIntake.onDragLeave}
+          onDrop={imageIntake.onDrop}
+        >
+          <TextAreaField
+            label="岗位描述"
+            rows={files.length > 0 ? 4 : 8}
+            value={jobPosting}
+            placeholder="例如：负责前端页面开发，熟悉 React 与 TypeScript……也可以只上传截图。"
+            onChange={(event) => setJobPosting(event.target.value)}
+          />
+          <div className="job-screenshot-row">
+            <Button
+              size="small"
+              variant="secondary"
+              icon="plus"
+              disabled={busy}
+              onClick={imageIntake.openPicker}
+            >
+              上传岗位截图
+            </Button>
+            <span className="job-screenshot-hint">
+              也可以直接粘贴或拖入图片。支持 JPG、PNG、WebP、GIF，单张不超过 5 MB。
+            </span>
+            <input
+              ref={fileInputRef}
+              className="visually-hidden"
+              type="file"
+              accept={IMAGE_INPUT_ACCEPT}
+              multiple
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => {
+                const picked = [...(event.target.files ?? [])]
+                event.target.value = ''
+                if (picked.length > 0) addFiles(picked)
+              }}
+            />
+          </div>
+          {files.length === 0 ? null : (
+            <ul className="composer-attachments job-screenshot-files" aria-label="岗位截图">
+              {files.map((file, index) => (
+                <AttachmentFileChip
+                  key={`${file.name}:${String(file.size)}:${String(index)}`}
+                  file={file}
+                  index={index}
+                  onRemove={() => {
+                    setFiles((current) => current.filter((_, at) => at !== index))
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+          {modelRefusesImages && files.length > 0 ? (
+            <p className="job-screenshot-warning" role="status">
+              当前模型不支持图片输入。请切换到支持图片的模型，或移除截图后粘贴文字。
+            </p>
+          ) : null}
+          {errorText === null ? null : (
+            <p className="composer-attachment-error" role="alert">
+              {errorText}
+            </p>
+          )}
+          {busy ? <p className="job-screenshot-hint">正在添加图片…</p> : null}
+        </div>
       </Dialog>
     </div>
   )
