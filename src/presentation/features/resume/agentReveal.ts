@@ -45,11 +45,54 @@ function sameOverride(left: ResumeOverride, right: ResumeOverride): boolean {
   return leftTarget === rightTarget && left.text === right.text
 }
 
-function sectionOfEntry(
+/** Sections whose composition, order or selection the document itself changed. */
+function changedSections(
+  previous: ResumeDocumentState,
+  next: ResumeDocumentState,
+): Set<ResumeSectionId> {
+  const before = new Map(previous.sections.map((section) => [section.id, section]))
+  const changed = new Set<ResumeSectionId>()
+  for (const section of next.sections) {
+    const earlier = before.get(section.id)
+    if (earlier === undefined || !sameSection(earlier, section)) changed.add(section.id)
+  }
+  return changed
+}
+
+/** The sections an override renders in: the summary is document-wide. */
+function sectionsOfOverride(
+  override: ResumeOverride,
   sections: readonly ResumeSection[],
-  entryId: string,
-): ResumeSection | undefined {
-  return sections.find((section) => section.entryIds.includes(entryId as never))
+): readonly ResumeSectionId[] {
+  if (override.target.kind === 'summary') {
+    return sections.filter((section) => section.visible).map((section) => section.id)
+  }
+  const entryId = override.target.entryId
+  const section = sections.find((candidate) => candidate.entryIds.includes(entryId))
+  return section === undefined ? [] : [section.id]
+}
+
+/** Sections an added, removed or rewritten override changed. */
+function sectionsOfOverrideChanges(
+  previous: readonly ResumeOverride[],
+  next: readonly ResumeOverride[],
+  sections: readonly ResumeSection[],
+): Set<ResumeSectionId> {
+  const before = new Map(previous.map((override) => [override.id, override]))
+  const nextIds = new Set(next.map((override) => override.id))
+  const changed = new Set<ResumeSectionId>()
+  const add = (override: ResumeOverride): void => {
+    for (const sectionId of sectionsOfOverride(override, sections)) changed.add(sectionId)
+  }
+  for (const override of next) {
+    const earlier = before.get(override.id)
+    if (earlier !== undefined && sameOverride(earlier, override)) continue
+    add(override)
+  }
+  for (const override of previous) {
+    if (!nextIds.has(override.id)) add(override)
+  }
+  return changed
 }
 
 /**
@@ -64,33 +107,13 @@ export function changedSectionIds(
   if (previous === null) {
     return next.sections.filter((section) => section.visible).map((section) => section.id)
   }
-  const changed = new Set<ResumeSectionId>()
-  const before = new Map(previous.sections.map((section) => [section.id, section]))
-  for (const section of next.sections) {
-    const earlier = before.get(section.id)
-    if (earlier === undefined || !sameSection(earlier, section)) changed.add(section.id)
-  }
-  // A different set of overrides changes the text of the summary or of an
-  // entry, which are rendered inside a section rather than as a section.
-  const overridesBefore = new Map(previous.overrides.map((override) => [override.id, override]))
-  for (const override of next.overrides) {
-    const earlier = overridesBefore.get(override.id)
-    if (earlier !== undefined && sameOverride(earlier, override)) continue
-    if (override.target.kind === 'summary') {
-      for (const section of next.sections) {
-        if (section.visible) changed.add(section.id)
-      }
-      continue
-    }
-    const section = sectionOfEntry(next.sections, override.target.entryId)
-    if (section !== undefined) changed.add(section.id)
-  }
-  for (const override of previous.overrides) {
-    if (next.overrides.some((candidate) => candidate.id === override.id)) continue
-    if (override.target.kind === 'entry') {
-      const section = sectionOfEntry(next.sections, override.target.entryId)
-      if (section !== undefined) changed.add(section.id)
-    }
+  const changed = changedSections(previous, next)
+  for (const sectionId of sectionsOfOverrideChanges(
+    previous.overrides,
+    next.overrides,
+    next.sections,
+  )) {
+    changed.add(sectionId)
   }
   return [...changed]
 }
