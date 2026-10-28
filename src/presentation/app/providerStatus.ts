@@ -1,9 +1,10 @@
 /**
  * @file providerStatus
- * @description The one-line model-service state the sidebar and the top bar
- * show. The provider list itself is not part of this build's services yet, so
- * only two states can be distinguished honestly: nothing chosen, or an active
- * provider whose connectivity has not been tested.
+ * @description The one-line model-service state the sidebar shows. Only two
+ * states can be read from stored data: nothing chosen, or an active provider
+ * whose connectivity is a property of the current process and therefore not
+ * persisted. The model picker reads the full provider list and the last probe
+ * result; this helper stays the compact summary beside the settings entry.
  */
 
 export type ProviderStatus = 'unconfigured' | 'configured-untested'

@@ -15,6 +15,7 @@ import { IconButton } from './components/IconButton'
 import { ShortcutKeys, primaryModifierLabel } from './components/Kbd'
 import { Popover } from './components/Popover'
 import { Tooltip } from './components/Tooltip'
+import { ConversationList } from '../features/conversation/ConversationList'
 import { describeProviderStatus } from './providerStatus'
 import { useSettingsStore } from './stores/settingsStore'
 import { useShellStore } from './stores/shellStore'
@@ -106,15 +107,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
       <div className="sidebar-conversations">
         {collapsed ? null : <p className="sidebar-section-label">对话</p>}
-        <div className="sidebar-empty">
-          <Icon name="message-square" size={16} />
-          {collapsed ? null : (
-            <span className="sidebar-empty-copy">
-              <span className="sidebar-empty-title">还没有对话</span>
-              <span className="sidebar-empty-hint">对话记录保存在本机。</span>
-            </span>
-          )}
-        </div>
+        <ConversationList collapsed={collapsed} />
       </div>
 
       <div className="sidebar-foot">
