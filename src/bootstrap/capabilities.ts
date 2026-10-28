@@ -162,6 +162,12 @@ import type { ClearAllDataResult } from '../application/settings/clearAllData'
 import type { CleanupOrphanAttachmentsResult } from '../application/settings/cleanupOrphanAttachments'
 import type { SeedSampleDataOutput } from '../application/seed/seedSampleData'
 import type { ConversationService } from './wiring/conversation'
+import type {
+  ExportPdfInput,
+  ExportPdfOutput,
+  PdfExportPlan,
+  PreparePdfExportInput,
+} from '../application/export/exportPdf'
 
 /** Build information shown in the about section. Every field is a fact about the running build. */
 export interface AppInfo {
@@ -293,6 +299,17 @@ export interface UpdateCanvasBlockTextInput {
 }
 
 /**
+ * PDF export as the interface sees it. `preparePdfExport` is read-only and
+ * reports the overflows and warnings the save dialog must be preceded by;
+ * `exportPdf` renders the file and asks the saver where to write it. A dismissed
+ * dialog returns `savedPath: null` and writes nothing.
+ */
+export interface ExportService {
+  readonly preparePdfExport: (input: PreparePdfExportInput) => Promise<PdfExportPlan>
+  readonly exportPdf: (input: ExportPdfInput) => Promise<ExportPdfOutput>
+}
+
+/**
  * The resume document as the interface sees it: every document use case, already
  * bound to the store, the library, the measurer, the clock and the identifier
  * source. The facade hands out domain values and throws `DomainError` for a
@@ -365,6 +382,8 @@ export interface CompositionRoot {
   readonly conversation: ConversationService
   readonly info: InfoService
   readonly resume: ResumeService
+  /** Draft and frozen PDF export, its warnings and its save path. */
+  readonly export: ExportService
   /** Configured model services and the one serving requests. */
   readonly providers: ProviderService
   /** Reversal of the library writes the assistant performed. */

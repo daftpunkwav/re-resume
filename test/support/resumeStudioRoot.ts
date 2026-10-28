@@ -82,6 +82,8 @@ export function newResumeStudioRoot(input?: {
   readonly entries?: readonly InfoEntry[]
   readonly customModules?: readonly CustomModuleDefinition[]
   readonly seedResumes?: boolean
+  /** Replaces the export capability, so an export test need not render a PDF. */
+  readonly exportService?: CompositionRoot['export']
 }): ResumeStudioRoot {
   const clock = new FixedClock()
   const changes = new InMemoryChangeLogRepository()
@@ -111,7 +113,11 @@ export function newResumeStudioRoot(input?: {
   // A seeded resume is created through the create use case so its revision
   // chain starts the same way the panel's own creation path starts it.
   return {
-    root: stubCompositionRoot({ info, resume }),
+    root: stubCompositionRoot(
+      input?.exportService === undefined
+        ? { info, resume }
+        : { info, resume, export: input.exportService },
+    ),
     info,
     resume,
     entries,

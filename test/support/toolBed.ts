@@ -40,6 +40,8 @@ import {
 import { PREVIEW_RESUMES } from '../../src/infrastructure/preview/fixtures.resume'
 import { AggregateModelDouble } from './modelDouble'
 import { FixedClock, SequentialIdGenerator } from './fakeEnvironment'
+import type { PdfFileSaver } from '../../src/domain/resume/ports/PdfFileSaver'
+import { FixedBytesPdfExporter, RecordingPdfFileSaver } from './pdfDoubles'
 
 export interface ToolBed {
   readonly clock: FixedClock
@@ -58,6 +60,8 @@ export interface ToolBed {
   readonly messageContexts: InMemoryMessageContextRepository
   readonly model: AggregateModelDouble
   readonly measurer: FixtureTextMeasurer
+  readonly pdfExporter: FixedBytesPdfExporter
+  readonly pdfSaver: PdfFileSaver
   readonly deps: ToolPackDeps
   readonly registry: ToolRegistry
   readonly events: AgentEvent[]
@@ -66,6 +70,8 @@ export interface ToolBed {
 export interface ToolBedOptions {
   /** Seed the preview library and its resumes; true by default. */
   readonly seedData?: boolean
+  /** Replaces the recording saver, for the cancellation and failure paths. */
+  readonly pdfSaver?: PdfFileSaver
 }
 
 export function createToolBed(options: ToolBedOptions = {}): ToolBed {
@@ -83,6 +89,9 @@ export function createToolBed(options: ToolBedOptions = {}): ToolBed {
     customModules.seed(PREVIEW_INFO_CUSTOM_MODULES)
     resumes.seed(PREVIEW_RESUMES)
   }
+  const fileStore = new InMemoryFileStore()
+  const pdfExporter = new FixedBytesPdfExporter()
+  const pdfSaver = options.pdfSaver ?? new RecordingPdfFileSaver()
   const deps: ToolPackDeps = {
     model: new AggregateModelDouble(),
     entries,
@@ -93,10 +102,12 @@ export function createToolBed(options: ToolBedOptions = {}): ToolBed {
     jobPostings: new InMemoryJobPostingRepository(),
     runs,
     attachments: new InMemoryAttachmentRepository(),
-    fileStore: new InMemoryFileStore(),
+    fileStore,
     measurer: new FixtureTextMeasurer(),
     clock,
     ids,
+    pdfExporter,
+    pdfSaver,
   }
   return {
     clock,
@@ -115,6 +126,8 @@ export function createToolBed(options: ToolBedOptions = {}): ToolBed {
     messageContexts: new InMemoryMessageContextRepository(),
     model: deps.model as AggregateModelDouble,
     measurer: deps.measurer as FixtureTextMeasurer,
+    pdfExporter,
+    pdfSaver,
     deps,
     registry: buildToolRegistry(deps),
     events: [],

@@ -35,6 +35,7 @@ import { useRunStore } from '../../../../src/presentation/features/conversation/
 import { useSettingsStore } from '../../../../src/presentation/app/stores/settingsStore'
 import { createConversationBed } from '../../../support/conversationBed'
 import type { ConversationBed } from '../../../support/conversationBed'
+import { FixedBytesPdfExporter, RecordingPdfFileSaver } from '../../../support/pdfDoubles'
 import { FixedClock, SequentialIdGenerator } from '../../../support/fakeEnvironment'
 import { MESSAGE_WINDOW } from '../../../../src/presentation/features/conversation/stores/conversationStore'
 
@@ -72,6 +73,8 @@ function createHarness(): Harness {
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
+    pdfExporter: new FixedBytesPdfExporter(),
+    pdfSaver: new RecordingPdfFileSaver(),
   })
   const infoClock = new FixedClock()
   const infoIds = new SequentialIdGenerator('info')

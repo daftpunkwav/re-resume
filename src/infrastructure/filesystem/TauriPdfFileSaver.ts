@@ -19,19 +19,13 @@
  */
 
 import type { PdfFileSaver } from '../../domain/resume/ports/PdfFileSaver'
-
-/**
- * Characters a file name cannot carry on at least one target platform,
- * replaced rather than rejected: the suggested name is a convenience, not
- * input the user typed for this purpose.
- */
-const FORBIDDEN_NAME_CHARS = /[/\\:?*"<>|]/g
+import { sanitizePdfFileName } from './pdfFileName'
 
 export class TauriPdfFileSaver implements PdfFileSaver {
   async save(bytes: Uint8Array, suggestedName: string): Promise<string | null> {
     const { save } = await import('@tauri-apps/plugin-dialog')
     const path = await save({
-      defaultPath: sanitizeFileName(suggestedName),
+      defaultPath: sanitizePdfFileName(suggestedName),
       filters: [{ name: 'PDF document', extensions: ['pdf'] }],
     })
     if (path === null) return null
@@ -40,11 +34,11 @@ export class TauriPdfFileSaver implements PdfFileSaver {
     // makes the wire shape the command deserializes part of the call itself
     // instead of something the IPC serializer has to infer.
     const payload = { destination: path, bytes: Array.from(bytes) }
-    await invoke('publish_export', payload)
+    try {
+      await invoke('publish_export', payload)
+    } catch (failure) {
+      throw new Error(`无法写入 PDF 文件：${failure instanceof Error ? failure.message : String(failure)}`)
+    }
     return path
   }
-}
-
-function sanitizeFileName(name: string): string {
-  return name.replace(FORBIDDEN_NAME_CHARS, ' ').trim()
 }

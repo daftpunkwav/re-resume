@@ -20,6 +20,10 @@
 
 import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
 import { InMemoryFileStore } from '../infrastructure/preview/InMemoryFileStore'
+import { BrowserDownloadPdfSaver } from '../infrastructure/filesystem/BrowserDownloadPdfSaver'
+import { createBundledFontPdfExporter } from '../infrastructure/exporter/react-pdf/BundledFontPdfExporter'
+import type { PdfFileSaver } from '../domain/resume/ports/PdfFileSaver'
+import type { ResumePdfExporter } from '../domain/resume/ports/ResumePdfExporter'
 import {
   InMemoryAgentRunRepository,
   InMemoryAttachmentRepository,
@@ -84,6 +88,13 @@ export interface PreviewConversationState {
   readonly changes: InMemoryChangeLogRepository
   readonly resumes: InMemoryResumeRepository
   readonly measurer: TextMeasurer
+  /**
+   * The preview's PDF renderer and saver. The renderer loads the bundled fonts
+   * on first use; the saver hands the file to the browser's download list
+   * instead of opening a native dialog.
+   */
+  readonly pdfExporter: ResumePdfExporter
+  readonly pdfSaver: PdfFileSaver
 }
 
 /** Creates the seeded memory state: library, resumes, one conversation and its run. */
@@ -121,6 +132,8 @@ export function createPreviewConversationState(): PreviewConversationState {
     changes,
     resumes,
     measurer: new FixtureTextMeasurer(),
+    pdfExporter: createBundledFontPdfExporter(),
+    pdfSaver: new BrowserDownloadPdfSaver(),
   }
 }
 
@@ -214,6 +227,8 @@ export function createPreviewConversationService(
     titleModel: null,
     activeRuns,
     secrets: [],
+    pdfExporter: state.pdfExporter,
+    pdfSaver: state.pdfSaver,
     onWarning: (message, warning) => {
       console.warn(`[preview] ${message}`, warning)
     },

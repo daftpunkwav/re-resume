@@ -39,6 +39,7 @@ function stubRoot(): CompositionRoot {
     },
     info: base.info,
     resume: base.resume,
+    export: base.export,
     conversation: createPreviewConversationService().service,
     providers: base.providers,
     libraryChanges: base.libraryChanges,

@@ -27,6 +27,7 @@ import type { CompositionRoot } from '../../../../src/bootstrap/capabilities'
 import { stubCompositionRoot } from '../../../support/stubCompositionRoot'
 import { createConversationBed } from '../../../support/conversationBed'
 import type { ConversationBed } from '../../../support/conversationBed'
+import { FixedBytesPdfExporter, RecordingPdfFileSaver } from '../../../support/pdfDoubles'
 
 function renderView(root: CompositionRoot) {
   return render(
@@ -65,6 +66,8 @@ function conversationServiceFor(bed: ConversationBed) {
     titleModel: null,
     activeRuns: new ActiveRunRegistry(),
     secrets: [],
+    pdfExporter: new FixedBytesPdfExporter(),
+    pdfSaver: new RecordingPdfFileSaver(),
   })
 }
 

@@ -45,6 +45,7 @@ const EXPECTED_NAMES = [
   'writeEntryOverride',
   'addCanvasBlock',
   'moveCanvasBlock',
+  'exportPdf',
   'undoLastChange',
 ] as const
 
@@ -59,12 +60,12 @@ function fakeTool(name: string, risk: 'read' | 'write' | 'draft' = 'write'): Too
 }
 
 describe('the production registry', () => {
-  it('registers exactly the 25 tools of the pack', () => {
+  it('registers exactly the 26 tools of the pack', () => {
     const { registry } = createToolBed()
     const names = registry.list().map((tool) => tool.name).sort()
     expect(registry.list()).toHaveLength(EXPECTED_TOOL_COUNT)
     expect(names).toEqual([...EXPECTED_NAMES].sort())
-    expect(EXPECTED_TOOL_COUNT).toBe(25)
+    expect(EXPECTED_TOOL_COUNT).toBe(26)
   })
 
   it('offers a renderable object schema for every tool', () => {
@@ -110,7 +111,7 @@ describe('the construction guards', () => {
 
   it('rejects a duplicate name and a wrong count', () => {
     expect(() => assertUniqueNames([fakeTool('a'), fakeTool('a')])).toThrow(/twice/)
-    expect(() => assertExpectedCount([fakeTool('a')])).toThrow(/Expected 25/)
+    expect(() => assertExpectedCount([fakeTool('a')])).toThrow(/Expected 26/)
   })
 
   it('rejects a write tool without a label', () => {
