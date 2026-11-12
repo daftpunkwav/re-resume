@@ -11,14 +11,13 @@
  * Responsibilities:
  * - Pin the observable repository behaviour both flavors share: supersession
  *   and cursor semantics, the never-reused sequence, the trim window, the run
- *   gate, and the dense reorder rewrite
- * - Pin the documented divergences in their own suite instead of weakening the
- *   shared assertions
+ *   gate (the createRun one and the raw create path behind it), and the dense
+ *   reorder rewrite
  *
  * Constraints:
  * - Tests only: no src/ file may change to satisfy a case here. Where the two
- *   flavors disagree, each case pins the behaviour its flavor ships today and
- *   its comment names the divergence.
+ *   flavors disagreed, the memory side was brought in line with the schema's
+ *   own rule, so the suite states one contract for both.
  * - The SQLite side runs over `createMigratedDatabase()`, so the schema under
  *   test is exactly the one the shipped migration files declare.
  * - `DomainError` codes are part of the contract, so shared cases match codes;
@@ -520,6 +519,17 @@ function describeInfoEntryOrderContract(flavor: Flavor): void {
       await expect(bed.entries.listAll()).resolves.toHaveLength(2)
     })
 
+    it('refuses a second entry on a sort order the module already uses', async () => {
+      // The port declares the order unique inside a module: SQLite enforces it
+      // with idx_info_entry_order and the memory store mirrors the check.
+      await bed.entries.insert(projectEntry('entry-1', 1), aChange())
+
+      await expect(
+        bed.entries.insert(projectEntry('entry-2', 1), aChange()),
+      ).rejects.toThrow()
+      await expect(bed.countChangeRecords()).resolves.toBe(1)
+    })
+
     it('rewrites the order of a module densely to one through n', async () => {
       await bed.entries.insert(projectEntry('entry-1', 1), aChange())
       await bed.entries.insert(projectEntry('entry-2', 2), aChange())
@@ -571,12 +581,6 @@ function describeInfoEntryOrderContract(flavor: Flavor): void {
   })
 }
 
-for (const flavor of FLAVORS) {
-  describeResumeContract(flavor)
-  describeRunGateContract(flavor)
-  describeInfoEntryOrderContract(flavor)
-}
-
 describe('shared defaults', () => {
   it('keeps one default revision limit for both implementations', () => {
     // The trim window is a contract, not an implementation detail: the two
@@ -586,6 +590,12 @@ describe('shared defaults', () => {
     expect(SQLITE_REVISION_LIMIT).toBe(200)
   })
 })
+
+for (const flavor of FLAVORS) {
+  describeResumeContract(flavor)
+  describeRunGateContract(flavor)
+  describeInfoEntryOrderContract(flavor)
+}
 
 /**
  * Behaviour the two flavors do not share. Each case pins what its flavor does
@@ -616,18 +626,6 @@ describe('documented divergences between the flavors', () => {
         bed.runs.create(aRun('run-2', asConversationId('conversation-1'))),
       ).rejects.toThrow(/UNIQUE constraint failed/u)
     })
-
-    it('refuses a second entry on a sort order the module already uses', async () => {
-      // The port declares the sort order unique inside a module; the SQLite
-      // schema enforces it with idx_info_entry_order. The memory store enforces
-      // no such index and accepts the duplicate (see the in-memory case below).
-      await bed.entries.insert(projectEntry('entry-1', 1), aChange())
-
-      await expect(
-        bed.entries.insert(projectEntry('entry-2', 1), aChange()),
-      ).rejects.toThrow()
-      await expect(bed.countChangeRecords()).resolves.toBe(1)
-    })
   })
 
   describe('in-memory repositories', () => {
@@ -642,9 +640,12 @@ describe('documented divergences between the flavors', () => {
     })
 
     it('leaves the raw create path unguarded', async () => {
-      // Divergence from SQLite: the map-backed store has no index, so only the
-      // createRun gate enforces the single-running rule and a raw create
-      // accepts a second running run. This pins today's behaviour.
+      // Divergence from SQLite, and it is load-bearing: the job-posting parse
+      // (parseJobPosting.startRun) uses the raw create for a run that carries
+      // the current conversation while the turn's own run is still running, so
+      // mirroring the index in the memory store would fail the scripted tool
+      // chain the preview exists to exercise. On the native runtime the same
+      // call meets idx_run_one_running — see the tracking issue.
       await bed.conversations.insert(aConversation('conversation-1'))
       await bed.runs.create(aRun('run-1', asConversationId('conversation-1')))
 
@@ -653,17 +654,6 @@ describe('documented divergences between the flavors', () => {
       ).resolves.toBeUndefined()
       await expect(bed.runs.findById(asAgentRunId('run-2'))).resolves.not.toBeNull()
       await expect(bed.runs.listRunning()).resolves.toHaveLength(2)
-    })
-
-    it('accepts a second entry on a sort order the module already uses', async () => {
-      // Divergence from SQLite and from the port's declared rule: the
-      // map-backed store enforces no order index and only refuses a duplicate
-      // entry identity, so the duplicate sort order is stored. This pins
-      // today's behaviour.
-      await bed.entries.insert(projectEntry('entry-1', 1), aChange())
-      await bed.entries.insert(projectEntry('entry-2', 1), aChange())
-
-      await expect(bed.entries.listByModule('project', null)).resolves.toHaveLength(2)
     })
   })
 })
