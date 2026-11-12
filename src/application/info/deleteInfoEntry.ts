@@ -15,6 +15,7 @@
  */
 
 import type { ChangeRecord } from '../../domain/changes/ChangeRecord'
+import { serializeInfoEntryPayload } from '../../domain/info/changePayloads'
 import type { InfoOrigin } from '../../domain/info/InfoEntry'
 import { moduleDescriptor } from '../../domain/info/InfoModuleKind'
 import type { InfoEntryReference } from '../../domain/info/ports/InfoEntryReferenceQuery'
@@ -79,7 +80,7 @@ export async function deleteInfoEntry(
     entity: 'infoEntry',
     entityId: entry.id,
     op: 'infoEntry.delete',
-    beforeJson: JSON.stringify(entry),
+    beforeJson: serializeInfoEntryPayload(entry),
     afterJson: null,
     origin,
     runId: sourceRunId,

@@ -24,6 +24,7 @@ import {
   validateCustomFieldDefinition,
   validateCustomModuleDefinition,
 } from '../../domain/info/CustomModule'
+import { serializeCustomModulePayload } from '../../domain/info/changePayloads'
 import type {
   AgentRunId,
   ConversationId,
@@ -96,7 +97,7 @@ export async function createCustomModule(
     entityId: module.id,
     op: 'customModule.create',
     beforeJson: null,
-    afterJson: JSON.stringify(module),
+    afterJson: serializeCustomModulePayload(module),
     origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,
