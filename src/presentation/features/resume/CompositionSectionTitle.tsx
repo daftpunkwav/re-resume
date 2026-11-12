@@ -5,7 +5,7 @@
  * the per-control wording so the row itself stays an ordered composition.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { CustomModuleDefinition } from '../../../domain/info/CustomModule'
 import type { ResumeSection } from '../../../domain/resume/ResumeSection'
@@ -102,6 +102,12 @@ function ColumnChoice({
 function SectionName({ section, heading }: { readonly section: ResumeSection; readonly heading: string }) {
   const [renaming, setRenaming] = useState(false)
   const [value, setValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  // The explicit ref focus replaces the autoFocus attribute, which Sonar flags
+  // as an accessibility hazard; the focus timing stays the same.
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus()
+  }, [renaming])
   const setSectionDisplay = useResumeStore((state) => state.setSectionDisplay)
   const selectSection = useResumeStore((state) => state.selectSection)
   const requestSection = useResumeStore((state) => state.requestSection)
@@ -115,10 +121,10 @@ function SectionName({ section, heading }: { readonly section: ResumeSection; re
   if (renaming) {
     return (
       <input
+        ref={renameInputRef}
         className="section-rename-input"
         aria-label="章节名称"
         value={value}
-        autoFocus
         onChange={(event) => setValue(event.target.value)}
         onBlur={commitRename}
         onKeyDown={(event) => {

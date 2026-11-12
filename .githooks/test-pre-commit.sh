@@ -143,4 +143,4 @@ expect_pass "binary skip" "$binary"
 
 echo "----"
 echo "pass=$pass fail=$fail"
-[ "$fail" -eq 0 ]
+[[ "$fail" -eq 0 ]]

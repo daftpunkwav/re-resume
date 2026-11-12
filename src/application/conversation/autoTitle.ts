@@ -90,13 +90,22 @@ async function askModelForTitle(model: ModelProvider, firstUserMessage: string):
   return answer
 }
 
+/** Quoting marks a model may wrap the title in, stripped before it is stored. */
+const OPENING_TITLE_MARKS = new Set(['"', "'", '「', '『', '《'])
+const CLOSING_TITLE_MARKS = new Set(['"', "'", '」', '』', '》', '。', '.', '!', '！'])
+
 /**
  * A model reply can arrive with quoting or a trailing explanation; the first
- * line without wrapping punctuation is the title.
+ * line without wrapping punctuation is the title. The wrapping characters are
+ * stripped with loops instead of anchored quantifiers, which Sonar flags for
+ * super-linear backtracking.
  */
 function normaliseGeneratedTitle(answer: string): string | null {
   const firstLine = answer.trim().split('\n')[0]?.trim() ?? ''
-  const stripped = firstLine.replace(/^["'「『《]+/u, '').replace(/["'」』》。.!！]+$/u, '').trim()
+  let stripped = firstLine
+  while (OPENING_TITLE_MARKS.has(stripped.slice(0, 1))) stripped = stripped.slice(1)
+  while (CLOSING_TITLE_MARKS.has(stripped.slice(-1))) stripped = stripped.slice(0, -1)
+  stripped = stripped.trim()
   if (stripped === '') return null
   const codePoints = [...stripped]
   return codePoints.length <= AUTO_TITLE_MAX_LENGTH

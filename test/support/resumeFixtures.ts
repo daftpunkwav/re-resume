@@ -257,6 +257,14 @@ export function anEntryOverride(entryId: string, text = '改写文案。'): Resu
   }
 }
 
+/** Default placement for aTextBlock, shared because every field is readonly. */
+const DEFAULT_TEXT_BLOCK_BOX: {
+  readonly x: number
+  readonly y: number
+  readonly width?: number
+  readonly height?: number
+} = { x: 72, y: 700 }
+
 /** A free text block, inside the A4 page. */
 export function aTextBlock(
   id: string,
@@ -265,7 +273,7 @@ export function aTextBlock(
     readonly y: number
     readonly width?: number
     readonly height?: number
-  } = { x: 72, y: 700 },
+  } = DEFAULT_TEXT_BLOCK_BOX,
 ): CanvasBlock {
   return {
     id: asCanvasBlockId(id) as CanvasBlockId,

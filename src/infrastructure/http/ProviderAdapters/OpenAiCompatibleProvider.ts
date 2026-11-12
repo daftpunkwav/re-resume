@@ -41,7 +41,7 @@ import {
   modelCallErrorForThrown,
   readRetryAfterSeconds,
 } from './errors'
-import { MAX_REQUEST_BODY_CHARACTER_LENGTH } from './httpTypes'
+import { MAX_REQUEST_BODY_CHARACTER_LENGTH, baseUrlEndpoint } from './httpTypes'
 
 const COMPLETIONS_PATH = '/chat/completions'
 const STREAM_SENTINEL = '[DONE]'
@@ -106,7 +106,7 @@ async function* streamChatCompletion(
   try {
     response = await config.http.openStream({
       method: 'POST',
-      url: `${config.baseUrl.replace(/\/+$/, '')}${COMPLETIONS_PATH}`,
+      url: baseUrlEndpoint(config.baseUrl, COMPLETIONS_PATH),
       headers: {
         'content-type': 'application/json',
         accept: 'text/event-stream',

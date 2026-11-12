@@ -104,7 +104,9 @@ export function mapCustomModuleRow(row: Row): CustomModuleDefinition {
   const module: CustomModuleDefinition = {
     id: asCustomModuleId(requiredString(row, 'id')),
     name: requiredString(row, 'name'),
-    fields: envelopeArray(row.fields_json, 'custom_module.fields_json').map(mapField),
+    fields: envelopeArray(row.fields_json, 'custom_module.fields_json').map((raw, index) =>
+      mapField(raw, index),
+    ),
     sortOrder: requiredInteger(row, 'sort_order'),
     createdAt: requiredDateTime(row, 'created_at'),
     updatedAt: requiredDateTime(row, 'updated_at'),

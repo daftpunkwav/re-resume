@@ -38,7 +38,7 @@ import {
   modelCallErrorForThrown,
   readRetryAfterSeconds,
 } from './errors'
-import { MAX_REQUEST_BODY_CHARACTER_LENGTH } from './httpTypes'
+import { MAX_REQUEST_BODY_CHARACTER_LENGTH, baseUrlEndpoint } from './httpTypes'
 
 const MESSAGES_PATH = '/v1/messages'
 const API_VERSION = '2023-06-01'
@@ -104,7 +104,7 @@ async function* streamMessages(
   try {
     response = await config.http.openStream({
       method: 'POST',
-      url: `${config.baseUrl.replace(/\/+$/, '')}${MESSAGES_PATH}`,
+      url: baseUrlEndpoint(config.baseUrl, MESSAGES_PATH),
       headers: {
         'content-type': 'application/json',
         accept: 'text/event-stream',
