@@ -61,7 +61,21 @@ export interface BackupDocument {
   readonly attachments: readonly BackupAttachment[]
 }
 
-type ColumnKind = 'text' | 'int' | 'nullableInt' | 'json' | 'nullableJson' | 'timestamp' | 'nullableTimestamp'
+/**
+ * The values a column may hold, mirroring the migration DDL: a TEXT column is
+ * text, timestamp or json; an INTEGER column is int. The nullable variants
+ * accept null on top. Declaring a column with the wrong kind rejects its real
+ * data, so each entry below must name the kind its CREATE TABLE gives it.
+ */
+type ColumnKind =
+  | 'text'
+  | 'nullableText'
+  | 'int'
+  | 'nullableInt'
+  | 'json'
+  | 'nullableJson'
+  | 'timestamp'
+  | 'nullableTimestamp'
 
 interface TableSchema {
   readonly columns: Readonly<Record<string, ColumnKind>>
@@ -199,12 +213,12 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     columns: {
       id: 'text',
       module_kind: 'text',
-      custom_module_id: 'nullableInt',
+      custom_module_id: 'nullableText',
       title: 'text',
       fields_json: 'json',
       sort_order: 'int',
       origin: 'text',
-      source_run_id: 'nullableInt',
+      source_run_id: 'nullableText',
       created_at: 'timestamp',
       updated_at: 'timestamp',
     },
@@ -232,8 +246,8 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
       before_json: 'nullableJson',
       after_json: 'nullableJson',
       origin: 'text',
-      run_id: 'nullableInt',
-      conversation_id: 'nullableInt',
+      run_id: 'nullableText',
+      conversation_id: 'nullableText',
       label: 'text',
       undone_at: 'nullableTimestamp',
       created_at: 'timestamp',
@@ -251,11 +265,11 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     columns: {
       id: 'text',
       title: 'text',
-      provider_id: 'nullableInt',
-      model_id: 'nullableInt',
+      provider_id: 'nullableText',
+      model_id: 'nullableText',
       pinned: 'int',
-      active_resume_id: 'nullableInt',
-      summary: 'nullableInt',
+      active_resume_id: 'nullableText',
+      summary: 'nullableText',
       summary_through_seq: 'nullableInt',
       created_at: 'timestamp',
       updated_at: 'timestamp',
@@ -309,8 +323,8 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
       status: 'text',
       markdown: 'text',
       tool_json: 'nullableJson',
-      run_id: 'nullableInt',
-      error_text: 'nullableInt',
+      run_id: 'nullableText',
+      error_text: 'nullableText',
       created_at: 'timestamp',
       updated_at: 'timestamp',
     },
@@ -358,12 +372,12 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     columns: {
       id: 'text',
       raw_text: 'text',
-      source: 'nullableInt',
+      source: 'nullableText',
       image_attachment_ids: 'json',
-      conversation_id: 'nullableInt',
-      resume_id: 'nullableInt',
+      conversation_id: 'nullableText',
+      resume_id: 'nullableText',
       parsed_json: 'nullableJson',
-      parsed_by_run_id: 'nullableInt',
+      parsed_by_run_id: 'nullableText',
       parsed_at: 'nullableTimestamp',
       created_at: 'timestamp',
     },
@@ -378,11 +392,11 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
   agent_run: {
     columns: {
       id: 'text',
-      conversation_id: 'nullableInt',
-      resume_id: 'nullableInt',
-      job_posting_id: 'nullableInt',
+      conversation_id: 'nullableText',
+      resume_id: 'nullableText',
+      job_posting_id: 'nullableText',
       status: 'text',
-      error_text: 'nullableInt',
+      error_text: 'nullableText',
       prompt_tokens: 'nullableInt',
       completion_tokens: 'nullableInt',
       started_at: 'timestamp',
@@ -398,13 +412,13 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     columns: {
       id: 'text',
       run_id: 'text',
-      message_id: 'nullableInt',
+      message_id: 'nullableText',
       tool_name: 'text',
       risk: 'text',
       args_json: 'json',
       result_summary_json: 'nullableJson',
       change_ids_json: 'json',
-      revision_id: 'nullableInt',
+      revision_id: 'nullableText',
       status: 'text',
       created_at: 'timestamp',
     },
@@ -421,7 +435,7 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
       target_job_json: 'nullableJson',
       status: 'text',
       current_revision_id: 'text',
-      conversation_id: 'nullableInt',
+      conversation_id: 'nullableText',
       created_at: 'timestamp',
       updated_at: 'timestamp',
     },
@@ -436,7 +450,7 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
       seq: 'int',
       label: 'text',
       origin: 'text',
-      run_id: 'nullableInt',
+      run_id: 'nullableText',
       state_json: 'json',
       superseded_at: 'nullableTimestamp',
       created_at: 'timestamp',
@@ -491,6 +505,10 @@ function validateColumn(row: BackupRow, column: string, kind: ColumnKind): strin
   switch (kind) {
     case 'text':
       return typeof value === 'string' ? null : `column ${column} must be text`
+    case 'nullableText':
+      return value === null || typeof value === 'string'
+        ? null
+        : `column ${column} must be text or null`
     case 'int':
       return typeof value === 'number' && Number.isInteger(value)
         ? null
