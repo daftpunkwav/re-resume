@@ -91,6 +91,30 @@ describe('parseBackupDocument', () => {
     expect(() => validateBackupTables(tables)).toThrow(/status/)
   })
 
+  it('refuses a change record whose entity is outside the schema', () => {
+    const tables = tablesWithRows({
+      change_record: [
+        {
+          id: 'ch1',
+          scope: 'library',
+          entity: 'resume',
+          entity_id: 'e1',
+          op: 'infoEntry.update',
+          before_json: null,
+          after_json: null,
+          origin: 'user',
+          run_id: null,
+          conversation_id: null,
+          label: 'Update',
+          undone_at: null,
+          created_at: TEST_TIMESTAMP,
+        },
+      ],
+    })
+
+    expect(() => validateBackupTables(tables)).toThrow(/entity/)
+  })
+
   it('accepts the TEXT provenance columns this build writes', () => {
     const tables = tablesWithRows({
       message: [

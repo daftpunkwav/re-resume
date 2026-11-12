@@ -111,6 +111,7 @@ const TIMESTAMP = (row: BackupRow, column: string): string | null => {
 const PROVIDER_KINDS = ['openai-compatible', 'anthropic'] as const
 const ORIGINS = ['user', 'agent'] as const
 const CHANGE_SCOPES = ['library', 'jobPosting'] as const
+const CHANGE_ENTITIES = ['infoEntry', 'customModule', 'jobPosting'] as const
 const MESSAGE_KINDS = ['user', 'assistant', 'tool'] as const
 const MESSAGE_STATUSES = ['streaming', 'complete', 'cancelled', 'failed', 'running'] as const
 const ATTACHMENT_KINDS = ['image', 'file'] as const
@@ -255,6 +256,8 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     checkRow(row) {
       const scope = ENUM_KIND(row, 'scope', CHANGE_SCOPES)
       if (scope !== null) return scope
+      const entity = ENUM_KIND(row, 'entity', CHANGE_ENTITIES)
+      if (entity !== null) return entity
       const origin = ENUM_KIND(row, 'origin', ORIGINS)
       if (origin !== null) return origin
       if (row.undone_at !== null) return TIMESTAMP(row, 'undone_at')
