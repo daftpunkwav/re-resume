@@ -108,6 +108,30 @@ describe('WorkspaceIntegration', () => {
     expect(useResumeStore.getState().agentBusy).toBe(false)
   })
 
+  it('clears the busy marker when the run settles without a done event', async () => {
+    renderIntegration()
+    await screen.findByText('workspace-ready', undefined, { timeout: 5000 })
+
+    publishWorkspaceSignal({
+      kind: 'agentEvent',
+      event: {
+        type: 'toolStart',
+        invocationId: 'invocation-1' as never,
+        toolName: 'writeResumeSummary',
+        risk: 'write',
+        label: '修改简历摘要',
+        argsSummary: '{}',
+        messageId: 'message-1' as never,
+      },
+    })
+    expect(useResumeStore.getState().agentBusy).toBe(true)
+
+    // A turn can end without a done event (a throwing provider, a cancelled
+    // stream); settling is the safety net that must always clear the marker.
+    publishWorkspaceSignal({ kind: 'runSettled' })
+    expect(useResumeStore.getState().agentBusy).toBe(false)
+  })
+
   it('does not treat a read tool as a write', async () => {
     renderIntegration()
     await screen.findByText('workspace-ready', undefined, { timeout: 5000 })

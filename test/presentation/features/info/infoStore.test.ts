@@ -13,8 +13,8 @@ import {
   infoEntryFixture,
 } from '../../../support/infoFixtures'
 import { newInfoLibrary, referencesFor } from '../../../support/infoLibrary'
+import { AGENT_HIGHLIGHT_MS } from '../../../../src/presentation/agentHighlightDuration'
 import {
-  AGENT_TOUCH_MS,
   resetInfoStore,
   useInfoStore,
 } from '../../../../src/presentation/features/info/stores/infoStore'
@@ -196,7 +196,7 @@ describe('infoStore', () => {
     useInfoStore.getState().markAgentTouched([entryId], 'created')
     expect(useInfoStore.getState().agentTouched[entryId]).toBe('created')
 
-    vi.advanceTimersByTime(AGENT_TOUCH_MS)
+    vi.advanceTimersByTime(AGENT_HIGHLIGHT_MS)
     expect(useInfoStore.getState().agentTouched[entryId]).toBeUndefined()
   })
 
