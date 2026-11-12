@@ -31,6 +31,7 @@ import type { LibraryChangeInverseWriter } from './undoLibraryChange'
 import type { ChangeRecord } from '../../domain/changes/ChangeRecord'
 import type { ChangeLogRepository } from '../../domain/changes/ports/ChangeLogRepository'
 import type { Clock } from '../../domain/shared/Clock'
+import type { OrderMappingPayload } from '../../domain/info/changePayloads'
 import {
   parseDeletedModulePayload,
   parseInfoEntryPayload,
@@ -112,7 +113,7 @@ function reorderTarget(entityId: string): {
     : { moduleKind: 'custom', customModuleId: asCustomModuleId(entityId) }
 }
 
-function orderedIds(order: readonly { readonly id: string; readonly sortOrder: number }[]): readonly string[] {
+function orderedIds(order: readonly OrderMappingPayload[]): readonly string[] {
   return [...order].sort((left, right) => left.sortOrder - right.sortOrder).map((entry) => entry.id)
 }
 
