@@ -10,6 +10,8 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+import { BACKUP_SCHEMA_VERSION } from '../../../src/domain/backup/BackupDocument'
+
 const REPOSITORY_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..')
 const MIGRATIONS = join(REPOSITORY_ROOT, 'src/infrastructure/persistence/migrations')
 
@@ -153,6 +155,15 @@ describe('migrations', () => {
       )
       expect(shell, `${file} must be compiled into the shell`).toContain(`migrations/${file}`)
     }
+  })
+
+  it('states the schema version the migration files count up to', () => {
+    // A backup document self-describes with BACKUP_SCHEMA_VERSION and is
+    // accepted only at that version; the version is the number of registered
+    // migrations. Adding a file without moving the constant produces backups
+    // that describe a row set they do not carry.
+    const files = readdirSync(MIGRATIONS).filter((name) => /^\d{3}_.*\.sql$/u.test(name))
+    expect(BACKUP_SCHEMA_VERSION).toBe(files.length)
   })
 
   it('keeps versions 3 to 6 comment-only', () => {
