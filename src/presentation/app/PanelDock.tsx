@@ -31,6 +31,7 @@ import { IconButton } from './components/IconButton'
 import { TabList } from './components/Tabs'
 import { InfoPanel } from '../features/info/InfoPanel'
 import { requestInfoPanelClose } from '../features/info/panelBridge'
+import { useInfoStore } from '../features/info/stores/infoStore'
 import { ResumePanel } from '../features/resume/ResumePanel'
 import {
   addEntryToConversation,
@@ -64,7 +65,13 @@ function panelBody(kind: PanelKind) {
   return kind === 'resume' ? (
     <ResumePanel onAddResumeToConversation={addResumeToConversation} />
   ) : (
-    <InfoPanel onAddEntryToConversation={addEntryToConversation} />
+    <InfoPanel
+      onAddEntryToConversation={(entry) =>
+        // The chip label needs the custom module names the information panel
+        // owns; read at click time so the dock never subscribes to the library.
+        addEntryToConversation(entry, useInfoStore.getState().customModules)
+      }
+    />
   )
 }
 

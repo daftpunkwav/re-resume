@@ -6,8 +6,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { showPanel } from '../../../../src/presentation/features/conversation/revealChange'
-import { useShellStore } from '../../../../src/presentation/app/stores/shellStore'
+import { showPanel } from '../../../src/presentation/app/revealChange'
+import { useShellStore } from '../../../src/presentation/app/stores/shellStore'
 
 afterEach(() => {
   useShellStore.setState({ rightPanel: 'none' })

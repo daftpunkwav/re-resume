@@ -26,7 +26,7 @@ import type { CompositionRoot } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService, createBackupService } from './wiring/appSettings'
 import { createSeedDataService } from './wiring/seed'
-import { createInfoService } from './wiring/info'
+import type { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import { createExportService } from './wiring/export'
 import {
@@ -39,7 +39,7 @@ import type { ConversationLibrary, ConversationRepositories } from './wiring/con
 import { ActiveRunRegistry } from '../application/generation/activeRunRegistry'
 import { PROVIDER_CONNECTION_TIMEOUT_MS } from '../application/settings/providerConfiguration'
 import { createProviderService } from './wiring/providers'
-import { createLibraryChangesService } from './wiring/changes'
+import { createLibraryCore } from './wiring/library'
 import { startLocalDatabase } from './localDatabase'
 import { backupDatabaseBeforeMigration } from '../infrastructure/persistence/backup'
 import { openSqliteDatabase } from '../infrastructure/persistence/sqlite'
@@ -320,15 +320,17 @@ function createLibraryRuntime(input: {
   readonly clock: Clock
   readonly ids: IdGenerator
 }): Pick<CompositionRoot, 'info' | 'resume' | 'libraryChanges'> {
-  const info = createInfoService({
+  const { info, libraryChanges } = createLibraryCore({
     entries: input.repositories.entries,
     customModules: input.repositories.customModules,
-    references: new ResumeEntryReferences(input.repositories.resumes),
+    resumes: input.repositories.resumes,
+    changes: input.repositories.changes,
     clock: input.clock,
     ids: input.ids,
   })
   return {
     info,
+    libraryChanges,
     resume: createResumeRuntime({
       database: input.database,
       resumes: input.repositories.resumes,
@@ -338,13 +340,6 @@ function createLibraryRuntime(input: {
       measurer: input.measurer,
       clock: input.clock,
       ids: input.ids,
-    }),
-    libraryChanges: createLibraryChangesService({
-      changes: input.repositories.changes,
-      entries: input.repositories.entries,
-      customModules: input.repositories.customModules,
-      resumes: input.repositories.resumes,
-      clock: input.clock,
     }),
   }
 }

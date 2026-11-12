@@ -14,17 +14,20 @@
  * Constraints:
  * - This module names no repository and reads no row directly: the change
  *   record comes through `LibraryChangesService`.
+ * - It lives in the app layer because it writes into both panel stores; the
+ *   conversation feature only publishes the request, and the panels' reveal
+ *   queues stay private to their own stores and this coordinator.
  * - A target that does not exist (a deleted entry, a missing record) is reported
  *   as a toast; the panels are not opened onto nothing.
  */
 
-import type { CompositionRoot } from '../../../bootstrap/capabilities'
-import type { CustomModuleId, InfoEntryId } from '../../../domain/shared/branded-id'
-import { showToast } from '../../app/stores/toastStore'
-import { useShellStore } from '../../app/stores/shellStore'
-import { useInfoStore } from '../info/stores/infoStore'
-import { useResumeStore } from '../resume/resumeStore'
-import { messageOf } from '../../app/settings/settingsErrors'
+import type { CompositionRoot } from '../../bootstrap/capabilities'
+import type { CustomModuleId, InfoEntryId } from '../../domain/shared/branded-id'
+import { showToast } from './stores/toastStore'
+import { useShellStore } from './stores/shellStore'
+import { useInfoStore } from '../features/info/stores/infoStore'
+import { useResumeStore } from '../features/resume/resumeStore'
+import { messageOf } from './settings/settingsErrors'
 
 export type WorkspacePanel = 'info' | 'resume'
 

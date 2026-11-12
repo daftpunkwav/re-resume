@@ -19,18 +19,12 @@ import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
 import type { Clock } from '../../domain/shared/Clock'
 import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type { UpdateInfoEntryInput, UpdateInfoEntryOutput } from '../../application/info/updateInfoEntry'
-import type {
-  ResumeRender,
-  ResumeService,
-  UpdateCanvasBlockTextInput,
-} from '../capabilities'
+import type { ResumeRender, ResumeService } from '../capabilities'
 import type { FindMissingReferencesDeps } from '../../application/resume/findMissingReferences'
 import type { ResumeContentDeps, ResumeStoreDeps } from '../../application/resume/resumeSource'
-import type { Revision } from '../../domain/resume/Revision'
 import type { ResumeId } from '../../domain/shared/branded-id'
 import { addCanvasBlock } from '../../application/resume/addCanvasBlock'
 import { checkLayoutOverflow } from '../../application/resume/checkLayoutOverflow'
-import { commitResumeChange } from '../../application/resume/commitResumeChange'
 import { createResume } from '../../application/resume/createResume'
 import { deleteOverride } from '../../application/resume/deleteOverride'
 import { deleteResume } from '../../application/resume/deleteResume'
@@ -51,12 +45,12 @@ import { setSectionDisplay } from '../../application/resume/setSectionDisplay'
 import { setSectionOrder } from '../../application/resume/setSectionOrder'
 import { setSectionSelection } from '../../application/resume/setSectionSelection'
 import { setTemplate } from '../../application/resume/setTemplate'
+import { updateCanvasBlockText } from '../../application/resume/updateCanvasBlockText'
 import { undoResumeChange } from '../../application/resume/undoResumeChange'
 import { updateResumeTarget } from '../../application/resume/updateResumeTarget'
 import { writeEntryOverride } from '../../application/resume/writeEntryOverride'
 import { writeSummaryOverride } from '../../application/resume/writeSummaryOverride'
 import { loadMaterializedResume, loadResume } from '../../application/resume/resumeSource'
-import { DomainError } from '../../domain/shared/DomainError'
 import { listTemplates } from '../../domain/resume/Template'
 
 export interface ResumeWiring {
@@ -167,45 +161,5 @@ async function renderResume(
   const resume = await loadResume(content.resumes, resumeId)
   const rendered = await loadMaterializedResume(content, resume)
   return { resume, materialized: rendered.document, layout: rendered.layout }
-}
-
-/**
- * The one inline document edit the resume use cases do not expose: changing a
- * free text block's text. It goes through the same commit point as every other
- * write, so it validates and undoes like the rest.
- */
-async function updateCanvasBlockText(
-  deps: ResumeContentDeps,
-  input: UpdateCanvasBlockTextInput,
-): Promise<Revision> {
-  const resume = await loadResume(deps.resumes, input.resumeId)
-  const block = resume.document.canvas.freeBlocks.find((candidate) => candidate.id === input.blockId)
-  if (block === undefined) {
-    throw new DomainError('canvasBlockNotFound', 'The canvas block no longer exists.', {
-      entity: 'canvasBlock',
-      id: input.blockId,
-      blockers: [input.blockId],
-    })
-  }
-  if (block.kind !== 'text') {
-    throw new DomainError('invalidFieldValue', 'Only a text block carries editable text.', {
-      entity: 'canvasBlock',
-      id: input.blockId,
-      blockers: ['text'],
-    })
-  }
-  return commitResumeChange(deps, input.resumeId, {
-    label: '编辑画布文字',
-    origin: 'user',
-    runId: null,
-    next: (state) => ({
-      ...state,
-      canvas: {
-        freeBlocks: state.canvas.freeBlocks.map((candidate) =>
-          candidate.id === block.id ? { ...candidate, text: input.text } : candidate,
-        ),
-      },
-    }),
-  })
 }
 

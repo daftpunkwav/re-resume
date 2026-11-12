@@ -24,7 +24,7 @@ import type { CompositionRoot } from '../../bootstrap/capabilities'
 import { useServices } from './ApplicationServicesProvider'
 import { isInfoStoreConnected, useInfoStore } from '../features/info/stores/infoStore'
 import { useResumeStore } from '../features/resume/resumeStore'
-import { showPanel } from '../features/conversation/revealChange'
+import { showPanel } from './revealChange'
 import { subscribeWorkspaceSignals } from '../features/conversation/workspaceEvents'
 import type { WorkspaceSignal } from '../features/conversation/workspaceEvents'
 

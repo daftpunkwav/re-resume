@@ -16,20 +16,25 @@
  */
 
 import { moduleDescriptor } from '../../../domain/info/InfoModuleKind'
+import type { CustomModuleDefinition } from '../../../domain/info/CustomModule'
 import type { InfoEntry } from '../../../domain/info/InfoEntry'
 import type { Resume } from '../../../domain/resume/Resume'
 import { showToast } from '../../app/stores/toastStore'
-import { useInfoStore } from '../info/stores/infoStore'
 import { useConversationStore } from './stores/conversationStore'
 
-/** The label a chip shows: the module's name and the entry title. */
-export function entryContextLabel(entry: InfoEntry): string {
+/**
+ * The label a chip shows: the module's name and the entry title. The custom
+ * module list comes from the caller — the information panel that owns it — so
+ * this module reads no other feature's store.
+ */
+export function entryContextLabel(
+  entry: InfoEntry,
+  customModules: readonly CustomModuleDefinition[],
+): string {
   const customModule =
     entry.customModuleId === null
       ? null
-      : (useInfoStore
-          .getState()
-          .customModules.find((module) => module.id === entry.customModuleId) ?? null)
+      : (customModules.find((module) => module.id === entry.customModuleId) ?? null)
   return `${moduleDescriptor(entry.moduleKind, customModule).label}：${entry.title}`
 }
 
@@ -44,13 +49,16 @@ function announceDuplicate(): void {
 }
 
 /** Adds one library entry to the next turn. */
-export function addEntryToConversation(entry: InfoEntry): void {
+export function addEntryToConversation(
+  entry: InfoEntry,
+  customModules: readonly CustomModuleDefinition[],
+): void {
   if (alreadyAttached('entry', entry.id)) {
     announceDuplicate()
     return
   }
   const store = useConversationStore.getState()
-  store.addContext({ kind: 'entry', refId: entry.id }, entryContextLabel(entry))
+  store.addContext({ kind: 'entry', refId: entry.id }, entryContextLabel(entry, customModules))
   store.requestComposerFocus()
   showToast('success', `已将「${entry.title}」加入本轮上下文`)
 }

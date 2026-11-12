@@ -123,6 +123,7 @@ import type {
   SetSectionSelectionOutput,
 } from '../application/resume/setSectionSelection'
 import type { SetTemplateInput, SetTemplateOutput } from '../application/resume/setTemplate'
+import type { UpdateCanvasBlockTextInput } from '../application/resume/updateCanvasBlockText'
 import type { UpdateResumeTargetInput } from '../application/resume/updateResumeTarget'
 import type {
   WriteEntryOverrideInput,
@@ -133,7 +134,7 @@ import type {
   WriteSummaryOverrideOutput,
 } from '../application/resume/writeSummaryOverride'
 import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReferenceQuery'
-import type { CanvasBlockId, CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
+import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { ProviderConfig } from '../domain/settings/ProviderConfig'
 import type { ChangeOp, ChangeRecord, ChangeScope } from '../domain/changes/ChangeRecord'
@@ -307,12 +308,8 @@ export interface ResumeRender {
   readonly layout: LayoutOutput
 }
 
-/** Editing the text of one free canvas block. */
-export interface UpdateCanvasBlockTextInput {
-  readonly resumeId: ResumeId
-  readonly blockId: CanvasBlockId
-  readonly text: string
-}
+/** Editing the text of one free canvas block; the use case owns the type. */
+export type { UpdateCanvasBlockTextInput }
 
 /**
  * PDF export as the interface sees it. `preparePdfExport` is read-only and
