@@ -24,7 +24,7 @@ import { TextField } from '../components/TextField'
 const KIND_OPTIONS = [
   { value: 'openai-compatible', label: 'OpenAI 兼容接口' },
   { value: 'anthropic', label: 'Anthropic' },
-] as const
+] as const satisfies readonly { readonly value: ProviderKind; readonly label: string }[]
 
 const IMAGE_SUPPORT_OPTIONS = [
   { value: 'auto', label: '自动判断' },
