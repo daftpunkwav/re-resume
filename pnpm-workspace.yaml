@@ -17,6 +17,13 @@ minimumReleaseAgeExclude:
   - minimatch@11.0.8
   - '@isaacs/nonrecursive-glob-match@1.1.0'
 
+# Version strategy: the runtime's load-bearing dependencies — the Tauri
+# family, react, konva, zod, zustand and fontkit — are pinned exactly, so an
+# upgrade is always a reviewed diff. fontkit must stay a single copy in the
+# lockfile shared with @react-pdf/font and pdfkit: the text measurer and the
+# PDF renderer must run on the same engine. konva is declared directly only
+# to satisfy react-konva's peer range; no source file imports it.
+
 # Development-only transitive packages with published security fixes. All are
 # inside test, stylesheet, and lint tooling, not the desktop runtime; the
 # overrides keep the dependency audit clean without waiting for the parent
