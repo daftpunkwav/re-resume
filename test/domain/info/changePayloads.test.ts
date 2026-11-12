@@ -109,6 +109,12 @@ describe('module update payload', () => {
     expect(parsed.module).toEqual(module)
     expect(parsed.clearedValues).toEqual(cleared)
   })
+
+  it('refuses a payload with a key the contract does not know', () => {
+    const module = customModuleFixture()
+    const drifted = { ...JSON.parse(serializeModuleUpdatePayload(module, [])), clearedCount: 1 }
+    expect(() => parseModuleUpdatePayload(drifted)).toThrow(/unknown keys/)
+  })
 })
 
 describe('deleted module payload', () => {
@@ -125,6 +131,12 @@ describe('deleted module payload', () => {
     const parsed = parseDeletedModulePayload(JSON.parse(serializeDeletedModulePayload(module, entries)))
     expect(parsed.module).toEqual(module)
     expect(parsed.entries).toEqual(entries)
+  })
+
+  it('refuses a payload with a key the contract does not know', () => {
+    const module = customModuleFixture()
+    const drifted = { ...JSON.parse(serializeDeletedModulePayload(module, [])), entryCount: 1 }
+    expect(() => parseDeletedModulePayload(drifted)).toThrow(/unknown keys/)
   })
 })
 
