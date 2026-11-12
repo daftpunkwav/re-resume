@@ -7,7 +7,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { BACKUP_TABLES } from '../../../../src/domain/backup/BackupDocument'
+import {
+  BACKUP_APP_MARKER,
+  BACKUP_DOCUMENT_VERSION,
+  BACKUP_SCHEMA_VERSION,
+  BACKUP_TABLES,
+  parseBackupDocument,
+} from '../../../../src/domain/backup/BackupDocument'
 import type { BackupRow } from '../../../../src/domain/backup/BackupDocument'
 import { SqliteBackupStore } from '../../../../src/infrastructure/persistence/backup/SqliteBackupStore'
 import {
@@ -55,7 +61,7 @@ function seedRows(database: NodeSqliteDatabase): void {
     database,
     'custom_module',
     `INSERT INTO custom_module (id, name, fields_json, sort_order, created_at, updated_at)
-     VALUES ('m1', 'Open source', '[]', 1, '${TIMESTAMP}', '${TIMESTAMP}')`,
+     VALUES ('m1', 'Open source', '[{"key":"f_1a2b3c4d","label":"Repository","type":"text","required":false,"maxLength":200}]', 1, '${TIMESTAMP}', '${TIMESTAMP}')`,
   )
   insertRows(
     database,
@@ -67,18 +73,27 @@ function seedRows(database: NodeSqliteDatabase): void {
   )
   insertRows(
     database,
+    'info_entry',
+    `INSERT INTO info_entry
+       (id, module_kind, custom_module_id, title, fields_json, sort_order, origin, source_run_id, created_at, updated_at)
+     VALUES ('e2', 'skill', NULL, 'React', '{"name":"React"}', 2, 'agent', 'run1',
+             '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
     'change_record',
     `INSERT INTO change_record
        (id, scope, entity, entity_id, op, before_json, after_json, origin, run_id, conversation_id, label, undone_at, created_at)
      VALUES ('c1', 'library', 'infoEntry', 'e1', 'infoEntry.create', NULL, '{}', 'user',
-             NULL, NULL, 'create', NULL, '${TIMESTAMP}')`,
+             'run1', 'conv1', 'create', NULL, '${TIMESTAMP}')`,
   )
   insertRows(
     database,
     'conversation',
     `INSERT INTO conversation (id, title, provider_id, model_id, pinned, active_resume_id,
        summary, summary_through_seq, created_at, updated_at)
-     VALUES ('conv1', 'Chat', NULL, NULL, 0, NULL, NULL, NULL, '${TIMESTAMP}', '${TIMESTAMP}')`,
+     VALUES ('conv1', 'Chat', 'p1', 'model-1', 0, 'r1', 'Chatted about a role', 2,
+             '${TIMESTAMP}', '${TIMESTAMP}')`,
   )
   insertRows(
     database,
@@ -87,6 +102,46 @@ function seedRows(database: NodeSqliteDatabase): void {
        run_id, error_text, created_at, updated_at)
      VALUES ('msg1', 'conv1', 1, 'user', 'complete', 'hello', NULL, NULL, NULL,
              '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
+    'message',
+    `INSERT INTO message (id, conversation_id, seq, kind, status, markdown, tool_json,
+       run_id, error_text, created_at, updated_at)
+     VALUES ('msg-tool', 'conv1', 2, 'tool', 'complete', '', '{"toolName":"list_info_entries"}',
+       'run1', NULL, '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
+    'message',
+    `INSERT INTO message (id, conversation_id, seq, kind, status, markdown, tool_json,
+       run_id, error_text, created_at, updated_at)
+     VALUES ('msg-failed', 'conv1', 3, 'assistant', 'failed', 'sorry', NULL, 'run1',
+             'The provider refused the request', '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
+    'agent_run',
+    `INSERT INTO agent_run (id, conversation_id, resume_id, job_posting_id, status, error_text,
+       prompt_tokens, completion_tokens, started_at, ended_at)
+     VALUES ('run1', 'conv1', 'r1', 'j1', 'failed', 'The provider refused the request',
+             120, 45, '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
+    'job_posting',
+    `INSERT INTO job_posting (id, raw_text, source, image_attachment_ids, conversation_id,
+       resume_id, parsed_json, parsed_by_run_id, parsed_at, created_at)
+     VALUES ('j1', 'Frontend engineer working with React', 'pasted', '{"v":1,"data":[]}',
+       'conv1', 'r1', '{"title":"Frontend engineer"}', 'run1', '${TIMESTAMP}', '${TIMESTAMP}')`,
+  )
+  insertRows(
+    database,
+    'tool_invocation',
+    `INSERT INTO tool_invocation (id, run_id, message_id, tool_name, risk, args_json,
+       result_summary_json, change_ids_json, revision_id, status, created_at)
+     VALUES ('t1', 'run1', 'msg-tool', 'list_info_entries', 'read', '{"query":"react"}', NULL,
+       '{"v":1,"data":[]}', 'rev1', 'ok', '${TIMESTAMP}')`,
   )
   insertRows(
     database,
@@ -110,14 +165,14 @@ function seedRows(database: NodeSqliteDatabase): void {
     'resume',
     `INSERT INTO resume (id, title, target_job_json, status, current_revision_id, conversation_id,
        created_at, updated_at)
-     VALUES ('r1', 'Resume', NULL, 'draft', 'rev1', NULL, '${TIMESTAMP}', '${TIMESTAMP}')`,
+     VALUES ('r1', 'Resume', NULL, 'draft', 'rev1', 'conv1', '${TIMESTAMP}', '${TIMESTAMP}')`,
   )
   insertRows(
     database,
     'resume_revision',
     `INSERT INTO resume_revision (id, resume_id, seq, label, origin, run_id, state_json,
        superseded_at, created_at)
-     VALUES ('rev1', 'r1', 1, 'Create', 'user', NULL, '{"sections":[]}', NULL, '${TIMESTAMP}')`,
+     VALUES ('rev1', 'r1', 1, 'Edit canvas text', 'agent', 'run1', '{"sections":[]}', NULL, '${TIMESTAMP}')`,
   )
 }
 
@@ -147,6 +202,31 @@ describe('SqliteBackupStore', () => {
 
     const targetStore = new SqliteBackupStore(target)
     await targetStore.replaceAll(tables)
+
+    const restored = await targetStore.dumpTables()
+    for (const table of BACKUP_TABLES) {
+      expect(sortedRows(restored[table] ?? []), table).toEqual(sortedRows(tables[table] ?? []))
+    }
+    expect(await foreignKeyViolations(target)).toEqual([])
+  })
+
+  it('round-trips a real-shaped dump through the parser and a restore', async () => {
+    const tables = await new SqliteBackupStore(source).dumpTables()
+    const document = {
+      v: BACKUP_DOCUMENT_VERSION,
+      app: BACKUP_APP_MARKER,
+      exportedAt: TIMESTAMP,
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      tables,
+      attachments: (tables.attachment ?? []).map((row) => ({ row, bytesBase64: 'YWJj' })),
+    }
+
+    // The document travels as JSON: the parse must accept the exact shape the
+    // dump wrote, TEXT provenance columns included.
+    const parsed = parseBackupDocument(JSON.parse(JSON.stringify(document)))
+
+    const targetStore = new SqliteBackupStore(target)
+    await targetStore.replaceAll(parsed.tables)
 
     const restored = await targetStore.dumpTables()
     for (const table of BACKUP_TABLES) {

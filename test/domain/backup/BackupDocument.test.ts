@@ -91,6 +91,50 @@ describe('parseBackupDocument', () => {
     expect(() => validateBackupTables(tables)).toThrow(/status/)
   })
 
+  it('accepts the TEXT provenance columns this build writes', () => {
+    const tables = tablesWithRows({
+      message: [
+        {
+          id: 'msg1',
+          conversation_id: 'conv1',
+          seq: 1,
+          kind: 'assistant',
+          status: 'failed',
+          markdown: 'sorry',
+          tool_json: null,
+          run_id: 'run1',
+          error_text: 'The provider refused the request',
+          created_at: TEST_TIMESTAMP,
+          updated_at: TEST_TIMESTAMP,
+        },
+      ],
+    })
+
+    expect(validateBackupTables(tables)).toEqual(tables)
+  })
+
+  it('refuses a TEXT provenance column that holds a number', () => {
+    const tables = tablesWithRows({
+      message: [
+        {
+          id: 'msg1',
+          conversation_id: 'conv1',
+          seq: 1,
+          kind: 'assistant',
+          status: 'failed',
+          markdown: 'sorry',
+          tool_json: null,
+          run_id: 42,
+          error_text: null,
+          created_at: TEST_TIMESTAMP,
+          updated_at: TEST_TIMESTAMP,
+        },
+      ],
+    })
+
+    expect(() => validateBackupTables(tables)).toThrow(/run_id/)
+  })
+
   it('refuses a JSON column that does not parse', () => {
     const tables = tablesWithRows({
       app_settings: [{ ...APP_SETTINGS_ROW, settings_json: '{not json' }],
