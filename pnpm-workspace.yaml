@@ -7,9 +7,12 @@ minimumReleaseAgeExclude:
   - react-konva@19.3.2
   - vitest@5.0.5
 
-# Development-only transitive packages with published security fixes. Both are
-# inside test and stylesheet tooling, not the desktop runtime; the overrides keep
-# the dependency audit clean without waiting for the parent packages to republish.
+# Development-only transitive packages with published security fixes. All are
+# inside test, stylesheet, and lint tooling, not the desktop runtime; the
+# overrides keep the dependency audit clean without waiting for the parent
+# packages to republish.
 overrides:
   fast-uri: ^3.1.9
   undici: ^8.12.2
+  # Ranged so minimatch@3.1.5 (not in the advisory range) is left untouched.
+  "minimatch@>=7.0.0 <11.0.1": 11.0.8
