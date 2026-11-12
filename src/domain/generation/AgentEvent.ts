@@ -10,8 +10,10 @@
  *
  * Constraints:
  * - This module is pure: no DOM, no storage, no package.
- * - Adding an event member is additive; changing a member's fields is a
- *   contract change for the chat interface.
+ * - Adding an event member is a contract change for every reducer: each
+ *   consumer ends its switch with `satisfies never`, so a member the store does
+ *   not name — even one it means to ignore — is a compile error, not a silent
+ *   drop. Changing a member's fields is the same kind of change.
  */
 
 import type {

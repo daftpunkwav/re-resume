@@ -52,8 +52,6 @@ import { DEFAULT_CONVERSATION_TITLE } from '../../domain/conversation/Conversati
 import { truncateToolDetail } from '../../domain/conversation/Message'
 import type { MessageContext } from '../../domain/conversation/MessageContext'
 import { DomainError, isDomainError } from '../../domain/shared/DomainError'
-import type { Clock } from '../../domain/shared/Clock'
-import type { IdGenerator } from '../../domain/shared/IdGenerator'
 import type {
   AgentRunId,
   AttachmentId,
@@ -62,19 +60,10 @@ import type {
   ResumeId,
 } from '../../domain/shared/branded-id'
 import { asAgentRunId } from '../../domain/shared/branded-id'
-import type { AgentRunRepository } from '../../domain/generation/ports/AgentRunRepository'
-import type { AttachmentRepository } from '../../domain/conversation/ports/AttachmentRepository'
 import type { ConversationRepository } from '../../domain/conversation/ports/ConversationRepository'
-import type { FileStore } from '../../domain/conversation/ports/FileStore'
 import type { MessageContextRepository } from '../../domain/conversation/ports/MessageContextRepository'
 import type { MessageRepository } from '../../domain/conversation/ports/MessageRepository'
-import type { JobPostingRepository } from '../../domain/generation/ports/JobPostingRepository'
 import type { ToolInvocationRepository } from '../../domain/generation/ports/ToolInvocationRepository'
-import type { ChangeLogRepository } from '../../domain/changes/ports/ChangeLogRepository'
-import type { CustomModuleRepository } from '../../domain/info/ports/CustomModuleRepository'
-import type { InfoEntryRepository } from '../../domain/info/ports/InfoEntryRepository'
-import type { ResumeRepository } from '../../domain/resume/ports/ResumeRepository'
-import type { TextMeasurer } from '../../domain/resume/ports/TextMeasurer'
 import { appendMessage } from '../conversation/appendMessage'
 import type { AppendMessageInput } from '../conversation/appendMessage'
 import { autoTitleConversation } from '../conversation/autoTitle'
@@ -88,6 +77,7 @@ import type { AgentContext, AgentContextSources, ContextChip } from './context'
 import { compactConversation } from './compactConversation'
 import { redactSecret } from './redactSecret'
 import { buildFixedSystemPromptSections, buildSystemPrompt } from './systemPrompt'
+import type { SharedGenerationPorts } from './tools/deps'
 import { executeToolCall } from './toolExecution'
 import { truncateToolResult } from './toolOutcome'
 import {
@@ -140,8 +130,7 @@ export const DEFAULT_RUN_LIMITS: RunLimits = {
   streamPersistIntervalMs: STREAM_PERSIST_INTERVAL_MS,
 }
 
-export interface RunAgentTurnDeps {
-  readonly model: ModelProvider
+export interface RunAgentTurnDeps extends SharedGenerationPorts {
   /**
    * Model used for the automatic conversation title. null disables model
    * naming; the truncated first message is used instead.
@@ -151,18 +140,7 @@ export interface RunAgentTurnDeps {
   readonly conversations: ConversationRepository
   readonly messages: MessageRepository
   readonly messageContexts: MessageContextRepository
-  readonly runs: AgentRunRepository
   readonly invocations: ToolInvocationRepository
-  readonly jobPostings: JobPostingRepository
-  readonly attachments: AttachmentRepository
-  readonly fileStore: FileStore
-  readonly infoEntries: InfoEntryRepository
-  readonly customModules: CustomModuleRepository
-  readonly resumes: ResumeRepository
-  readonly changes: ChangeLogRepository
-  readonly measurer: TextMeasurer
-  readonly clock: Clock
-  readonly ids: IdGenerator
   readonly emit: (event: AgentEvent) => void
   /** Aborts the turn. The run is kept, marked cancelled. */
   readonly signal: AbortSignal
@@ -747,7 +725,7 @@ function buildToolContext(
     jobPostings: deps.jobPostings,
     attachments: deps.attachments,
     fileStore: deps.fileStore,
-    infoEntries: deps.infoEntries,
+    infoEntries: deps.entries,
     customModules: deps.customModules,
     resumes: deps.resumes,
     changes: deps.changes,
@@ -864,7 +842,7 @@ async function readResumeSummaryBlock(
   const summary = await summarizeResume(
     {
       resumes: deps.resumes,
-      entries: deps.infoEntries,
+      entries: deps.entries,
       customModules: deps.customModules,
       jobPostings: deps.jobPostings,
     },
@@ -876,7 +854,7 @@ async function readResumeSummaryBlock(
 /** Renders the library overview: module counts plus their leading titles. */
 async function readLibraryOverviewBlock(deps: RunAgentTurnDeps): Promise<string | null> {
   const [entries, customModules] = await Promise.all([
-    deps.infoEntries.listAll(),
+    deps.entries.listAll(),
     deps.customModules.listAll(),
   ])
   const titlesByModule = new Map<string, string[]>()
@@ -963,15 +941,7 @@ async function finishCancelled(
     errorText: CANCELLED_ERROR_TEXT,
     updatedAt: deps.clock.now(),
   })
-  for (const toolMessage of openToolMessages) {
-    if (toolMessage.status !== 'running') continue
-    await deps.messages.update({
-      ...toolMessage,
-      status: 'failed',
-      errorText: CANCELLED_ERROR_TEXT,
-      updatedAt: deps.clock.now(),
-    })
-  }
+  await settleOpenToolMessages(deps, openToolMessages, CANCELLED_ERROR_TEXT)
   const cancelled = cancelAgentRun(run, deps.clock.now())
   await deps.runs.save(cancelled)
   deps.emit({
@@ -1001,6 +971,21 @@ async function finishFailed(
     errorText,
     updatedAt: deps.clock.now(),
   })
+  await settleOpenToolMessages(deps, openToolMessages, errorText)
+  const failed = failRun(run, errorText, deps.clock.now())
+  await deps.runs.save(failed)
+  deps.emit({ type: 'error', message: errorText, retryable })
+  deps.emit({ type: 'done', status: 'failed', runId: failed.id, errorText })
+  await touchConversation(deps, assistant.conversationId)
+  return failed
+}
+
+/** Closes the tool cards a cancelled or failed turn left running. */
+async function settleOpenToolMessages(
+  deps: RunAgentTurnDeps,
+  openToolMessages: readonly Message[],
+  errorText: string,
+): Promise<void> {
   for (const toolMessage of openToolMessages) {
     if (toolMessage.status !== 'running') continue
     await deps.messages.update({
@@ -1010,12 +995,6 @@ async function finishFailed(
       updatedAt: deps.clock.now(),
     })
   }
-  const failed = failRun(run, errorText, deps.clock.now())
-  await deps.runs.save(failed)
-  deps.emit({ type: 'error', message: errorText, retryable })
-  deps.emit({ type: 'done', status: 'failed', runId: failed.id, errorText })
-  await touchConversation(deps, assistant.conversationId)
-  return failed
 }
 
 async function touchConversation(

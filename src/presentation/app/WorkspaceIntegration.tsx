@@ -86,9 +86,18 @@ function applyAgentEvent(services: CompositionRoot, event: AgentEvent): void {
     case 'error':
       useResumeStore.getState().setAgentBusy(false)
       return
-    default:
+    case 'runStarted':
+    case 'textDelta':
+    case 'turnStarted':
+    case 'toolEnd':
+    case 'usage':
+      // Stream upkeep the transcript stores own; the workspace only follows the
+      // write markers above.
       return
   }
+  // Every member is named, the ignored ones deliberately; a new event type is
+  // a compile error here until the workspace decides whether it points at it.
+  event satisfies never
 }
 
 function applySignal(services: CompositionRoot, signal: WorkspaceSignal): void {

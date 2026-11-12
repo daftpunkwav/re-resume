@@ -50,6 +50,28 @@ export interface ToolPackDeps {
   readonly pdfSaver: PdfFileSaver
 }
 
+/**
+ * The ports the tool pack and the run loop share, named once. The run loop
+ * takes this subset (`RunAgentTurnDeps` extends it) and the wiring assembles
+ * one object for both, so a port added here reaches tools and turn together;
+ * the tool-only render/saver pair stays out of the loop's type.
+ */
+export type SharedGenerationPorts = Pick<
+  ToolPackDeps,
+  | 'model'
+  | 'entries'
+  | 'customModules'
+  | 'resumes'
+  | 'changes'
+  | 'jobPostings'
+  | 'runs'
+  | 'attachments'
+  | 'fileStore'
+  | 'measurer'
+  | 'clock'
+  | 'ids'
+>
+
 /** The dependency record the library use cases take. */
 export function infoLibraryDeps(deps: ToolPackDeps): InfoLibraryDeps {
   return {
