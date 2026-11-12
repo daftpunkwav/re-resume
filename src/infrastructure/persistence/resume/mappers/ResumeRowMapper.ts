@@ -423,7 +423,8 @@ function parseTextStyle(value: unknown, path: string): TextStyle {
   }
 }
 
-function serializeTargetJob(target: TargetJob): Record<string, unknown> {
+/** The JSON shape `target_job_json` holds; every write path goes through here. */
+export function serializeTargetJob(target: TargetJob): Record<string, unknown> {
   return {
     title: target.title,
     company: target.company,

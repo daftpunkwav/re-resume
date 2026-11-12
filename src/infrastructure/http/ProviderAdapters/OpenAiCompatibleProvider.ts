@@ -32,15 +32,14 @@ import type {
   ToolSchema,
 } from '../../../domain/generation/ports/ModelProvider'
 import { DomainError } from '../../../domain/shared/DomainError'
-import { drainChunksAsText } from '../TauriHttpClient'
 import type { HttpClient, OutboundStream } from '../TauriHttpClient'
 import {
-  ERROR_BODY_CHAR_LIMIT,
   ModelCallError,
   modelCallErrorForStatus,
   modelCallErrorForThrown,
   readRetryAfterSeconds,
 } from './errors'
+import { parseJsonFrame, readErrorBody, requireRecord } from './frames'
 import { MAX_REQUEST_BODY_CHARACTER_LENGTH, baseUrlEndpoint } from './httpTypes'
 
 const COMPLETIONS_PATH = '/chat/completions'
@@ -305,39 +304,4 @@ async function* emitPendingToolCalls(
     }
     yield { type: 'toolCall', name: call.name, argsJson: call.argsJson }
   }
-}
-
-async function readErrorBody(response: OutboundStream): Promise<string> {
-  try {
-    return await drainChunksAsText(response.chunks(), ERROR_BODY_CHAR_LIMIT)
-  } catch {
-    // The status is the diagnostic that matters; an unreadable body is not
-    // allowed to replace it with a transport failure.
-    return ''
-  }
-}
-
-function parseJsonFrame(data: string): unknown {
-  try {
-    return JSON.parse(data)
-  } catch (failure) {
-    throw new ModelCallError(
-      `模型流返回了不是合法 JSON 的帧：${describeThrown(failure)}`,
-      { retryable: false, status: null },
-    )
-  }
-}
-
-function requireRecord(value: unknown, what: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ModelCallError(`模型流返回的 ${what} 不是 JSON 对象。`, {
-      retryable: false,
-      status: null,
-    })
-  }
-  return value as Record<string, unknown>
-}
-
-function describeThrown(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }

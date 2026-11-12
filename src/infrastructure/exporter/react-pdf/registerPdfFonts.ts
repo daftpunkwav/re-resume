@@ -18,6 +18,7 @@
 
 import { Font } from '@react-pdf/renderer'
 
+import { toBase64 } from '../../../domain/shared/base64'
 import type { FontFamily, FontRegistry } from '../../measurement/FontRegistry'
 
 /**
@@ -32,8 +33,6 @@ const BOLD_REGISTRATION_WEIGHT = 700
  * decodes the base64 payload, so the exact font format is not named.
  */
 const FONT_BYTES_MIME = 'application/octet-stream'
-
-const BASE64_CHUNK = 0x8000
 
 /** Registers every family of the registry that the renderer does not hold yet. */
 export async function registerPdfFonts(registry: FontRegistry): Promise<void> {
@@ -61,15 +60,7 @@ function fontSources(entry: FontFamily): PdfFontSource[] {
   return sources
 }
 
-/**
- * Base64 in browser and Node: `btoa` exists in both, and the byte string is
- * built in chunks because spreading font-sized arrays into one
- * `String.fromCharCode` call overflows the argument limit.
- */
+/** The data URL the renderer's font loader accepts for one face. */
 function asDataUrl(bytes: Uint8Array): string {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK))
-  }
-  return `data:${FONT_BYTES_MIME};base64,${btoa(binary)}`
+  return `data:${FONT_BYTES_MIME};base64,${toBase64(bytes)}`
 }

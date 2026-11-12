@@ -60,6 +60,7 @@ import type {
   ResumeId,
 } from '../../domain/shared/branded-id'
 import { asAgentRunId } from '../../domain/shared/branded-id'
+import { toBase64 } from '../../domain/shared/base64'
 import type { ConversationRepository } from '../../domain/conversation/ports/ConversationRepository'
 import type { MessageContextRepository } from '../../domain/conversation/ports/MessageContextRepository'
 import type { MessageRepository } from '../../domain/conversation/ports/MessageRepository'
@@ -1018,15 +1019,6 @@ async function loadExistingUserMessage(
     })
   }
   return message
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-  }
-  return btoa(binary)
 }
 
 function sleep(milliseconds: number): Promise<void> {

@@ -24,6 +24,7 @@ import {
 } from '../../domain/backup/BackupDocument'
 import type { BackupStore } from '../../domain/backup/ports/BackupStore'
 import type { FileStore } from '../../domain/conversation/ports/FileStore'
+import { toBase64 } from '../../domain/shared/base64'
 import type { Clock } from '../../domain/shared/Clock'
 
 export interface ExportBackupDeps {
@@ -38,7 +39,7 @@ export async function exportBackup(deps: ExportBackupDeps): Promise<BackupDocume
   const files = new Map<string, string>()
   for (const row of rows) {
     const storageName = String(row.storage_name)
-    files.set(storageName, bytesToBase64(await deps.files.read(storageName)))
+    files.set(storageName, toBase64(await deps.files.read(storageName)))
   }
   return {
     v: BACKUP_DOCUMENT_VERSION,
@@ -51,21 +52,4 @@ export async function exportBackup(deps: ExportBackupDeps): Promise<BackupDocume
       bytesBase64: files.get(String(row.storage_name)) as string,
     })),
   }
-}
-
-/** Base64 of a byte array, without Node or plugin helpers. */
-export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
-/** The bytes base64 names, or a readable error when the text is not base64. */
-export function base64ToBytes(value: string): Uint8Array {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }
