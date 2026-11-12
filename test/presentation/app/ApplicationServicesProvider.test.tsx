@@ -234,13 +234,19 @@ describe('ApplicationServicesProvider', () => {
     const superseded = stubRoot()
     const kept = stubRoot()
     let attempt = 0
+    // The second boot parks on this promise, so its resolution time is under
+    // the test's control: released only after the third boot has taken over,
+    // the late root can only land in an effect that no longer exists.
+    let releaseSuperseded: () => void = () => {}
     renderProvider(async () => {
       attempt += 1
       if (attempt === 1) return stubRoot()
       if (attempt === 2) {
         // This rebuild is overtaken before it resolves, so the root it builds
         // belongs to an effect that no longer exists.
-        await new Promise((resolve) => setTimeout(resolve, 40))
+        await new Promise<void>((resolve) => {
+          releaseSuperseded = resolve
+        })
         return superseded
       }
       return kept
@@ -259,7 +265,12 @@ describe('ApplicationServicesProvider', () => {
       rebuildHolder.current?.()
     })
 
-    // The superseded boot resolves after a 40 ms timer, well inside this wait.
+    // The third boot is serving; releasing the parked second one now resolves
+    // it into the effect the newer rebuild already superseded.
+    await act(async () => {
+      releaseSuperseded()
+    })
+
     await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled(), { timeout: 3000 })
     expect(kept.shutdown).not.toHaveBeenCalled()
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
