@@ -234,13 +234,19 @@ describe('ApplicationServicesProvider', () => {
     const superseded = stubRoot()
     const kept = stubRoot()
     let attempt = 0
+    // The second boot parks on this promise, so its resolution time is under
+    // the test's control: released only after the third boot has taken over,
+    // the late root can only land in an effect that no longer exists.
+    let releaseSuperseded: () => void = () => {}
     renderProvider(async () => {
       attempt += 1
       if (attempt === 1) return stubRoot()
       if (attempt === 2) {
         // This rebuild is overtaken before it resolves, so the root it builds
         // belongs to an effect that no longer exists.
-        await new Promise((resolve) => setTimeout(resolve, 40))
+        await new Promise<void>((resolve) => {
+          releaseSuperseded = resolve
+        })
         return superseded
       }
       return kept
@@ -248,12 +254,23 @@ describe('ApplicationServicesProvider', () => {
     await screen.findByText('简历工作台')
 
     // The button is unmounted while the provider shows its boot state, so the
-    // rebuild is triggered through the function the provider handed out.
-    act(() => rebuildHolder.current?.())
-    act(() => rebuildHolder.current?.())
+    // rebuild is triggered through the function the provider handed out. Each
+    // rebuild is awaited separately: two updates in one batch would coalesce
+    // into a single attempt change, only one boot would run, and no root would
+    // ever arrive superseded.
+    await act(async () => {
+      rebuildHolder.current?.()
+    })
+    await act(async () => {
+      rebuildHolder.current?.()
+    })
 
-    // The superseded boot resolves after a timer; on a busy machine the
-    // shutdown callback can land later than the default wait.
+    // The third boot is serving; releasing the parked second one now resolves
+    // it into the effect the newer rebuild already superseded.
+    await act(async () => {
+      releaseSuperseded()
+    })
+
     await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled(), { timeout: 3000 })
     expect(kept.shutdown).not.toHaveBeenCalled()
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
