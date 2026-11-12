@@ -150,6 +150,23 @@ describe('validateFieldValues', () => {
     )
   })
 
+  it('keeps the historical email shape on its boundary cases', () => {
+    // The original anchored pattern accepts a trailing dot (it can end the last
+    // run) and a dot directly after the @ (the later dot still separates the
+    // domain); the predicate must keep accepting exactly those.
+    for (const accepted of ['a@b.c.', 'a@.b.c', 'a@b..c']) {
+      expect(() =>
+        validateFieldValues('personal', null, { fullName: '张三', email: accepted }),
+      ).not.toThrow()
+    }
+    for (const rejected of ['a@.bc', 'a@bc.', 'a@b@c', 'a.b@c', '@b.c', 'a@ b.c']) {
+      expectDomainError(
+        () => validateFieldValues('personal', null, { fullName: '张三', email: rejected }),
+        'invalidFieldValue',
+      )
+    }
+  })
+
   it('rejects a month outside the calendar range', () => {
     expectDomainError(
       () => validateFieldValues('personal', null, { fullName: '张三', birthMonth: '2024-13' }),

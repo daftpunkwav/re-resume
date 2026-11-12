@@ -231,7 +231,6 @@ export const MODULE_FIELDS: Readonly<
   selfEvaluation: SELF_EVALUATION_FIELDS,
 }
 
-const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 const URL_PATTERN = /^https?:\/\/\S+$/
 const PHONE_PATTERN = /^[0-9+\-() ]+$/
 
@@ -491,7 +490,7 @@ function validateTypedFormat(
     case 'bool':
       return
     case 'email':
-      assertPattern(moduleKind, descriptor, EMAIL_PATTERN, value, 'an email address')
+      assertEmail(moduleKind, descriptor, value)
       return
     case 'url':
       assertPattern(moduleKind, descriptor, URL_PATTERN, value, 'an http or https URL')
@@ -503,6 +502,33 @@ function validateTypedFormat(
     case 'dateOrPresent':
       values.set(descriptor.key, parseDateValue(moduleKind, descriptor, value))
   }
+}
+
+/**
+ * The email shape: exactly one '@', at least one character before it, and a
+ * dot in the domain with characters on both sides. Written as a predicate
+ * instead of one anchored regex because the quantified `[^@\s]` classes make
+ * the regex backtrack super-linearly on mismatched input; the checks below
+ * accept exactly the same strings. The first dot from index `at + 2` decides:
+ * an earlier dot would sit right after the '@' (nothing before it) and any
+ * later candidate dot lies behind it.
+ */
+function isEmailShape(value: string): boolean {
+  const at = value.indexOf('@')
+  if (at <= 0 || value.indexOf('@', at + 1) !== -1) return false
+  if (/\s/.test(value)) return false
+  const dot = value.indexOf('.', at + 2)
+  return dot !== -1 && dot < value.length - 1
+}
+
+function assertEmail(moduleKind: InfoModuleKind, descriptor: FieldDescriptor, value: string): void {
+  if (isEmailShape(value)) return
+  throw fieldError(
+    'invalidFieldValue',
+    moduleKind,
+    descriptor.key,
+    `The field "${descriptor.key}" must be an email address.`,
+  )
 }
 
 function assertPattern(

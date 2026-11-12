@@ -23,8 +23,10 @@ export function sanitizePdfFileName(suggestedName: string): string {
     .map((char) => ((char.codePointAt(0) ?? 0) < 0x20 ? ' ' : char))
     .join('')
   const cleaned = withoutControl.replace(FORBIDDEN_NAME_CHARS, ' ').replace(/\s+/gu, ' ').trim()
-  // Windows rejects a trailing dot or space and strips both silently.
-  const trimmed = cleaned.replace(/[. ]+$/gu, '')
+  // Windows rejects a trailing dot or space and strips both silently. A loop
+  // replaces the regex so the strip cannot backtrack over the whole stem.
+  let trimmed = cleaned
+  while (trimmed.endsWith('.') || trimmed.endsWith(' ')) trimmed = trimmed.slice(0, -1)
   const bounded = [...trimmed].slice(0, MAX_STEM_CODE_POINTS).join('').trim()
   return `${bounded === '' ? FALLBACK_STEM : bounded}.pdf`
 }

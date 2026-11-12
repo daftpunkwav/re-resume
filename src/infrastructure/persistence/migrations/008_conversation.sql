@@ -105,8 +105,10 @@ CREATE TABLE job_posting (
   parsed_by_run_id TEXT,
   parsed_at TEXT,
   created_at TEXT NOT NULL,
-  -- A posting is something to read: text, images, or both.
-  CHECK (raw_text <> '' OR image_attachment_ids <> '{"v":1,"data":[]}')
+  -- A posting is something to read: text, images, or both. The explicit IS NOT
+  -- NULL keeps the empty-string comparison away from NULL semantics (the
+  -- column is NOT NULL, so the added conjunct is always true).
+  CHECK (raw_text IS NOT NULL AND raw_text <> '' OR image_attachment_ids <> '{"v":1,"data":[]}')
 );
 
 CREATE TABLE agent_run (

@@ -284,7 +284,8 @@ function runSegments(
 }
 
 const WEB_URL_PATTERN = /https?:\/\/[^\s]+/u
-const TRAILING_URL_PUNCTUATION = /[.,;:!?)]+$/u
+/** Punctuation stripped from the end of a matched URL, checked in the loop below. */
+const TRAILING_URL_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?', ')'])
 
 function firstWebUrlIn(
   text: string,
@@ -292,7 +293,9 @@ function firstWebUrlIn(
   const match = WEB_URL_PATTERN.exec(text)
   if (match === null) return null
   const raw = match[0]
-  const url = raw.replace(TRAILING_URL_PUNCTUATION, '')
+  // A loop replaces the regex so the strip cannot backtrack over the whole URL.
+  let url = raw
+  while (TRAILING_URL_PUNCTUATION.has(url.slice(-1))) url = url.slice(0, -1)
   if (!url.startsWith('https://') && !url.startsWith('http://')) return null
   const start = match.index
   return {

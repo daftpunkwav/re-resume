@@ -35,6 +35,6 @@ export class InMemoryFileStore {
   }
 
   async list(): Promise<readonly string[]> {
-    return [...this.#files.keys()].sort()
+    return [...this.#files.keys()].sort((a, b) => a.localeCompare(b))
   }
 }
