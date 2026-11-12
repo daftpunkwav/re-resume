@@ -248,12 +248,18 @@ describe('ApplicationServicesProvider', () => {
     await screen.findByText('简历工作台')
 
     // The button is unmounted while the provider shows its boot state, so the
-    // rebuild is triggered through the function the provider handed out.
-    act(() => rebuildHolder.current?.())
-    act(() => rebuildHolder.current?.())
+    // rebuild is triggered through the function the provider handed out. Each
+    // rebuild is awaited separately: two updates in one batch would coalesce
+    // into a single attempt change, only one boot would run, and no root would
+    // ever arrive superseded.
+    await act(async () => {
+      rebuildHolder.current?.()
+    })
+    await act(async () => {
+      rebuildHolder.current?.()
+    })
 
-    // The superseded boot resolves after a timer; on a busy machine the
-    // shutdown callback can land later than the default wait.
+    // The superseded boot resolves after a 40 ms timer, well inside this wait.
     await vi.waitFor(() => expect(superseded.shutdown).toHaveBeenCalled(), { timeout: 3000 })
     expect(kept.shutdown).not.toHaveBeenCalled()
     expect(await screen.findByText('简历工作台')).toBeInTheDocument()
