@@ -279,14 +279,16 @@ function describeFailure(error: unknown): string {
 }
 
 /**
- * Reads the refusal a tool returns instead of throwing: the model-facing
- * `{ ok:false, error }` value the domain mapping produces. A refusal is a
+ * Reads the refusal a tool returns instead of throwing: the discriminated
+ * value the domain mapping produces (`kind: 'toolFailure'`). A refusal is a
  * failed call, so the card and the audit row say so, while the run continues.
+ * Only the discriminator counts — a successful result that happens to carry
+ * `ok: false` and an `error` string is the tool's own data, not a refusal.
  */
 function readToolRefusal(value: unknown): string | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
-  const candidate = value as { readonly ok?: unknown; readonly error?: unknown }
-  if (candidate.ok !== false || typeof candidate.error !== 'string') return null
+  const candidate = value as { readonly kind?: unknown; readonly error?: unknown }
+  if (candidate.kind !== 'toolFailure' || typeof candidate.error !== 'string') return null
   return candidate.error
 }
 
