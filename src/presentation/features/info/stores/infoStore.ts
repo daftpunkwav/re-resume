@@ -45,9 +45,7 @@ import type { InfoModuleKind } from '../../../../domain/info/InfoModuleKind'
 import type { CustomModuleId, InfoEntryId } from '../../../../domain/shared/branded-id'
 import { describeError } from '../../../app/errorMessages'
 import type { ReadableError } from '../../../app/errorMessages'
-
-/** How long an agent-written entry keeps its highlight. */
-export const AGENT_TOUCH_MS = 2000
+import { AGENT_HIGHLIGHT_MS } from '../../../agentHighlightDuration'
 
 /** The agent-write marker an entry row shows while the highlight lasts. */
 export type AgentTouchKind = 'created' | 'updated'
@@ -81,7 +79,7 @@ interface InfoState {
   readonly loading: boolean
   readonly busy: boolean
   readonly error: ReadableError | null
-  /** Entry id → what the agent did to it; present for `AGENT_TOUCH_MS`. */
+  /** Entry id → what the agent did to it; present for `AGENT_HIGHLIGHT_MS`. */
   readonly agentTouched: Readonly<Record<string, AgentTouchKind>>
   /** The reveal waiting to be applied by the mounted panel. */
   readonly revealRequest: InfoRevealRequest | null
@@ -315,7 +313,7 @@ export const useInfoStore = create<InfoState>((set, get) => ({
             delete next[id]
             return { agentTouched: next }
           })
-        }, AGENT_TOUCH_MS),
+        }, AGENT_HIGHLIGHT_MS),
       )
     }
     set((state) => ({ agentTouched: { ...state.agentTouched, ...additions } }))

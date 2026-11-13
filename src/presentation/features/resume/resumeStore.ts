@@ -53,6 +53,7 @@ import type { ResolvedStyles } from '../../../application/resume/materializeDocu
 import { resolveStyles } from '../../../application/resume/materializeDocument'
 import { describeError } from '../../app/errorMessages'
 import type { ReadableError } from '../../app/errorMessages'
+import { AGENT_HIGHLIGHT_MS } from '../../agentHighlightDuration'
 
 /** The services the studio calls. Bound once per open panel by `attach`. */
 export interface ResumeStudioServices {
@@ -149,6 +150,11 @@ interface ResumeStudioState {
   readonly sectionRequest: SectionRequest | null
 
   readonly highlightedSectionIds: readonly ResumeSectionId[]
+  /**
+   * True for as long as the run lifecycle reports the agent writing. Only the
+   * workspace integration writes it (`setAgentBusy`); the highlight timer never
+   * clears it, or a multi-tool turn would drop its marker mid-run.
+   */
   readonly agentBusy: boolean
   /** The agent write waiting to be revealed by the mounted studio. */
   readonly revealRequest: ResumeRevealRequest | null
@@ -709,8 +715,10 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
         selection: { kind: 'document' },
         editorTarget: null,
         currentPage: 0,
+        // The highlight belongs to the document that was being pointed at, so
+        // navigating away clears it. `agentBusy` does not: the run that set it
+        // is still writing, and only the run lifecycle may clear it.
         highlightedSectionIds: [],
-        agentBusy: false,
       })
       await get().reload(id)
     },
@@ -981,24 +989,21 @@ export const useResumeStore = create<ResumeStudioState>((set, get) => {
     },
 
     flashAgentSections(sectionIds) {
+      // The reveal only points the canvas at what the run changed. The busy
+      // marker belongs to the run lifecycle (`setAgentBusy`); a reveal that
+      // clears it would drop the marker of a multi-tool turn mid-run.
       clearAgentHighlightTimer()
-      if (sectionIds.length === 0) {
-        // Nothing to point at, but the run that asked for the highlight may
-        // still be writing: the busy marker belongs to the run lifecycle, not
-        // to one reveal, so this branch only clears the highlight.
-        set({ highlightedSectionIds: [] })
-        return
-      }
-      set({ highlightedSectionIds: sectionIds, agentBusy: true })
+      set({ highlightedSectionIds: sectionIds })
+      if (sectionIds.length === 0) return
       agentHighlightTimer = setTimeout(() => {
         agentHighlightTimer = null
-        set({ highlightedSectionIds: [], agentBusy: false })
-      }, 2000)
+        set({ highlightedSectionIds: [] })
+      }, AGENT_HIGHLIGHT_MS)
     },
 
     clearAgentHighlight() {
       clearAgentHighlightTimer()
-      set({ highlightedSectionIds: [], agentBusy: false })
+      set({ highlightedSectionIds: [] })
     },
 
     setAgentBusy(busy) {

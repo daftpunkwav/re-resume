@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InfoEntryId, LayoutBlockId, ResumeSectionId } from '../../../../src/domain/shared/branded-id'
 import { listTemplates } from '../../../../src/domain/resume/Template'
+import { AGENT_HIGHLIGHT_MS } from '../../../../src/presentation/agentHighlightDuration'
 import {
   saveEditorText,
   useResumeStore,
@@ -206,13 +207,35 @@ describe('resume studio store', () => {
 
     vi.useFakeTimers()
     studio().flashAgentSections([section.id])
-    expect(studio().agentBusy).toBe(true)
     expect(studio().highlightedSectionIds).toEqual([section.id])
-    vi.advanceTimersByTime(2100)
-    expect(studio().agentBusy).toBe(false)
+    vi.advanceTimersByTime(AGENT_HIGHLIGHT_MS + 100)
     expect(studio().highlightedSectionIds).toEqual([])
     vi.useRealTimers()
     expect(studio().resume?.id).toBe(seeded.resumeId)
+  })
+
+  it('leaves the busy marker to the run lifecycle, not the highlight window', async () => {
+    const root = newResumeStudioRoot()
+    await seedResume(root, { title: '前端简历' })
+    await attachTo(root)
+    const section = studio().resume?.document.sections[0]
+    expect(section).toBeDefined()
+    if (section === undefined) return
+
+    vi.useFakeTimers()
+    // The run marked itself busy; a reveal lands inside its window.
+    studio().setAgentBusy(true)
+    studio().flashAgentSections([section.id])
+    expect(studio().agentBusy).toBe(true)
+    // The highlight expires while the run is still going: the marker must not
+    // drop with it, or a multi-tool turn flashes its bar off mid-run.
+    vi.advanceTimersByTime(AGENT_HIGHLIGHT_MS + 100)
+    expect(studio().agentBusy).toBe(true)
+    expect(studio().highlightedSectionIds).toEqual([])
+    // Only the run lifecycle clears the marker.
+    studio().setAgentBusy(false)
+    expect(studio().agentBusy).toBe(false)
+    vi.useRealTimers()
   })
 
   it('reports a refused write through the readable error and keeps the editor open', async () => {
