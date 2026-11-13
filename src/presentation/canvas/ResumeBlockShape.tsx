@@ -208,6 +208,12 @@ function SectionHeaderDecoration({
   if (firstLine === undefined) return null
   const color = decorationColor(decoration.accent)
   const frame = frameOf({ block, pageTop, zoom })
+  // The drawing rule starts the first line at the block's y plus the first
+  // paragraph's spaceBefore, and every decoration anchors on that line — the
+  // same anchors the PDF renderer uses (its top is y + spaceBefore, its height
+  // the first line's own height).
+  const lineTop = pageTop + (block.y + firstLine.top) * zoom
+  const lineHeight = firstLine.height * zoom
   switch (decoration.headingStyle) {
     case 'plain':
       return null
@@ -215,7 +221,7 @@ function SectionHeaderDecoration({
       return (
         <Rect
           x={frame.x}
-          y={frame.y + frame.height + 1.5 * zoom}
+          y={lineTop + lineHeight + 1.5 * zoom}
           width={frame.width}
           height={Math.max(RULE_THICKNESS * zoom, 1)}
           fill={color}
@@ -226,9 +232,9 @@ function SectionHeaderDecoration({
       return (
         <Rect
           x={frame.x - ACCENT_BAR_OFFSET * zoom}
-          y={frame.y}
+          y={lineTop}
           width={ACCENT_BAR_WIDTH * zoom}
-          height={frame.height}
+          height={lineHeight}
           fill={color}
           listening={false}
         />
@@ -237,9 +243,9 @@ function SectionHeaderDecoration({
       return (
         <Rect
           x={frame.x}
-          y={frame.y - (BOXED_HEADING_PADDING / 2) * zoom}
+          y={lineTop - (BOXED_HEADING_PADDING / 2) * zoom}
           width={frame.width}
-          height={frame.height + BOXED_HEADING_PADDING * zoom}
+          height={lineHeight + BOXED_HEADING_PADDING * zoom}
           stroke={color}
           strokeWidth={Math.max(BOXED_HEADING_BORDER_WIDTH * zoom, 0.75)}
           listening={false}

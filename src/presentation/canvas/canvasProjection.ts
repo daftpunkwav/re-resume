@@ -73,6 +73,11 @@ export interface ProjectedLayout {
 interface BlockTraits {
   readonly role: LayoutRole
   readonly absolute: boolean
+  /**
+   * The first paragraph's spaceBefore: the drawing rule puts the first line
+   * that far below the block's y, so the projection folds it in here.
+   */
+  readonly firstParagraphSpaceBefore: number
 }
 
 function traitsOf(materialized: MaterializedDocument): ReadonlyMap<LayoutBlockId, BlockTraits> {
@@ -81,14 +86,19 @@ function traitsOf(materialized: MaterializedDocument): ReadonlyMap<LayoutBlockId
     traits.set(block.id, {
       role: block.role,
       absolute: block.placement.mode === 'absolute',
+      firstParagraphSpaceBefore: block.paragraphs[0]?.spaceBefore ?? 0,
     })
   }
   return traits
 }
 
-/** The y offset of each line within a block, sharing the content height with the layout. */
-function projectLines(block: LaidOutBlock): readonly ProjectedLine[] {
-  let top = 0
+/**
+ * The y offset of each line within a block. The first line starts after the
+ * first paragraph's spaceBefore, the same rule the PDF renderer draws by, so
+ * the canvas and the file place the line at the same spot.
+ */
+function projectLines(block: LaidOutBlock, firstParagraphSpaceBefore: number): readonly ProjectedLine[] {
+  let top = firstParagraphSpaceBefore
   const lines: ProjectedLine[] = []
   for (const line of block.lines) {
     const height = line.style.fontSize * line.style.lineHeight
@@ -121,7 +131,7 @@ function projectBlock(
     y: laidOut.y + page.marginTop,
     width: laidOut.width,
     height: laidOut.height,
-    lines: projectLines(laidOut),
+    lines: projectLines(laidOut, trait?.firstParagraphSpaceBefore ?? 0),
     image: laidOut.image,
   }
 }
