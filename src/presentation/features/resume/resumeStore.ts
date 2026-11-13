@@ -51,6 +51,8 @@ import type {
 } from '../../../domain/shared/branded-id'
 import type { ResolvedStyles } from '../../../application/resume/materializeDocument'
 import { resolveStyles } from '../../../application/resume/materializeDocument'
+import type { ResolvedDecoration } from '../../../domain/resume/Decoration'
+import { resolveDecoration } from '../../../domain/resume/Decoration'
 import { describeError } from '../../app/errorMessages'
 import type { ReadableError } from '../../app/errorMessages'
 import { AGENT_HIGHLIGHT_MS } from '../../agentHighlightDuration'
@@ -135,6 +137,8 @@ interface ResumeStudioState {
   readonly entries: readonly InfoEntry[]
   readonly customModules: readonly CustomModuleDefinition[]
   readonly styles: ResolvedStyles | null
+  /** The appearance's decoration, resolved once per load; the canvas and the PDF render the same one. */
+  readonly decoration: ResolvedDecoration | null
   readonly entryUpdates: ReadonlySet<string>
 
   readonly committing: boolean
@@ -255,6 +259,7 @@ function emptyStudio(): Pick<
   | 'entries'
   | 'customModules'
   | 'styles'
+  | 'decoration'
   | 'entryUpdates'
   | 'committing'
   | 'actionError'
@@ -283,6 +288,7 @@ function emptyStudio(): Pick<
     entries: [],
     customModules: [],
     styles: null,
+    decoration: null,
     entryUpdates: new Set<string>(),
     committing: false,
     actionError: null,
@@ -302,6 +308,11 @@ function emptyStudio(): Pick<
 function stylesOf(resume: Resume): ResolvedStyles | null {
   const template = listTemplates().find((candidate) => candidate.id === resume.document.templateId)
   return template === undefined ? null : resolveStyles(template.tokens, resume.document.appearance)
+}
+
+function decorationOf(resume: Resume): ResolvedDecoration | null {
+  const template = listTemplates().find((candidate) => candidate.id === resume.document.templateId)
+  return template === undefined ? null : resolveDecoration(resume.document.appearance, template)
 }
 
 /** The blocks the inline editor can start from, keyed by their layout id. */
@@ -441,6 +452,7 @@ function loadedResumeState(
     entries: view.entries,
     customModules: view.customModules,
     styles: stylesOf(view.render.resume),
+    decoration: decorationOf(view.render.resume),
     entryUpdates: entryUpdatesOf(view.render.resume, view.entries),
     selection: selectionIfStillRendered(selection, view.render),
     editorTarget: null,

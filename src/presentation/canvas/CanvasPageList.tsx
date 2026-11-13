@@ -7,6 +7,8 @@
 
 import { Layer } from 'react-konva'
 
+import type { ResolvedDecoration } from '../../domain/resume/Decoration'
+
 import type { LayoutBlockId, ResumeSectionId } from '../../domain/shared/branded-id'
 import type { CanvasMetrics, ProjectedLayout } from './canvasProjection'
 import { pageBoxOf } from './canvasProjection'
@@ -16,6 +18,7 @@ export interface CanvasPageListProps {
   readonly projected: ProjectedLayout
   readonly metrics: CanvasMetrics
   readonly pageCount: number
+  readonly decoration: ResolvedDecoration | null
   readonly zoom: number
   readonly accent: string
   readonly selectedBlockId: LayoutBlockId | null
@@ -34,6 +37,7 @@ export function CanvasPageList({
   projected,
   metrics,
   pageCount,
+  decoration,
   zoom,
   accent,
   selectedBlockId,
@@ -59,6 +63,7 @@ export function CanvasPageList({
             box={box}
             pageCount={pageCount}
             zoom={zoom}
+            decoration={decoration}
             accent={accent}
             selectedBlockId={selectedBlockId}
             selectedSectionId={selectedSectionId}

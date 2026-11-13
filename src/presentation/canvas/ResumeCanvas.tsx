@@ -23,6 +23,7 @@ import type { CanvasBlock } from '../../domain/resume/CanvasLayout'
 import type { LayoutOutput } from '../../domain/resume/PageLayout'
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { MaterializedDocument } from '../../domain/resume/ResumeSnapshot'
+import type { ResolvedDecoration } from '../../domain/resume/Decoration'
 import type { LayoutBlockId, ResumeSectionId } from '../../domain/shared/branded-id'
 import type { StudioSelection } from '../features/resume/resumeStore'
 import { CanvasPageList } from './CanvasPageList'
@@ -35,6 +36,7 @@ export interface ResumeCanvasProps {
   readonly materialized: MaterializedDocument
   readonly layout: LayoutOutput
   readonly page: PageSetup
+  readonly decoration: ResolvedDecoration | null
   readonly zoom: number
   readonly selection: StudioSelection
   readonly highlightedSectionIds: readonly ResumeSectionId[]
@@ -52,6 +54,7 @@ export function ResumeCanvas({
   materialized,
   layout,
   page,
+  decoration,
   zoom,
   selection,
   highlightedSectionIds,
@@ -88,6 +91,7 @@ export function ResumeCanvas({
           metrics={metrics}
           pageCount={projected.pages.length}
           zoom={zoom}
+          decoration={decoration}
           accent={accent}
           selectedBlockId={selectedBlockId}
           selectedSectionId={selectedSectionId}

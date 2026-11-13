@@ -13,6 +13,15 @@
 
 import { Group, Line as KonvaLine, Rect, Text as KonvaText } from 'react-konva'
 
+import type { ResolvedDecoration } from '../../domain/resume/Decoration'
+import {
+  ACCENT_BAR_OFFSET,
+  ACCENT_BAR_WIDTH,
+  BOXED_HEADING_BORDER_WIDTH,
+  BOXED_HEADING_PADDING,
+  RULE_THICKNESS,
+  decorationColor,
+} from '../../domain/resume/Decoration'
 import type { LayoutBlockId } from '../../domain/shared/branded-id'
 import type { ProjectedBlock } from './canvasProjection'
 import {
@@ -43,6 +52,7 @@ export interface ResumeBlockShapeProps {
   readonly agentHighlighted: boolean
   readonly overflow: boolean
   readonly accent: string
+  readonly decoration: ResolvedDecoration | null
   readonly editable: boolean
   readonly editorOpen: boolean
   readonly onSelectBlock: (blockId: LayoutBlockId) => void
@@ -187,6 +197,57 @@ function BlockHitArea({
   )
 }
 
+function SectionHeaderDecoration({
+  block,
+  pageTop,
+  zoom,
+  decoration,
+}: BlockGeometry & { readonly decoration: ResolvedDecoration }) {
+  if (block.role !== 'sectionHeader') return null
+  const firstLine = block.lines[0]
+  if (firstLine === undefined) return null
+  const color = decorationColor(decoration.accent)
+  const frame = frameOf({ block, pageTop, zoom })
+  switch (decoration.headingStyle) {
+    case 'plain':
+      return null
+    case 'underline':
+      return (
+        <Rect
+          x={frame.x}
+          y={frame.y + frame.height + 1.5 * zoom}
+          width={frame.width}
+          height={Math.max(RULE_THICKNESS * zoom, 1)}
+          fill={color}
+          listening={false}
+        />
+      )
+    case 'accentBar':
+      return (
+        <Rect
+          x={frame.x - ACCENT_BAR_OFFSET * zoom}
+          y={frame.y}
+          width={ACCENT_BAR_WIDTH * zoom}
+          height={frame.height}
+          fill={color}
+          listening={false}
+        />
+      )
+    case 'boxed':
+      return (
+        <Rect
+          x={frame.x}
+          y={frame.y - (BOXED_HEADING_PADDING / 2) * zoom}
+          width={frame.width}
+          height={frame.height + BOXED_HEADING_PADDING * zoom}
+          stroke={color}
+          strokeWidth={Math.max(BOXED_HEADING_BORDER_WIDTH * zoom, 0.75)}
+          listening={false}
+        />
+      )
+  }
+}
+
 function SelectionOutline({ frame, accent }: { readonly frame: BlockFrame; readonly accent: string }) {
   return (
     <Rect
@@ -233,6 +294,7 @@ export function ResumeBlockShape({
   agentHighlighted,
   overflow,
   accent,
+  decoration,
   editable,
   editorOpen,
   onSelectBlock,
@@ -248,6 +310,7 @@ export function ResumeBlockShape({
       {block.role === 'divider' ? <DividerShape frame={frame} zoom={zoom} /> : null}
       {block.role === 'image' ? <ImageFrame frame={frame} zoom={zoom} missing={image === null} /> : null}
       {block.role !== 'image' && !editorOpen ? <BlockTextLines {...geometry} /> : null}
+      {decoration !== null ? <SectionHeaderDecoration {...geometry} decoration={decoration} /> : null}
       <BlockHitArea
         frame={frame}
         blockId={block.blockId}

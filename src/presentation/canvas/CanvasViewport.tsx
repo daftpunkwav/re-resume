@@ -141,6 +141,7 @@ export function CanvasViewport() {
               materialized={data.materialized}
               layout={data.layout}
               page={data.page}
+              decoration={data.decoration}
               zoom={data.zoom}
               selection={data.selection}
               highlightedSectionIds={data.highlightedSectionIds}
