@@ -83,7 +83,8 @@ export function attachmentKindForMime(mimeType: string): AttachmentKind | null {
   return isImageMimeType(mimeType) ? 'image' : 'file'
 }
 
-const MIME_EXTENSIONS: Readonly<Record<AttachmentMimeType, string>> = {
+/** The storage extension each supported MIME type is stored under. */
+export const MIME_EXTENSIONS: Readonly<Record<AttachmentMimeType, string>> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
