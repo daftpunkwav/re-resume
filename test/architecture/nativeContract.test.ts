@@ -101,11 +101,21 @@ describe('native shell contract', () => {
     const expression = /const MAX_ATTACHMENT_BYTE_SIZE: usize = ([^;]+);/u.exec(rust)?.[1]
     expect(expression, 'attachments.rs no longer declares MAX_ATTACHMENT_BYTE_SIZE').toBeTruthy()
 
-    const rustBound = (expression as string)
-      .split('*')
-      .map((factor) => Number.parseInt(factor.trim(), 10))
-      .reduce((left, right) => left * right)
-    expect(Number.isFinite(rustBound), 'the Rust bound is not a product of integers').toBe(true)
+    // Each factor must be a complete integer literal: `parseInt` would read
+    // `5 * 1024 * 1024 + 1` as its last factor and pass a bound that differs
+    // from the domain's. Anything outside a product of integers is a failure.
+    const INTEGER_LITERAL = /^[0-9]+$/u
+    const factors = (expression as string).split('*').map((factor) => factor.trim())
+    expect(
+      factors.every((factor) => INTEGER_LITERAL.test(factor)),
+      `the Rust bound must be a product of integer literals, got "${expression as string}"`,
+    ).toBe(true)
+
+    const rustBound = factors.reduce(
+      (left, factor) => left * Number.parseInt(factor, 10),
+      1,
+    )
+    expect(Number.isSafeInteger(rustBound), 'the Rust bound is not a safe integer').toBe(true)
 
     expect(MAX_ATTACHMENT_BYTE_SIZE).toBe(rustBound)
   })
