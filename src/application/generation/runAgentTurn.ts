@@ -78,6 +78,7 @@ import { compactConversation } from './compactConversation'
 import { redactSecret } from './redactSecret'
 import { buildFixedSystemPromptSections, buildSystemPrompt } from './systemPrompt'
 import type { SharedGenerationPorts } from './tools/deps'
+import { toToolContextPorts } from './tools/deps'
 import { executeToolCall } from './toolExecution'
 import { truncateToolResult } from './toolOutcome'
 import {
@@ -720,18 +721,9 @@ function buildToolContext(
   conversationId: ConversationId,
 ): ToolContext {
   return {
+    ...toToolContextPorts(deps),
     conversations: deps.conversations,
     messages: deps.messages,
-    jobPostings: deps.jobPostings,
-    attachments: deps.attachments,
-    fileStore: deps.fileStore,
-    infoEntries: deps.entries,
-    customModules: deps.customModules,
-    resumes: deps.resumes,
-    changes: deps.changes,
-    measurer: deps.measurer,
-    clock: deps.clock,
-    ids: deps.ids,
     runId,
     conversationId,
     emit: deps.emit,

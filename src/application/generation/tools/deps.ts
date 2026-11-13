@@ -28,6 +28,7 @@ import type { Clock } from '../../../domain/shared/Clock'
 import type { IdGenerator } from '../../../domain/shared/IdGenerator'
 import type { PdfExportDeps } from '../../export/exportPdf'
 import type { InfoLibraryDeps } from '../../info/library'
+import type { ToolContext } from '../../../domain/generation/ports/ToolRegistry'
 import type { ResumeContentDeps } from '../../resume/resumeSource'
 
 export interface ToolPackDeps {
@@ -71,6 +72,38 @@ export type SharedGenerationPorts = Pick<
   | 'clock'
   | 'ids'
 >
+
+/**
+ * The shared ports as the tool context names them. The two vocabularies differ
+ * in exactly one word (entries -> infoEntries), so this is the single place the
+ * mapping is written; a port the bundle grows flows through here.
+ */
+export function toToolContextPorts(deps: SharedGenerationPorts): Pick<
+  ToolContext,
+  | 'infoEntries'
+  | 'customModules'
+  | 'resumes'
+  | 'changes'
+  | 'measurer'
+  | 'jobPostings'
+  | 'attachments'
+  | 'fileStore'
+  | 'clock'
+  | 'ids'
+> {
+  return {
+    infoEntries: deps.entries,
+    customModules: deps.customModules,
+    resumes: deps.resumes,
+    changes: deps.changes,
+    measurer: deps.measurer,
+    jobPostings: deps.jobPostings,
+    attachments: deps.attachments,
+    fileStore: deps.fileStore,
+    clock: deps.clock,
+    ids: deps.ids,
+  }
+}
 
 /** The dependency record the library use cases take. */
 export function infoLibraryDeps(deps: ToolPackDeps): InfoLibraryDeps {
