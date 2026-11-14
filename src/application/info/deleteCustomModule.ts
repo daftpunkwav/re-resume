@@ -14,6 +14,7 @@
  */
 
 import type { ChangeOrigin, ChangeRecord } from '../../domain/changes/ChangeRecord'
+import { serializeDeletedModulePayload } from '../../domain/info/changePayloads'
 import type { InfoEntryReference } from '../../domain/info/ports/InfoEntryReferenceQuery'
 import type {
   AgentRunId,
@@ -76,7 +77,7 @@ export async function deleteCustomModule(
     entity: 'customModule',
     entityId: module.id,
     op: 'customModule.delete',
-    beforeJson: JSON.stringify({ module, entries }),
+    beforeJson: serializeDeletedModulePayload(module, entries),
     afterJson: null,
     origin,
     runId: sourceRunId,

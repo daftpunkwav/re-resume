@@ -25,6 +25,10 @@ import {
   validateCustomFieldDefinition,
   validateCustomModuleDefinition,
 } from '../../domain/info/CustomModule'
+import {
+  serializeCustomModulePayload,
+  serializeModuleUpdatePayload,
+} from '../../domain/info/changePayloads'
 import type { InfoEntry } from '../../domain/info/InfoEntry'
 import type {
   AgentRunId,
@@ -122,8 +126,8 @@ export async function updateCustomModule(
     entity: 'customModule',
     entityId: current.id,
     op: 'customModule.update',
-    beforeJson: JSON.stringify({ module: current, clearedValues }),
-    afterJson: JSON.stringify(updated),
+    beforeJson: serializeModuleUpdatePayload(current, clearedValues),
+    afterJson: serializeCustomModulePayload(updated),
     origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,

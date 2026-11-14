@@ -21,6 +21,7 @@ import type {
   InfoEntryId,
 } from '../../domain/shared/branded-id'
 import { DomainError } from '../../domain/shared/DomainError'
+import { serializeInfoEntryPayload } from '../../domain/info/changePayloads'
 import type { InfoLibraryDeps } from './library'
 import {
   buildChangeRecord,
@@ -69,8 +70,8 @@ export async function updateInfoEntry(
     entity: 'infoEntry',
     entityId: updated.id,
     op: 'infoEntry.update',
-    beforeJson: JSON.stringify(current),
-    afterJson: JSON.stringify(updated),
+    beforeJson: serializeInfoEntryPayload(current),
+    afterJson: serializeInfoEntryPayload(updated),
     origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,

@@ -13,6 +13,7 @@
 
 import type { InfoEntry } from '../../domain/info/InfoEntry'
 import { deriveEntryTitle } from '../../domain/info/InfoEntry'
+import { serializeInfoEntryPayload } from '../../domain/info/changePayloads'
 import { validateFieldValues } from '../../domain/info/InfoFieldValue'
 import type { InfoModuleKind } from '../../domain/info/InfoModuleKind'
 import { moduleDescriptor } from '../../domain/info/InfoModuleKind'
@@ -75,7 +76,7 @@ export async function createInfoEntry(
     entityId: entry.id,
     op: 'infoEntry.create',
     beforeJson: null,
-    afterJson: JSON.stringify(entry),
+    afterJson: serializeInfoEntryPayload(entry),
     origin: input.origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,

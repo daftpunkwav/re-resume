@@ -12,6 +12,7 @@
  */
 
 import type { ChangeOrigin, ChangeRecord } from '../../domain/changes/ChangeRecord'
+import { serializeOrderMappings } from '../../domain/info/changePayloads'
 import type { InfoEntry } from '../../domain/info/InfoEntry'
 import { moduleDescriptor } from '../../domain/info/InfoModuleKind'
 import type { InfoModuleKind } from '../../domain/info/InfoModuleKind'
@@ -73,8 +74,8 @@ export async function reorderInfoEntries(
     entity: 'infoEntry',
     entityId: customModuleId ?? input.moduleKind,
     op: 'infoEntry.reorder',
-    beforeJson: JSON.stringify(before),
-    afterJson: JSON.stringify(after),
+    beforeJson: serializeOrderMappings(before),
+    afterJson: serializeOrderMappings(after),
     origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,

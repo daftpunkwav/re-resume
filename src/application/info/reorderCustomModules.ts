@@ -10,6 +10,7 @@
  */
 
 import type { ChangeOrigin, ChangeRecord } from '../../domain/changes/ChangeRecord'
+import { serializeOrderMappings } from '../../domain/info/changePayloads'
 import type { CustomModuleDefinition } from '../../domain/info/CustomModule'
 import type {
   AgentRunId,
@@ -59,8 +60,8 @@ export async function reorderCustomModules(
     entity: 'customModule',
     entityId: 'customModules',
     op: 'customModule.reorder',
-    beforeJson: JSON.stringify(before),
-    afterJson: JSON.stringify(after),
+    beforeJson: serializeOrderMappings(before),
+    afterJson: serializeOrderMappings(after),
     origin,
     runId: sourceRunId,
     conversationId: input.conversationId ?? null,
