@@ -156,12 +156,14 @@ export class InMemoryInfoEntryRepository implements InfoEntryRepository {
     if (this.#entries.has(entry.id)) {
       throw new Error(`The in-memory library already has an entry "${entry.id}".`)
     }
+    this.#assertPositionFree(entry)
     this.#entries.set(entry.id, entry)
     this.#changes.record(change)
   }
 
   async update(entry: InfoEntry, change: ChangeRecord): Promise<void> {
     requireEntry(this.#entries.get(entry.id), entry.id)
+    this.#assertPositionFree(entry)
     this.#entries.set(entry.id, entry)
     this.#changes.record(change)
   }
@@ -204,7 +206,30 @@ export class InMemoryInfoEntryRepository implements InfoEntryRepository {
       if (this.#entries.has(entry.id)) {
         throw new Error(`The in-memory library already has an entry "${entry.id}".`)
       }
+      this.#assertPositionFree(entry)
       this.#entries.set(entry.id, entry)
+    }
+  }
+
+  /**
+   * Refuses a position another entry of the same module already holds: the port
+   * declares the sort order unique inside a module and the SQLite store
+   * enforces it with `idx_info_entry_order`, so the in-memory store does too.
+   * The entry being written skips itself, which is what an update needs.
+   */
+  #assertPositionFree(entry: InfoEntry): void {
+    for (const existing of this.#entries.values()) {
+      if (
+        existing.id !== entry.id &&
+        existing.moduleKind === entry.moduleKind &&
+        (existing.customModuleId ?? null) === (entry.customModuleId ?? null) &&
+        existing.sortOrder === entry.sortOrder
+      ) {
+        throw new Error(
+          `The in-memory library already has an entry "${existing.id}" ` +
+            `at position ${entry.sortOrder.toString()} of this module.`,
+        )
+      }
     }
   }
 
