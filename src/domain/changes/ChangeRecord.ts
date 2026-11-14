@@ -48,11 +48,16 @@ export const CHANGE_ORIGINS = ['user', 'agent'] as const
 /** Who performed the write. */
 export type ChangeOrigin = (typeof CHANGE_ORIGINS)[number]
 
+/** The entity families a change record can describe; each has its own undo. */
+export const CHANGE_ENTITIES = ['infoEntry', 'customModule', 'jobPosting'] as const
+
+export type ChangeEntity = (typeof CHANGE_ENTITIES)[number]
+
 export interface ChangeRecord {
   readonly id: ChangeRecordId
   readonly scope: ChangeScope
-  /** Entity family the record belongs to: 'infoEntry', 'customModule' or 'jobPosting'. */
-  readonly entity: string
+  /** Entity family the record belongs to; the op's prefix names the same family. */
+  readonly entity: ChangeEntity
   readonly entityId: string
   readonly op: ChangeOp
   /**
@@ -81,4 +86,8 @@ export function isChangeOp(value: unknown): value is ChangeOp {
 
 export function isChangeOrigin(value: unknown): value is ChangeOrigin {
   return value === 'user' || value === 'agent'
+}
+
+export function isChangeEntity(value: unknown): value is ChangeEntity {
+  return typeof value === 'string' && (CHANGE_ENTITIES as readonly string[]).includes(value)
 }

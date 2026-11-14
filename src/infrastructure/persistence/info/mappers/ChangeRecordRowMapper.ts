@@ -14,7 +14,7 @@
  *   by an older or external writer cannot enter the domain.
  */
 
-import { isChangeOp, isChangeOrigin, isChangeScope } from '../../../../domain/changes/ChangeRecord'
+import { isChangeEntity, isChangeOp, isChangeOrigin, isChangeScope } from '../../../../domain/changes/ChangeRecord'
 import type { ChangeRecord } from '../../../../domain/changes/ChangeRecord'
 import {
   asAgentRunId,
@@ -74,12 +74,16 @@ export function mapChangeRecordRow(row: Row): ChangeRecord {
   if (!isChangeOrigin(origin)) {
     throw new RowMappingError('change_record.origin', 'is not a change origin this build knows', origin)
   }
+  const entity = requiredString(row, 'entity')
+  if (!isChangeEntity(entity)) {
+    throw new RowMappingError('change_record.entity', 'is not an entity family this build knows', entity)
+  }
   const runId = optionalString(row, 'run_id')
   const conversationId = optionalString(row, 'conversation_id')
   return {
     id: asChangeRecordId(requiredString(row, 'id')),
     scope,
-    entity: requiredString(row, 'entity'),
+    entity,
     entityId: requiredString(row, 'entity_id'),
     op,
     beforeJson: optionalJsonPayload(row, 'before_json'),

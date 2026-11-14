@@ -171,14 +171,36 @@ interface ConversationState {
   clearError(): void
 }
 
+/**
+ * A latest-wins stamp for one stream of async work: `next` starts a generation
+ * that supersedes every earlier one, `stamp` borrows the current number for
+ * work that only a reset may invalidate, and `current` fails once anything
+ * newer has started. One guard per stream, at module scope like the store.
+ */
+function createLatestGuard(): {
+  next(): number
+  stamp(): number
+  current(stamp: number): boolean
+} {
+  let generation = 0
+  return {
+    next: () => {
+      generation += 1
+      return generation
+    },
+    stamp: () => generation,
+    current: (stamp) => generation === stamp,
+  }
+}
+
 /** The service object of the root currently mounted; replaced on a rebuild. */
 let services: ConversationServices | null = null
 
 /** Makes only the newest transcript read write, whatever settles first. */
-let messageGeneration = 0
+const messageReads = createLatestGuard()
 
 /** Makes only the newest list read write. */
-let listGeneration = 0
+const listReads = createLatestGuard()
 
 const EMPTY = {
   conversations: [],
@@ -204,13 +226,52 @@ const EMPTY = {
 } as const satisfies Partial<ConversationState>
 
 /** Drops the ingest results of a composer that was reset while they ran. */
-let attachmentGeneration = 0
+const composerIngests = createLatestGuard()
 
 /** Drops the attachment-row reads of a root that is no longer mounted. */
-let attachmentReadGeneration = 0
+const attachmentRowReads = createLatestGuard()
 
 /** Serialises composer ingestion so two quick pastes see one draft. */
 let attachQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Runs one undo to completion: the busy/undone bookkeeping, the toast and the
+ * error path are the same for a library change and a resume revision, so the
+ * two actions differ only in the call and what follows a successful undo.
+ */
+async function runUndo(
+  key: string,
+  run: (current: ConversationServices) => Promise<unknown>,
+  afterUndone?: () => void,
+): Promise<boolean> {
+  const current = services
+  if (current === null) return false
+  if (useConversationStore.getState().undoBusy.has(key) || useConversationStore.getState().undone.has(key)) {
+    return false
+  }
+  useConversationStore.setState((state) => ({ undoBusy: new Set(state.undoBusy).add(key) }))
+  try {
+    await run(current)
+    useConversationStore.setState((state) => {
+      const busy = new Set(state.undoBusy)
+      busy.delete(key)
+      return {
+        undoBusy: busy,
+        undone: new Set(state.undone).add(key),
+      }
+    })
+    showToast('success', '已撤销这次修改')
+    afterUndone?.()
+    return true
+  } catch (failure) {
+    useConversationStore.setState((state) => {
+      const busy = new Set(state.undoBusy)
+      busy.delete(key)
+      return { undoBusy: busy, error: describeError(failure) }
+    })
+    return false
+  }
+}
 
 /** The opens: only the newest request may write what the region shows. */
 function contextLabelFor(context: MessageContext, entries: Readonly<Record<string, string>>): string {
@@ -296,10 +357,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (services === next) return
     services = next
     useRunStore.getState().reset()
-    messageGeneration += 1
-    listGeneration += 1
-    attachmentGeneration += 1
-    attachmentReadGeneration += 1
+    messageReads.next()
+    listReads.next()
+    composerIngests.next()
+    attachmentRowReads.next()
     set({ ...EMPTY })
     if (next === null) return
     void get().loadConversations()
@@ -308,18 +369,17 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   async loadConversations() {
     const current = services
     if (current === null) return
-    const generation = listGeneration + 1
-    listGeneration = generation
+    const generation = listReads.next()
     set({ listStatus: 'loading' })
     let listed: ListConversationsOutput
     try {
       listed = await current.conversation.listConversations()
     } catch (failure) {
-      if (generation !== listGeneration) return
+      if (!listReads.current(generation)) return
       set({ listStatus: 'failed', error: describeError(failure) })
       return
     }
-    if (generation !== listGeneration) return
+    if (!listReads.current(generation)) return
     set({
       conversations: listed.conversations,
       groups: listed.groups,
@@ -343,7 +403,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       // The preference is a convenience: a window that cannot read it still
       // opens the most recent session below.
     }
-    if (generation !== listGeneration) return
+    if (!listReads.current(generation)) return
     const preferred =
       listed.conversations.find((conversation) => conversation.id === lastConversationId) ??
       listed.conversations[0]
@@ -357,8 +417,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   startDraft(mode = 'reset') {
-    messageGeneration += 1
-    attachmentGeneration += 1
+    messageReads.next()
+    composerIngests.next()
     useRunStore.getState().reset()
     publishWorkspaceSignal({ kind: 'runSettled' })
     set({
@@ -377,7 +437,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   async openConversation(conversationId) {
     const current = services
     if (current === null) return
-    messageGeneration += 1
+    messageReads.next()
     useRunStore.getState().reset()
     publishWorkspaceSignal({ kind: 'runSettled' })
     set({
@@ -400,15 +460,14 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     const current = services
     if (current === null) return
     if (get().activeId !== conversationId) return
-    const generation = messageGeneration + 1
-    messageGeneration = generation
+    const generation = messageReads.next()
     const firstLoad = get().messages.length === 0
     try {
       const [messages, contexts] = await Promise.all([
         current.conversation.listMessages(conversationId, MESSAGE_WINDOW),
         current.conversation.listMessageContexts(conversationId, MESSAGE_WINDOW),
       ])
-      if (generation !== messageGeneration || get().activeId !== conversationId) return
+      if (!messageReads.current(generation) || get().activeId !== conversationId) return
       const previousIds = new Set(get().messages.map((message) => message.id))
       const enterIds = firstLoad
         ? new Set<string>()
@@ -424,7 +483,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         contextsByMessage: Object.fromEntries(contexts),
       })
     } catch (failure) {
-      if (generation !== messageGeneration || get().activeId !== conversationId) return
+      if (!messageReads.current(generation) || get().activeId !== conversationId) return
       set({ messagesStatus: 'failed', error: describeError(failure) })
     }
   },
@@ -482,9 +541,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   attachFiles(files) {
     if (services === null || files.length === 0) return Promise.resolve()
-    const generation = attachmentGeneration
+    const generation = composerIngests.stamp()
     const run = async (): Promise<void> => {
-      if (generation !== attachmentGeneration || services === null) return
+      if (!composerIngests.current(generation) || services === null) return
       const current = services
       const existing = get().composer.attachments.map((entry) => entry.attachment)
       set((state) => ({
@@ -492,7 +551,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         attachmentError: null,
       }))
       const { accepted, errors } = await ingestImageFiles(current.conversation, files, existing)
-      if (generation !== attachmentGeneration) return
+      if (!composerIngests.current(generation)) return
       set((state) => ({
         attachmentIngesting: Math.max(0, state.attachmentIngesting - files.length),
         composer:
@@ -532,7 +591,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   async ensureAttachments(attachmentIds) {
     const current = services
     if (current === null || attachmentIds.length === 0) return
-    const generation = attachmentReadGeneration
+    const generation = attachmentRowReads.stamp()
     const state = get()
     const missing = [...new Set(attachmentIds)].filter(
       (id) => state.attachmentsById[id] === undefined && state.attachmentLoad[id] !== 'loading',
@@ -546,7 +605,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }))
     try {
       const found = await current.conversation.listAttachments(missing)
-      if (generation !== attachmentReadGeneration) return
+      if (!attachmentRowReads.current(generation)) return
       set((current2) => {
         const attachmentsById = { ...current2.attachmentsById }
         const attachmentLoad = { ...current2.attachmentLoad }
@@ -560,7 +619,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         return { attachmentsById, attachmentLoad }
       })
     } catch {
-      if (generation !== attachmentReadGeneration) return
+      if (!attachmentRowReads.current(generation)) return
       set((current2) => ({
         attachmentLoad: {
           ...current2.attachmentLoad,
@@ -584,13 +643,13 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   async sendWithFiles(text, files) {
     const current = services
     if (current === null) return false
-    const generation = attachmentGeneration
+    const generation = composerIngests.stamp()
     set((state) => ({
       attachmentIngesting: state.attachmentIngesting + files.length,
       attachmentError: null,
     }))
     const { accepted, errors } = await ingestImageFiles(current.conversation, files, [])
-    if (generation !== attachmentGeneration) return false
+    if (!composerIngests.current(generation)) return false
     set((state) => ({
       attachmentIngesting: Math.max(0, state.attachmentIngesting - files.length),
       attachmentError:
@@ -815,60 +874,18 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   async undoChange(changeId) {
-    const current = services
-    if (current === null) return false
-    if (get().undoBusy.has(changeId) || get().undone.has(changeId)) return false
-    set((state) => ({ undoBusy: new Set(state.undoBusy).add(changeId) }))
-    try {
-      await current.libraryChanges.undo({ changeId })
-      set((state) => {
-        const busy = new Set(state.undoBusy)
-        busy.delete(changeId)
-        return {
-          undoBusy: busy,
-          undone: new Set(state.undone).add(changeId),
-        }
-      })
-      showToast('success', '已撤销这次修改')
+    return runUndo(changeId, (current) => current.libraryChanges.undo({ changeId }), () => {
       void get().refreshContextEntries()
       publishWorkspaceSignal({ kind: 'changesUndone', scope: 'library' })
-      return true
-    } catch (failure) {
-      set((state) => {
-        const busy = new Set(state.undoBusy)
-        busy.delete(changeId)
-        return { undoBusy: busy, error: describeError(failure) }
-      })
-      return false
-    }
+    })
   },
 
   async undoRevision(resumeId, revisionId) {
-    const current = services
-    if (current === null) return false
-    if (get().undoBusy.has(revisionId) || get().undone.has(revisionId)) return false
-    set((state) => ({ undoBusy: new Set(state.undoBusy).add(revisionId) }))
-    try {
-      await current.libraryChanges.undoRevision({ resumeId, revisionId })
-      set((state) => {
-        const busy = new Set(state.undoBusy)
-        busy.delete(revisionId)
-        return {
-          undoBusy: busy,
-          undone: new Set(state.undone).add(revisionId),
-        }
-      })
-      showToast('success', '已撤销这次修改')
-      publishWorkspaceSignal({ kind: 'changesUndone', scope: 'resume' })
-      return true
-    } catch (failure) {
-      set((state) => {
-        const busy = new Set(state.undoBusy)
-        busy.delete(revisionId)
-        return { undoBusy: busy, error: describeError(failure) }
-      })
-      return false
-    }
+    return runUndo(
+      revisionId,
+      (current) => current.libraryChanges.undoRevision({ resumeId, revisionId }),
+      () => publishWorkspaceSignal({ kind: 'changesUndone', scope: 'resume' }),
+    )
   },
 
   clearError() {
