@@ -11,12 +11,14 @@ import type { OverflowReason } from '../../domain/resume/PageLayout'
 import type { LayoutBlockId, ResumeSectionId } from '../../domain/shared/branded-id'
 import type { PageScreenBox, ProjectedPage } from './canvasProjection'
 import { ResumeBlockShape } from './ResumeBlockShape'
+import type { ResolvedDecoration } from '../../domain/resume/Decoration'
 import { PageNumberText, PaperShadow, PaperSurface } from './ResumePageParts'
 
 interface PageBlocksProps {
   readonly page: ProjectedPage
   readonly box: PageScreenBox
   readonly zoom: number
+  readonly decoration: ResolvedDecoration | null
   readonly accent: string
   readonly selectedBlockId: LayoutBlockId | null
   readonly selectedSectionId: ResumeSectionId | null
@@ -33,6 +35,7 @@ function PageBlocks({
   page,
   box,
   zoom,
+  decoration,
   accent,
   selectedBlockId,
   selectedSectionId,
@@ -60,6 +63,7 @@ function PageBlocks({
             }
             agentHighlighted={sectionId !== undefined && agentSections.has(sectionId)}
             overflow={overflows.has(block.blockId)}
+            decoration={decoration}
             accent={accent}
             editable={editable}
             editorOpen={editorBlockId === block.blockId}
@@ -76,6 +80,7 @@ export interface ResumePageProps {
   readonly page: ProjectedPage
   readonly box: PageScreenBox
   readonly pageCount: number
+  readonly decoration: ResolvedDecoration | null
   readonly zoom: number
   readonly accent: string
   readonly selectedBlockId: LayoutBlockId | null
@@ -95,6 +100,7 @@ export function ResumePage({
   page,
   box,
   pageCount,
+  decoration,
   zoom,
   accent,
   selectedBlockId,
@@ -117,6 +123,7 @@ export function ResumePage({
         page={page}
         box={box}
         zoom={zoom}
+        decoration={decoration}
         accent={accent}
         selectedBlockId={selectedBlockId}
         selectedSectionId={selectedSectionId}

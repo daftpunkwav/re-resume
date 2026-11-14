@@ -13,6 +13,9 @@ import type { LayoutOutput, OverflowReason } from '../../domain/resume/PageLayou
 import type { PageSetup } from '../../domain/resume/PageSetup'
 import type { Resume } from '../../domain/resume/Resume'
 import type { MaterializedDocument } from '../../domain/resume/ResumeSnapshot'
+import { resolveDecoration } from '../../domain/resume/Decoration'
+import type { ResolvedDecoration } from '../../domain/resume/Decoration'
+import { resolveTemplate } from '../../domain/resume/Template'
 import type { TextStyle } from '../../domain/resume/TextStyle'
 import type { LayoutBlockId, ResumeSectionId } from '../../domain/shared/branded-id'
 import { useResumeStore } from '../features/resume/resumeStore'
@@ -75,6 +78,7 @@ export interface CanvasViewportData {
   readonly canvasBlocks: readonly CanvasBlock[]
   readonly blockSectionIds: ReadonlyMap<LayoutBlockId, ResumeSectionId>
   readonly page: PageSetup | null
+  readonly decoration: ResolvedDecoration | null
   readonly projected: ProjectedLayout | null
   readonly metrics: CanvasMetrics | null
   readonly pageCount: number
@@ -172,6 +176,13 @@ export function useCanvasViewportData(): CanvasViewportData {
   const selectedId = useResumeStore((state) => state.selectedId)
 
   const page = resume?.document.pageSetup ?? null
+  const decoration = useMemo(
+    () =>
+      resume === null
+        ? null
+        : resolveDecoration(resume.document.appearance, resolveTemplate(resume.document.templateId)),
+    [resume],
+  )
   const projected = useMemo(
     () => projectOf(materialized, layout, page),
     [materialized, layout, page],
@@ -192,6 +203,7 @@ export function useCanvasViewportData(): CanvasViewportData {
     materialized,
     layout,
     styles,
+    decoration,
     selection,
     editorTarget,
     selectedId,
