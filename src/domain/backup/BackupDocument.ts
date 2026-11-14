@@ -21,6 +21,7 @@
  */
 
 import { isAppSettings } from '../settings/AppSettings'
+import { CHANGE_OPS } from '../changes/ChangeRecord'
 import type { DateTime } from '../shared/DateTime'
 import { parseDateTime } from '../shared/DateTime'
 import { DomainError } from '../shared/DomainError'
@@ -256,6 +257,8 @@ const TABLE_SCHEMAS: Readonly<Record<string, TableSchema>> = {
     checkRow(row) {
       const scope = ENUM_KIND(row, 'scope', CHANGE_SCOPES)
       if (scope !== null) return scope
+      const op = ENUM_KIND(row, 'op', CHANGE_OPS)
+      if (op !== null) return op
       const entity = ENUM_KIND(row, 'entity', CHANGE_ENTITIES)
       if (entity !== null) return entity
       const origin = ENUM_KIND(row, 'origin', ORIGINS)

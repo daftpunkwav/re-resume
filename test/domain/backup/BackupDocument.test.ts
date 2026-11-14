@@ -115,6 +115,33 @@ describe('parseBackupDocument', () => {
     expect(() => validateBackupTables(tables)).toThrow(/entity/)
   })
 
+  it('refuses a change record whose op is outside the schema', () => {
+    // The mapper validates the op with the same closed set; a document the
+    // validator accepted with another op would insert rows every later read
+    // refuses.
+    const tables = tablesWithRows({
+      change_record: [
+        {
+          id: 'ch1',
+          scope: 'library',
+          entity: 'infoEntry',
+          entity_id: 'e1',
+          op: 'resume.update',
+          before_json: null,
+          after_json: null,
+          origin: 'user',
+          run_id: null,
+          conversation_id: null,
+          label: 'Update',
+          undone_at: null,
+          created_at: TEST_TIMESTAMP,
+        },
+      ],
+    })
+
+    expect(() => validateBackupTables(tables)).toThrow(/op/)
+  })
+
   it('accepts the TEXT provenance columns this build writes', () => {
     const tables = tablesWithRows({
       message: [
