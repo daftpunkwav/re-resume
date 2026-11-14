@@ -62,7 +62,8 @@ export function resolveDecoration(
   appearance: AppearanceSettings,
   template: TemplateDefinition,
 ): ResolvedDecoration {
-  const accent = template.id === 'minimal' ? null : (ACCENT_HEX[appearance.accentColor] ?? DECORATION_INK)
+  const accent =
+    template.id === 'minimal' ? null : (ACCENT_HEX[appearance.accentColor] ?? DECORATION_INK)
   return { accent, headingStyle: appearance.headingStyle }
 }
 

@@ -1,5 +1,5 @@
 /**
- * @file canvasDecoration.browser.test
+ * @file canvasDecoration.test
  * @description The WYSIWYG seam between the two renderers: an appearance change
  * resolves into the decoration record the store holds, the PDF renderer maps
  * the same document to the same accent, and the canvas actually paints it — a

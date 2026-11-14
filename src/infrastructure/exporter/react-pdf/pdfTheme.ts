@@ -30,6 +30,7 @@ export {
   BOXED_HEADING_BORDER_WIDTH,
   BOXED_HEADING_PADDING,
   RULE_THICKNESS,
+  decorationColor,
 } from '../../../domain/resume/Decoration'
 
 export function pdfAccentColor(
@@ -37,9 +38,4 @@ export function pdfAccentColor(
   template: TemplateDefinition,
 ): string | null {
   return resolveDecoration(appearance, template).accent
-}
-
-/** The colour decorations use: the accent when the template allows one, ink otherwise. */
-export function decorationColor(accent: string | null): string {
-  return accent ?? INK
 }
