@@ -195,6 +195,11 @@ describe('the image row of a user turn', () => {
 })
 
 describe('the composer toolbar in a narrow column', () => {
+  /** The double the composer registers from its mount effect. */
+  function composerObserver(element: HTMLElement): TestResizeObserver | undefined {
+    return TestResizeObserver.watching().find((candidate) => candidate.targets.includes(element))
+  }
+
   it('drops the shortcut hint when the composer is too narrow for it', async () => {
     await renderComposer()
     const composer = document.querySelector('.composer')
@@ -202,17 +207,21 @@ describe('the composer toolbar in a narrow column', () => {
     const element = composer as HTMLElement
     expect(element).not.toHaveAttribute('data-compact')
 
-    const observer = TestResizeObserver.watching().find((candidate) =>
-      candidate.targets.includes(element),
-    )
-    expect(observer).toBeDefined()
+    // The observer is registered from a passive effect, which a loaded
+    // scheduler may flush after the mount query has already resolved: wait for
+    // the registration instead of assuming the effect ran before this line.
+    await waitFor(() => {
+      expect(composerObserver(element)).toBeDefined()
+    })
+    const observer = composerObserver(element)
+    if (observer === undefined) throw new Error('The composer registered no resize observer.')
     act(() => {
-      observer?.report(320, 180)
+      observer.report(320, 180)
     })
     expect(element).toHaveAttribute('data-compact', 'true')
 
     act(() => {
-      observer?.report(640, 180)
+      observer.report(640, 180)
     })
     expect(element).not.toHaveAttribute('data-compact')
   })
