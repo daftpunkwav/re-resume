@@ -806,6 +806,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       case 'usage':
         return
     }
+    // Every member is named, the ignored ones deliberately; a new event type
+    // is a compile error here until this store decides where it belongs.
+    event satisfies never
   },
 
   async renameConversation(conversationId, title) {

@@ -29,7 +29,7 @@ function turnDeps(bed: ToolBed): RunAgentTurnDeps {
     jobPostings: bed.jobPostings,
     attachments: bed.attachments,
     fileStore: bed.fileStore,
-    infoEntries: bed.entries,
+    entries: bed.entries,
     customModules: bed.customModules,
     resumes: bed.resumes,
     changes: bed.changes,

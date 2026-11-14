@@ -195,6 +195,9 @@ export const useRunStore = create<RunState>((set, get) => ({
         set({ status: 'idle', errorText: event.errorText })
         return
     }
+    // Every member is reduced; a new event type is a compile error here until
+    // this store names it, so the transcript cannot silently drop it.
+    event satisfies never
   },
 
   finish() {

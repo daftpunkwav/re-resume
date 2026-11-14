@@ -72,6 +72,8 @@ import type { RecoverySummary } from '../../application/generation/recoverInterr
 import { retryRun } from '../../application/generation/retryRun'
 import { runAgentTurn } from '../../application/generation/runAgentTurn'
 import { buildToolRegistry } from '../../application/generation/buildToolRegistry'
+import type { RunAgentTurnDeps } from '../../application/generation/runAgentTurn'
+import type { ToolPackDeps } from '../../application/generation/tools/deps'
 import type { RunAgentTurnInput } from '../../application/generation/runAgentTurn'
 import type { ActiveRunRegistry } from '../../application/generation/activeRunRegistry'
 import { UnconfiguredModelProvider } from '../../infrastructure/http/ProviderAdapters/UnconfiguredModelProvider'
@@ -179,7 +181,10 @@ export function createConversationService(input: ConversationServiceInput): Conv
     pdfExporter,
     pdfSaver,
   } = input
-  const registry = buildToolRegistry({
+  // One bundle feeds both the tool pack and the run loop: a port added to
+  // `ToolPackDeps` reaches the turn through this spread, and the loop's own
+  // type keeps the run-specific fields out of the tools.
+  const toolDeps: ToolPackDeps = {
     model,
     entries: library.entries,
     customModules: library.customModules,
@@ -195,26 +200,16 @@ export function createConversationService(input: ConversationServiceInput): Conv
     ids,
     pdfExporter,
     pdfSaver,
-  })
-  const turnDeps = (signal: AbortSignal, emit: (event: AgentEvent) => void) => ({
-    model,
+  }
+  const registry = buildToolRegistry(toolDeps)
+  const turnDeps = (signal: AbortSignal, emit: (event: AgentEvent) => void): RunAgentTurnDeps => ({
+    ...toolDeps,
     titleModel,
     registry,
     conversations: repositories.conversations,
     messages: repositories.messages,
     messageContexts: repositories.messageContexts,
-    runs: repositories.runs,
     invocations: repositories.invocations,
-    jobPostings: repositories.jobPostings,
-    attachments: repositories.attachments,
-    fileStore: repositories.fileStore,
-    infoEntries: library.entries,
-    customModules: library.customModules,
-    resumes: library.resumes,
-    changes: library.changes,
-    measurer: library.measurer,
-    clock,
-    ids,
     emit,
     signal,
     secrets,
