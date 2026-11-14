@@ -77,13 +77,15 @@ export function modelCallErrorForStatus(
 /**
  * Classifies a thrown transport error. A user abort is not retried; any other
  * transport failure is a network interruption and is worth one retry.
+ *
+ * The abort here is recognized by name alone. Every call site already checks
+ * the signal before reaching this classifier, so a rejection that merely
+ * carries a `reason` property is an unrelated failure and stays retryable.
  */
 export function modelCallErrorForThrown(endpoint: string, error: unknown): ModelCallError {
   const aborted =
-    (error instanceof Error && error.name === 'AbortError') ||
-    (typeof error === 'object' &&
-      error !== null &&
-      (error as { readonly reason?: unknown }).reason !== undefined)
+    typeof error === 'object' && error !== null && 'name' in error &&
+    (error as { readonly name?: unknown }).name === 'AbortError'
   const detail = describeThrown(error)
   return new ModelCallError(`${endpoint} 请求失败${aborted ? '（已中止）' : ''}：${detail}`, {
     retryable: !aborted,

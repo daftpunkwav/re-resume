@@ -23,6 +23,7 @@
 import type { BackupDocument, BackupImportSummary } from '../../domain/backup/BackupDocument'
 import { parseBackupDocument, summarizeBackupDocument } from '../../domain/backup/BackupDocument'
 import type { BackupStore } from '../../domain/backup/ports/BackupStore'
+import { base64ToBytes } from '../../domain/shared/base64'
 import type { FileStore } from '../../domain/conversation/ports/FileStore'
 import type { SecretStore } from '../../domain/generation/ports/SecretStore'
 
@@ -39,7 +40,7 @@ export async function importBackup(
 ): Promise<BackupImportSummary> {
   const document: BackupDocument = parseBackupDocument(raw)
   for (const attachment of document.attachments) {
-    const bytes = decodeBase64(attachment.bytesBase64)
+    const bytes = base64ToBytes(attachment.bytesBase64)
     await deps.files.write(String(attachment.row.storage_name), bytes)
   }
   await deps.backup.replaceAll(document.tables)
@@ -52,13 +53,4 @@ export async function importBackup(
 /** Validates without writing, for the confirmation step before a restore. */
 export function inspectBackup(raw: unknown): BackupImportSummary {
   return summarizeBackupDocument(parseBackupDocument(raw))
-}
-
-function decodeBase64(value: string): Uint8Array {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }

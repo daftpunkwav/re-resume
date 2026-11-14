@@ -35,6 +35,7 @@ import type { ResumeSnapshot } from '../../domain/resume/ResumeSnapshot'
 import type { TemplateDefinition } from '../../domain/resume/Template'
 import { resolveTemplate } from '../../domain/resume/Template'
 import type { PdfFileSaver } from '../../domain/resume/ports/PdfFileSaver'
+import { toBase64 } from '../../domain/shared/base64'
 import type { ResumePdfExporter } from '../../domain/resume/ports/ResumePdfExporter'
 import type { ResumeId } from '../../domain/shared/branded-id'
 import type { AttachmentId } from '../../domain/shared/branded-id'
@@ -302,19 +303,4 @@ function headerNameOf(blocks: readonly LayoutBlock[]): string | null {
   if (header === undefined || header.role !== 'entry') return null
   const name = header.paragraphs[0]?.text.trim() ?? ''
   return name === '' ? null : name
-}
-
-const BASE64_CHUNK = 0x8000
-
-/**
- * Base64 for the data URL: `btoa` exists in the WebView and in Node, and the
- * byte string is built in chunks because spreading a font- or image-sized array
- * into one `String.fromCharCode` call overflows the argument limit.
- */
-function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK))
-  }
-  return btoa(binary)
 }

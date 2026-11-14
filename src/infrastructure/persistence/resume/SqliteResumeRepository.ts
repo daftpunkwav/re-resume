@@ -43,6 +43,7 @@ import {
   fromRevisionRow,
   fromSnapshotRow,
   hydrateResume,
+  serializeTargetJob,
   toResumeRow,
   toRevisionRow,
   toSnapshotRow,
@@ -344,7 +345,11 @@ export class SqliteResumeRepository implements ResumeRepository {
       assignments.push(`title = $${values.length.toString()}`)
     }
     if (patch.targetJob !== undefined) {
-      values.push(patch.targetJob === null ? null : writeJsonEnvelope(patch.targetJob))
+      // The column shape is the mapper's contract, not this method's: the same
+      // serializer runs for inserts and metadata updates.
+      values.push(
+        patch.targetJob === null ? null : writeJsonEnvelope(serializeTargetJob(patch.targetJob)),
+      )
       assignments.push(`target_job_json = $${values.length.toString()}`)
     }
     if (patch.conversationId !== undefined) {

@@ -57,6 +57,14 @@ describe('retry classification', () => {
     expect(modelCallErrorForThrown('endpoint', abort).retryable).toBe(false)
   })
 
+  it('does not read a reason property as an abort', () => {
+    // The signal guards at the call sites own the abort classification; any
+    // rejection that merely carries a `reason` is an unrelated failure and
+    // stays worth one retry.
+    const rejected = { reason: new Error('provider closed the stream') }
+    expect(modelCallErrorForThrown('endpoint', rejected).retryable).toBe(true)
+  })
+
   it('reads retry-after as seconds or an HTTP date', () => {
     expect(readRetryAfterSeconds({ 'retry-after': '2' })).toBe(2)
     expect(readRetryAfterSeconds({})).toBeNull()

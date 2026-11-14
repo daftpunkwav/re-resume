@@ -4,7 +4,13 @@
  * header map the transport reports, and the JSON body size ceiling.
  */
 
-/** Largest JSON request body, in characters, before the message is refused. */
+/**
+ * Largest JSON request body, in characters, before the message is refused.
+ * The count is UTF-16 code units, an approximation of the byte ceiling the
+ * servers enforce: CJK text underestimates by up to about three times, so a
+ * body this limit passes may still be refused by the server's 413 — the
+ * failure is fail-closed either way and lands in the same error path.
+ */
 export const MAX_REQUEST_BODY_CHARACTER_LENGTH = 20 * 1024 * 1024
 
 /**

@@ -26,6 +26,7 @@ import type { ToolContext } from '../../../domain/generation/ports/ToolRegistry'
 import type { Clock } from '../../../domain/shared/Clock'
 import type { IdGenerator } from '../../../domain/shared/IdGenerator'
 import { asJobPostingId } from '../../../domain/shared/branded-id'
+import { toBase64 } from '../../../domain/shared/base64'
 import type { AttachmentId, JobPostingId } from '../../../domain/shared/branded-id'
 import { DomainError } from '../../../domain/shared/DomainError'
 import { parseJobPosting } from '../../job/parseJobPosting'
@@ -222,13 +223,4 @@ function parseFailureToDomainError(failure: JobPostingParseFailure): DomainError
     id: '',
     blockers: ['text'],
   })
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-  }
-  return btoa(binary)
 }

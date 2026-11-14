@@ -12,9 +12,10 @@ import {
   cutoffBefore,
 } from '../../../src/application/settings/cleanupOrphanAttachments'
 import { clearAllData } from '../../../src/application/settings/clearAllData'
-import { base64ToBytes, exportBackup } from '../../../src/application/settings/exportBackup'
+import { exportBackup } from '../../../src/application/settings/exportBackup'
 import { importBackup, inspectBackup } from '../../../src/application/settings/importBackup'
 import type { OrphanAttachment } from '../../../src/domain/backup/ports/BackupStore'
+import { base64ToBytes } from '../../../src/domain/shared/base64'
 import type { Clock } from '../../../src/domain/shared/Clock'
 import { InMemorySecretStore } from '../../../src/infrastructure/preview/inMemoryRepositories'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
