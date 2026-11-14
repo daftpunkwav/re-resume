@@ -21,7 +21,20 @@
  */
 
 import { isAppSettings } from '../settings/AppSettings'
-import { CHANGE_OPS } from '../changes/ChangeRecord'
+import { PROVIDER_KINDS } from '../settings/ProviderConfig'
+import {
+  CHANGE_ENTITIES,
+  CHANGE_OPS,
+  CHANGE_ORIGINS,
+  CHANGE_SCOPES,
+} from '../changes/ChangeRecord'
+import { MESSAGE_KINDS, MESSAGE_STATUSES } from '../conversation/Message'
+import { ATTACHMENT_KINDS } from '../conversation/Attachment'
+import { MESSAGE_CONTEXT_KINDS } from '../conversation/MessageContext'
+import { AGENT_RUN_STATUSES } from '../generation/AgentRun'
+import { TOOL_RISKS } from '../generation/ToolRisk'
+import { TOOL_INVOCATION_STATUSES } from '../generation/ToolInvocation'
+import { RESUME_STATUSES } from '../resume/Resume'
 import type { DateTime } from '../shared/DateTime'
 import { parseDateTime } from '../shared/DateTime'
 import { DomainError } from '../shared/DomainError'
@@ -109,18 +122,13 @@ const TIMESTAMP = (row: BackupRow, column: string): string | null => {
     : null
 }
 
-const PROVIDER_KINDS = ['openai-compatible', 'anthropic'] as const
-const ORIGINS = ['user', 'agent'] as const
-const CHANGE_SCOPES = ['library', 'jobPosting'] as const
-const CHANGE_ENTITIES = ['infoEntry', 'customModule', 'jobPosting'] as const
-const MESSAGE_KINDS = ['user', 'assistant', 'tool'] as const
-const MESSAGE_STATUSES = ['streaming', 'complete', 'cancelled', 'failed', 'running'] as const
-const ATTACHMENT_KINDS = ['image', 'file'] as const
-const RUN_STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const
-const TOOL_RISKS = ['read', 'write', 'draft'] as const
-const TOOL_STATUSES = ['ok', 'failed'] as const
-const RESUME_STATUSES = ['draft', 'frozen'] as const
-const CONTEXT_KINDS = ['entry', 'resume', 'jobPosting'] as const
+// The enum value sets are imported from the domain types that own them: a kind
+// added to a domain type is accepted by the validator automatically. The column
+// shapes below stay the deliberately duplicated part of the row contract.
+const ORIGINS = CHANGE_ORIGINS
+const RUN_STATUSES = AGENT_RUN_STATUSES
+const TOOL_STATUSES = TOOL_INVOCATION_STATUSES
+const CONTEXT_KINDS = MESSAGE_CONTEXT_KINDS
 
 /**
  * The table set and the row columns of `BACKUP_SCHEMA_VERSION`. Insert order is

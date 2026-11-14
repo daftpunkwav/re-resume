@@ -18,7 +18,7 @@ import type { InfoEntry } from '../../../../src/domain/info/InfoEntry'
 import type { Resume } from '../../../../src/domain/resume/Resume'
 import { parseDateTime } from '../../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../../src/domain/shared/DateTime'
-import { asInfoEntryId, asResumeId } from '../../../../src/domain/shared/branded-id'
+import { asCustomModuleId, asInfoEntryId, asResumeId } from '../../../../src/domain/shared/branded-id'
 
 const AT: DateTime = parseDateTime('2026-01-01T00:00:00.000Z') as DateTime
 
@@ -54,7 +54,7 @@ afterEach(() => {
 
 describe('context injection', () => {
   it('adds an entry chip with its module label and focuses the composer', () => {
-    addEntryToConversation(ENTRY)
+    addEntryToConversation(ENTRY, [])
 
     const store = useConversationStore.getState()
     expect(store.composer.contexts).toEqual([
@@ -86,7 +86,7 @@ describe('context injection', () => {
       },
     })
 
-    addEntryToConversation(ENTRY)
+    addEntryToConversation(ENTRY, [])
 
     expect(useConversationStore.getState().composer.contexts).toHaveLength(1)
     expect(useToastStore.getState().toasts.at(-1)?.message).toContain('已经在本轮上下文里')
@@ -95,7 +95,27 @@ describe('context injection', () => {
 
 describe('entry context label', () => {
   it('names the built-in module', () => {
-    expect(entryContextLabel(ENTRY)).toContain('订单中台重构')
-    expect(entryContextLabel(ENTRY)).toContain('项目')
+    expect(entryContextLabel(ENTRY, [])).toContain('订单中台重构')
+    expect(entryContextLabel(ENTRY, [])).toContain('项目')
+  })
+
+  it('names a custom module from the list the caller supplies', () => {
+    const entry: InfoEntry = {
+      ...ENTRY,
+      moduleKind: 'custom',
+      customModuleId: asCustomModuleId('module-1'),
+    }
+    expect(
+      entryContextLabel(entry, [
+        {
+          id: asCustomModuleId('module-1'),
+          name: '开源经历',
+          fields: [],
+          sortOrder: 1,
+          createdAt: AT,
+          updatedAt: AT,
+        },
+      ]),
+    ).toContain('开源经历')
   })
 })

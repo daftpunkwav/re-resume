@@ -25,10 +25,9 @@ import type { CompositionRoot, ProviderService } from './capabilities'
 import { describeAppInfo } from './buildInfo'
 import { createAppSettingsService, createBackupService } from './wiring/appSettings'
 import { createSeedDataService } from './wiring/seed'
-import { createInfoService } from './wiring/info'
 import { createResumeService } from './wiring/resume'
 import { createExportService } from './wiring/export'
-import { createLibraryChangesService } from './wiring/changes'
+import { createLibraryCore } from './wiring/library'
 import { createProviderService } from './wiring/providers'
 import {
   InMemoryAppSettingsRepository,
@@ -36,7 +35,6 @@ import {
   InMemorySecretStore,
 } from '../infrastructure/preview/inMemoryRepositories'
 import { FakeClock, SequentialIdGenerator } from '../infrastructure/preview/deterministicEnvironment'
-import { ResumeEntryReferences } from '../infrastructure/persistence/resume/ResumeEntryReferences'
 import {
   PREVIEW_PROBE_SCRIPT,
   PREVIEW_PROVIDER_CREDENTIAL,
@@ -100,15 +98,17 @@ function createPreviewLibraryServices(state: PreviewConversationState): {
   readonly libraryChanges: CompositionRoot['libraryChanges']
   readonly export: CompositionRoot['export']
 } {
-  const info = createInfoService({
+  const { info, libraryChanges } = createLibraryCore({
     entries: state.entries,
     customModules: state.customModules,
-    references: new ResumeEntryReferences(state.resumes),
+    resumes: state.resumes,
+    changes: state.changes,
     clock: state.clock,
     ids: new SequentialIdGenerator('preview-info'),
   })
   return {
     info,
+    libraryChanges,
     resume: createResumeService({
       resumes: state.resumes,
       entries: state.entries,
@@ -119,13 +119,6 @@ function createPreviewLibraryServices(state: PreviewConversationState): {
       measurer: state.measurer,
       clock: new FakeClock(),
       ids: new SequentialIdGenerator('preview-resume'),
-    }),
-    libraryChanges: createLibraryChangesService({
-      changes: state.changes,
-      entries: state.entries,
-      customModules: state.customModules,
-      resumes: state.resumes,
-      clock: state.clock,
     }),
     // The preview renders with the real bundled fonts (loaded on first use) and
     // saves through the browser's download list instead of a native dialog.

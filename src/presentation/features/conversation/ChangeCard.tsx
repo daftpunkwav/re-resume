@@ -13,7 +13,7 @@
  */
 
 import { useServices } from '../../app/ApplicationServicesProvider'
-import { revealLibraryChange, revealResumeRevision } from './revealChange'
+import { revealLibraryChange, revealResumeRevision } from '../../app/revealChange'
 import { useConversationStore } from './stores/conversationStore'
 import { FeatureIcon } from './icons'
 import type { ChangeRecordId, ResumeId, RevisionId } from '../../../domain/shared/branded-id'

@@ -44,9 +44,12 @@ export function publishWorkspaceSignal(signal: WorkspaceSignal): void {
   for (const listener of [...listeners]) {
     try {
       listener(signal)
-    } catch {
+    } catch (failure) {
       // A panel that failed to follow one signal must not break the run or the
-      // other listeners. Its own store reports the failure through its state.
+      // other listeners. Its own store reports the failure through its state,
+      // but the crash itself is logged: a swallowed listener bug is otherwise
+      // invisible — the panel just silently stops following the agent.
+      console.error('workspace signal listener failed', signal.kind, failure)
     }
   }
 }

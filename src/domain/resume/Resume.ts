@@ -27,7 +27,10 @@ import type { MissingReference } from './MissingReference'
 import type { ResumeSnapshot } from './ResumeSnapshot'
 import type { TargetJob } from './TargetJob'
 
-export type ResumeStatus = 'draft' | 'frozen'
+/** The lifecycle a resume document is in; a frozen one refuses further edits. */
+export const RESUME_STATUSES = ['draft', 'frozen'] as const
+
+export type ResumeStatus = (typeof RESUME_STATUSES)[number]
 
 /** Longest accepted resume title, in code points. */
 export const RESUME_TITLE_MAX_LENGTH = 80

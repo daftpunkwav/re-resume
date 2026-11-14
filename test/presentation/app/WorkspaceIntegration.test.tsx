@@ -93,8 +93,14 @@ describe('WorkspaceIntegration', () => {
       argsSummary: '{}',
       messageId: 'message-1' as never,
     }
-    publishWorkspaceSignal({ kind: 'agentEvent', event: toolStart })
-    expect(useResumeStore.getState().agentBusy).toBe(true)
+    // The provider adopts the stored settings after the first paint, which
+    // re-subscribes the bridge; a signal published in that gap would be lost.
+    // Publishing again on each retry keeps the assertion about behaviour, not
+    // about which render the subscription landed on.
+    await waitFor(() => {
+      publishWorkspaceSignal({ kind: 'agentEvent', event: toolStart })
+      expect(useResumeStore.getState().agentBusy).toBe(true)
+    })
 
     publishWorkspaceSignal({
       kind: 'agentEvent',
@@ -112,19 +118,21 @@ describe('WorkspaceIntegration', () => {
     renderIntegration()
     await screen.findByText('workspace-ready', undefined, { timeout: 5000 })
 
-    publishWorkspaceSignal({
-      kind: 'agentEvent',
-      event: {
-        type: 'toolStart',
-        invocationId: 'invocation-1' as never,
-        toolName: 'writeResumeSummary',
-        risk: 'write',
-        label: '修改简历摘要',
-        argsSummary: '{}',
-        messageId: 'message-1' as never,
-      },
+    const toolStart: AgentEvent = {
+      type: 'toolStart',
+      invocationId: 'invocation-1' as never,
+      toolName: 'writeResumeSummary',
+      risk: 'write',
+      label: '修改简历摘要',
+      argsSummary: '{}',
+      messageId: 'message-1' as never,
+    }
+    // Same re-subscription gap as the case above: retry until the bridge has
+    // taken the event.
+    await waitFor(() => {
+      publishWorkspaceSignal({ kind: 'agentEvent', event: toolStart })
+      expect(useResumeStore.getState().agentBusy).toBe(true)
     })
-    expect(useResumeStore.getState().agentBusy).toBe(true)
 
     // A turn can end without a done event (a throwing provider, a cancelled
     // stream); settling is the safety net that must always clear the marker.
