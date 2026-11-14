@@ -86,6 +86,15 @@ describe('module payload', () => {
     const drifted = { ...JSON.parse(serializeCustomModulePayload(module)), icon: 'star' }
     expect(() => parseCustomModulePayload(drifted)).toThrow(/unknown keys/)
   })
+
+  it('reports a definition the domain validator refuses as a payload error', () => {
+    // The domain validator throws its own DomainError for a blank name; the
+    // parser converts it so the undo seam can describe the failure in its own
+    // vocabulary instead of surfacing an English rule refusal.
+    const module = customModuleFixture()
+    const invalid = { ...JSON.parse(serializeCustomModulePayload(module)), name: '   ' }
+    expect(() => parseCustomModulePayload(invalid)).toThrow(/does not validate/)
+  })
 })
 
 describe('module update payload', () => {

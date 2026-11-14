@@ -195,7 +195,16 @@ export function parseCustomModulePayload(value: unknown): CustomModuleDefinition
     createdAt: requireTimestamp(value, 'createdAt'),
     updatedAt: requireTimestamp(value, 'updatedAt'),
   }
-  validateCustomModuleDefinition(module)
+  // The domain's own validation is part of reading the payload back: its
+  // DomainError is an English rule refusal, so it is re-thrown as the payload
+  // error the undo seam knows how to describe.
+  try {
+    validateCustomModuleDefinition(module)
+  } catch (failure) {
+    throw new PayloadParseError(
+      `payload module does not validate: ${failure instanceof Error ? failure.message : String(failure)}`,
+    )
+  }
   return module
 }
 

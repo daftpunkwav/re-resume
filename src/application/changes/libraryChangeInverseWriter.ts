@@ -41,7 +41,6 @@ import {
 } from '../../domain/info/changePayloads'
 import type { CustomModuleId } from '../../domain/shared/branded-id'
 import { asCustomModuleId, asInfoEntryId } from '../../domain/shared/branded-id'
-import type { InfoEntry } from '../../domain/info/InfoEntry'
 import type { InfoModuleKind } from '../../domain/info/InfoModuleKind'
 import { isInfoModuleKind } from '../../domain/info/InfoModuleKind'
 import type { CustomModuleRepository } from '../../domain/info/ports/CustomModuleRepository'
@@ -213,9 +212,10 @@ export function createLibraryChangeInverseWriter(
 
     async restoreEntityOrder(record) {
       const what = `before 数据（排序 ${record.entityId}）`
+      if (record.beforeJson === null) throw corrupt(record.id, what)
       const order = parsePayload(
         parseOrderMappings,
-        decodeJson(record.beforeJson ?? '', record.id, what),
+        decodeJson(record.beforeJson, record.id, what),
         record.id,
         what,
       )
@@ -248,7 +248,7 @@ export function createLibraryChangeInverseWriter(
         null,
         what,
       )
-      if (entries.some((entry: InfoEntry) => entry.customModuleId !== module.id)) {
+      if (entries.some((entry) => entry.customModuleId !== module.id)) {
         throw corrupt(null, what)
       }
       const record = await liveRecord(deps, 'customModule', module.id)
