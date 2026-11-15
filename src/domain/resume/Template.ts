@@ -17,7 +17,7 @@
  * - `fontFamily` must be a family the bundled font registry carries; only the
  *   bundled family is available today.
  * - Templates live in the domain because the application materializer must
- *   import them and application may not import infrastructure (spec section 2.1).
+ *   import them and application may not import infrastructure.
  * - Pure data: no DOM, no storage, no package.
  */
 

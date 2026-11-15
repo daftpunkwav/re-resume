@@ -185,7 +185,7 @@ function placeColumnBlock(
 ): void {
   const placement = block.placement
   // An explicit column ends the current column when it targets an earlier one,
-  // and jumps forward when it targets a later one (spec section 11.3). Once the
+  // and jumps forward when it targets a later one. Once the
   // block no longer fits and a page break is needed, the same target column is
   // used again: placing a body block in the sidebar column of the next page
   // would be a layout the template never asked for.

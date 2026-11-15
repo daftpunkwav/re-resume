@@ -12,9 +12,9 @@
  * Constraints:
  * - Title and target job are metadata and deliberately absent: renaming a resume
  *   must not appear in its edit history.
- * - `validateResumeDocument` does not check that referenced entries exist
- *   (spec section 5.8): a composition change that removes a dangling reference
- *   must be committable, or the reference could never be cleared.
+ * - `validateResumeDocument` does not check that referenced entries exist: a
+ *   composition change that removes a dangling reference must be committable,
+ *   or the reference could never be cleared.
  * - Pure data: no DOM, no storage, no package.
  */
 

@@ -4,7 +4,7 @@
  * Every mutation — panel edit, canvas gesture, agent tool call — arrives here as
  * a change function and leaves as one revision.
  *
- * Execution order is the contract (spec section 5.8):
+ * Execution order is the contract:
  * 1. load the resume → `resumeNotFound`
  * 2. refuse a frozen resume → `resumeFrozen`
  * 3. apply the pure change function

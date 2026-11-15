@@ -7,7 +7,7 @@
  *
  * Responsibilities:
  * - Render a resume summary, dropping selected titles first and shortening
- *   tailored overrides second (spec section 7.5)
+ *   tailored overrides second
  * - Render a library overview with per-module counts and titles, trimming from
  *   the last module backwards and keeping at least five titles per module
  * - State every cut in the rendered text, so the prompt never claims to be

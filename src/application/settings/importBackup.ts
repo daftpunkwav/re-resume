@@ -6,7 +6,7 @@
  *
  * Responsibilities:
  * - Refuse a document of another version/schema or with any malformed row
- *   before the database is touched (spec section 8.7)
+ *   before the database is touched: validation is all-or-nothing
  * - Restore the attachment bytes the document carries
  * - Replace the whole database content in one transaction
  * - Leave no credential behind for a provider row the backup restores: the

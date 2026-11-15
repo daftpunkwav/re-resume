@@ -6,7 +6,8 @@
  * question in the library's terms, and the resume side answers it.
  *
  * Constraints:
- * - Cross-context port: declared where it is consumed (spec section 2.2).
+ * - Cross-context port: declared where it is consumed, not beside the
+ *   implementation that answers it.
  * - Read-only: deletions do not touch the resumes that referenced the row; the
  *   resume reports the reference as missing instead.
  */

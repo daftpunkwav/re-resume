@@ -577,7 +577,7 @@ interface MappedEntryContent {
   readonly body: readonly { readonly text: string; readonly bullet: boolean }[]
 }
 
-/** The field mapping table of spec section 11.2, one module at a time. */
+/** Maps one module's fields into the heading, meta line and body the document renders. */
 function mapEntryContent(
   entry: InfoEntry,
   customModule: CustomModuleDefinition | null,
@@ -690,7 +690,7 @@ function appendParagraph(target: { text: string; bullet: boolean }[], text: stri
   if (text !== '') target.push({ text, bullet: false })
 }
 
-/** A textarea value is bulleted line by line (spec section 11.2). */
+/** A textarea value becomes one bullet per line. */
 function bulletLines(text: string): readonly { readonly text: string; readonly bullet: boolean }[] {
   return splitLines(text).map((line) => ({ text: line, bullet: true }))
 }

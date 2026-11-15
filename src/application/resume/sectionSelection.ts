@@ -7,7 +7,7 @@
  *
  * Constraints:
  * - The selection is validated against the library on write only; the read path
- *   tolerates stale references (spec section 4.14).
+ *   tolerates stale references and reports them as missing.
  * - A section is identified by (moduleKind, customModuleId); a second selection
  *   of one module replaces the first rather than creating a duplicate.
  */

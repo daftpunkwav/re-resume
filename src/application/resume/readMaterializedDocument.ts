@@ -3,7 +3,7 @@
  * @description The query the interface uses to draw a resume: the materialized
  * blocks, the missing references and the page count the current layout produces.
  * The interface must not assemble resume content itself; this is the one read
- * that hands it the content (spec section 5.16).
+ * that hands it the content.
  *
  * Constraints:
  * - Read-only: no revision, no change record.
@@ -27,7 +27,7 @@ export interface ReadMaterializedDocumentOutput {
 }
 
 /**
- * Implements the materialization query of spec section 5.16. The pure builder in
+ * Implements the materialization query. The pure builder in
  * `materializeDocument.ts` produces the blocks; this function owns the read.
  */
 export async function readMaterializedDocument(

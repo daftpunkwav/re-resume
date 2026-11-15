@@ -5,8 +5,7 @@
  * previous state is in the revision chain.
  *
  * Constraints:
- * - Deliberately not exposed as an agent tool: the agent has no delete tools
- *   (spec section 7.10).
+ * - Deliberately not exposed as an agent tool: the agent has no delete tools.
  */
 
 import type { CanvasBlockId, ResumeId } from '../../domain/shared/branded-id'

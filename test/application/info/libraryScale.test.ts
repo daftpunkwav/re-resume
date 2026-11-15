@@ -2,7 +2,7 @@
  * @file libraryScale.test
  * @description The information library at the storage budget: 2000 entries.
  * Listing one module and searching the whole library are the two reads the panel
- * performs on every keystroke, so both are measured against the SPEC section 14
+ * performs on every keystroke, so both are measured against the panel's read
  * budget (500 entries first screen under 100 ms, with 2000 entries as the worst
  * case the storage allows).
  */

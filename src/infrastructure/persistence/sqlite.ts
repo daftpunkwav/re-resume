@@ -93,8 +93,7 @@ const sharedDatabases = new Map<string, SharedDatabase>()
 /**
  * Connects through the SQL plugin and returns the seam above. Migrations are
  * not run here: the plugin runs the ones registered on the Rust side when it
- * loads a connection, and its bookkeeping table is not this build's to write
- * (spec section 6.2).
+ * loads a connection, and its bookkeeping table is not this build's to write.
  */
 export async function openSqliteDatabase(
   connectionString: string,

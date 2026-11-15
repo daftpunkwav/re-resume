@@ -22,8 +22,8 @@
  * - Only web URLs become annotations: a `file:` or custom-scheme URL stays
  *   text, because a link annotation invites a reader's viewer to launch a local
  *   handler.
- * - Run baseline shifts are not expressible here; they belong to the residual
- *   cross-engine drawing differences the spec tracks as an open item.
+ * - Run baseline shifts are not expressible here; they remain among the
+ *   cross-engine drawing differences this exporter does not model.
  */
 
 import type { ReactElement, ReactNode } from 'react'
