@@ -14,7 +14,7 @@
  *   purpose: a mapper change must make a backup written by the previous build
  *   fail validation rather than be silently coerced.
  * - Validation is total and happens before the first write. A document that
- *   fails one row is rejected as a whole (spec section 8.7).
+ *   fails one row is rejected as a whole: a partial import is not an outcome.
  * - Cross-row invariants (primary keys, foreign keys, unique indexes) are left
  *   to the database transaction that applies the document; they cannot be
  *   checked meaningfully one row at a time.

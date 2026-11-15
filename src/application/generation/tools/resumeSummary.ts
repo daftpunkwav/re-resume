@@ -64,7 +64,7 @@ export interface ResumeSummarySelectedTitles {
   readonly titles: readonly string[]
 }
 
-/** The shape the tool contract fixes for `getResume` (spec section 7.4). */
+/** The summary `getResume` returns: the document's identifiers and composition, not its text. */
 export interface ResumeSummary {
   readonly resumeId: ResumeId
   readonly title: string

@@ -46,7 +46,7 @@ import type { ResumeContentDeps } from '../resume/resumeSource'
 import { loadMaterializedResume, loadResume } from '../resume/resumeSource'
 import { suggestedPdfFileName } from './suggestedPdfFileName'
 
-/** What an export reports next to its bytes, per spec section 5.15. */
+/** The conditions an export reports beside its bytes, for the user to accept before saving. */
 export type PdfExportWarning =
   | 'missing-reference'
   | 'text-overflow'

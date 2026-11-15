@@ -17,7 +17,7 @@
  * - `resume.current_revision_id` has no foreign key, so a pointer to a missing or
  *   foreign revision is a storage fault, not a null.
  * - Re-exporting is not allowed to change the envelope version: the payload
- *   version is independent of the DDL version (spec section 8.4).
+ *   version is independent of the DDL version.
  */
 
 import {

@@ -6,7 +6,7 @@
  *
  * Constraints:
  * - The bundled family is the only font family available, so every token names
- *   it (spec section 11.1: a token family must exist in the font registry).
+ *   it: a token family must exist in the font registry.
  * - Pure data: no DOM, no storage, no package.
  */
 

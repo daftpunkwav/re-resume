@@ -9,8 +9,9 @@
  * - Only the plugin's own exports are used. In 2.8.3 the plugin exposes
  *   exactly one function, fetch(input, init) -> Response; its type file
  *   declares nothing else.
- * - Streaming is the seam for spec section 11. The shipped implementation does
- *   build a pull-driven ReadableStream over the response body (each pull reads
+ * - Streaming is the seam the provider adapters consume. The shipped
+ *   implementation does build a pull-driven ReadableStream over the response
+ *   body (each pull reads
  *   one IPC chunk, and a trailing marker byte ends the stream), so
  *   readBodyChunks reads that stream directly. What is still unverified is
  *   whether the stream behaves identically on both target platforms; if it
