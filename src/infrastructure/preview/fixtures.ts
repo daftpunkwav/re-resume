@@ -16,7 +16,6 @@ import { providerSecretRef } from '../../domain/settings/ProviderConfig'
 import type { ModelChunk } from '../../domain/generation/ports/ModelProvider'
 import { parseDateTime } from '../../domain/shared/DateTime'
 import type { DateTime } from '../../domain/shared/DateTime'
-import { PREVIEW_CONVERSATION_ID } from './fixtures.conversation'
 
 const FIXTURE_TIME: DateTime = parseDateTime('2026-01-01T00:00:00.000Z') as DateTime
 
@@ -57,7 +56,6 @@ export const PREVIEW_SETTINGS: AppSettings = {
   ...DEFAULT_APP_SETTINGS,
   colorScheme: 'light',
   activeProviderId: PREVIEW_PROVIDER_ID,
-  lastConversationId: PREVIEW_CONVERSATION_ID,
 }
 
 /**

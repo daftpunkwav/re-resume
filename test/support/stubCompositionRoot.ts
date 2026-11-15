@@ -20,6 +20,7 @@ import type { DateTime } from '../../src/domain/shared/DateTime'
 import { FixtureTextMeasurer } from '../../src/infrastructure/measurement/FixtureTextMeasurer'
 import {
   InMemoryAppSettingsRepository,
+  InMemoryLastOpenedConversationStore,
   InMemoryProviderConfigRepository,
   InMemorySecretStore,
 } from '../../src/infrastructure/preview/inMemoryRepositories'
@@ -123,6 +124,7 @@ export function stubCompositionRoot(overrides: Partial<CompositionRoot> = {}): C
       clock,
     }),
     settings: createAppSettingsService({ repository: settingsRepository }),
+    lastOpenedConversation: new InMemoryLastOpenedConversationStore(),
     info,
     resume,
     export: pdfExport,

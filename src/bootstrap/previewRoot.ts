@@ -31,6 +31,7 @@ import { createLibraryCore } from './wiring/library'
 import { createProviderService } from './wiring/providers'
 import {
   InMemoryAppSettingsRepository,
+  InMemoryLastOpenedConversationStore,
   InMemoryProviderConfigRepository,
   InMemorySecretStore,
 } from '../infrastructure/preview/inMemoryRepositories'
@@ -42,6 +43,7 @@ import {
   PREVIEW_SETTINGS,
 } from '../infrastructure/preview/fixtures'
 import {
+  PREVIEW_CONVERSATION_ID,
   PREVIEW_CONVERSATION_SCRIPT,
   PREVIEW_FAILURE_MESSAGE,
   PREVIEW_FAILURE_SCRIPT,
@@ -163,6 +165,7 @@ function createPreviewProviders(deps: {
 interface PreviewState {
   readonly settings: InMemoryAppSettingsRepository
   readonly secrets: InMemorySecretStore
+  readonly lastOpenedConversation: InMemoryLastOpenedConversationStore
   readonly conversation: CompositionRoot['conversation']
   readonly info: CompositionRoot['info']
   readonly resume: CompositionRoot['resume']
@@ -189,6 +192,9 @@ function createPreviewState(): PreviewState {
   return {
     settings,
     secrets,
+    // The preview starts on the scripted session, the same way a returning
+    // window starts on the session it opened last.
+    lastOpenedConversation: new InMemoryLastOpenedConversationStore(PREVIEW_CONVERSATION_ID),
     conversation: conversation.service,
     info: library.info,
     resume: library.resume,
@@ -248,6 +254,7 @@ export function createPreviewRoot(options: PreviewRootOptions = {}): Composition
     info: state.info,
     resume: state.resume,
     conversation: state.conversation,
+    lastOpenedConversation: state.lastOpenedConversation,
     providers: state.providers,
     libraryChanges: state.libraryChanges,
     export: state.export,

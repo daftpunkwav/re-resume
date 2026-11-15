@@ -15,9 +15,13 @@
  * - This module is pure: no DOM, no storage, no package.
  * - Changes to the shape or to a range are a contract change for the
  *   persistence row and the settings cache; both carry a version.
+ * - The aggregate has one writer per concern: the settings store saves the
+ *   appearance and panel fields, the provider use cases save `activeProviderId`,
+ *   the sample-data seed saves `sampleDataSeeded`, and the read use case writes
+ *   the defaults when no row exists. Which conversation the window opened last
+ *   is window continuity, not a preference: the conversation area keeps it in
+ *   its own storage and this value does not carry it.
  */
-
-import type { ConversationId } from '../shared/branded-id'
 
 export const THEME_IDS = ['apple', 'doubao', 'google', 'minimalist', 'trae'] as const
 
@@ -63,7 +67,6 @@ export interface AppSettings {
   readonly canvasZoom: number
   readonly panels: PanelPreferences
   readonly sampleDataSeeded: boolean
-  readonly lastConversationId: ConversationId | null
   readonly activeProviderId: string | null
 }
 
@@ -89,7 +92,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   canvasZoom: 1,
   panels: { right: 'none', rightWidth: PANEL_WIDTH_DEFAULT, collapsed: false },
   sampleDataSeeded: false,
-  lastConversationId: null,
   activeProviderId: null,
 }
 
@@ -167,6 +169,10 @@ function isPanelPreferences(value: unknown): value is PanelPreferences {
  * Shape and range check for a stored value. A row that fails this is not the
  * settings this build wrote, so the persistence layer refuses it rather than
  * silently substituting defaults for a value the user chose.
+ *
+ * A field this build no longer reads is ignored rather than rejected: the value
+ * still holds every preference the build owns, so a row written by an earlier
+ * build stays usable instead of being refused as foreign.
  */
 export function isAppSettings(value: unknown): value is AppSettings {
   if (!isRecord(value)) return false
@@ -185,7 +191,6 @@ export function isAppSettings(value: unknown): value is AppSettings {
     value.canvasZoom <= CANVAS_ZOOM_MAX &&
     isPanelPreferences(value.panels) &&
     typeof value.sampleDataSeeded === 'boolean' &&
-    (value.lastConversationId === null || typeof value.lastConversationId === 'string') &&
     (value.activeProviderId === null || typeof value.activeProviderId === 'string')
   )
 }

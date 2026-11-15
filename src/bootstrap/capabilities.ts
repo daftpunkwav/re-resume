@@ -134,7 +134,7 @@ import type {
   WriteSummaryOverrideOutput,
 } from '../application/resume/writeSummaryOverride'
 import type { InfoEntryReference } from '../domain/info/ports/InfoEntryReferenceQuery'
-import type { CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
+import type { ConversationId, CustomModuleId, InfoEntryId } from '../domain/shared/branded-id'
 import type { AppSettings } from '../domain/settings/AppSettings'
 import type { ProviderConfig } from '../domain/settings/ProviderConfig'
 import type { ChangeOp, ChangeRecord, ChangeScope } from '../domain/changes/ChangeRecord'
@@ -185,6 +185,20 @@ export interface AppInfo {
 export interface AppSettingsService {
   readonly read: () => Promise<AppSettings>
   readonly save: (patch: Partial<AppSettings>) => Promise<AppSettings>
+}
+
+/**
+ * Remembers the conversation the window opened last, so the next launch can
+ * restore that session instead of whichever conversation was updated last.
+ *
+ * This is window continuity, not a preference: it changes on every open, it is
+ * deliberately kept outside `AppSettings`, and it never enters a backup. Both
+ * operations are total — an unreadable store reads as absent and a failed write
+ * is dropped, because the conversation list stays usable either way.
+ */
+export interface LastOpenedConversationStore {
+  read(): ConversationId | null
+  write(conversationId: ConversationId): void
 }
 
 /**
@@ -393,6 +407,8 @@ export interface CompositionRoot {
   readonly seed: SeedDataService
   /** Conversations, messages, attachments and the agent run of one turn. */
   readonly conversation: ConversationService
+  /** The session the next launch restores; see the store's own contract. */
+  readonly lastOpenedConversation: LastOpenedConversationStore
   readonly info: InfoService
   readonly resume: ResumeService
   /** Draft and frozen PDF export, its warnings and its save path. */

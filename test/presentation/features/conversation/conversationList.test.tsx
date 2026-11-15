@@ -13,7 +13,6 @@ import { useConversationStore } from '../../../../src/presentation/features/conv
 import type { ConversationServices } from '../../../../src/presentation/features/conversation/stores/conversationStore'
 import { createConversationService } from '../../../../src/bootstrap/wiring/conversation'
 import { createInfoService } from '../../../../src/bootstrap/wiring/info'
-import { createAppSettingsService } from '../../../../src/bootstrap/wiring/appSettings'
 import { ActiveRunRegistry } from '../../../../src/application/generation/activeRunRegistry'
 import { ResumeEntryReferences } from '../../../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import {
@@ -22,8 +21,7 @@ import {
   InMemoryEntryReferenceQuery,
   InMemoryInfoEntryRepository,
 } from '../../../../src/infrastructure/preview/inMemoryInfoRepositories'
-import { InMemoryAppSettingsRepository } from '../../../../src/infrastructure/preview/inMemoryRepositories'
-import { DEFAULT_APP_SETTINGS } from '../../../../src/domain/settings/AppSettings'
+import { InMemoryLastOpenedConversationStore } from '../../../../src/infrastructure/preview/inMemoryRepositories'
 import type { Conversation } from '../../../../src/domain/conversation/Conversation'
 import type { ConversationGroups } from '../../../../src/application/conversation/listConversations'
 import { createConversationBed } from '../../../support/conversationBed'
@@ -85,11 +83,8 @@ function createHarness(): Harness {
         clock: new FixedClock(),
         ids: new SequentialIdGenerator('list-info'),
       }),
-      settings: createAppSettingsService({
-        repository: new InMemoryAppSettingsRepository(DEFAULT_APP_SETTINGS),
-      }),
-      libraryChanges: {
-        undo: async () => {
+      lastOpened: new InMemoryLastOpenedConversationStore(),
+      libraryChanges: {        undo: async () => {
           throw new Error('not used in this test')
         },
         undoRevision: async () => {

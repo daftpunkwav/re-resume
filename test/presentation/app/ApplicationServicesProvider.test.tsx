@@ -41,6 +41,7 @@ function stubRoot(): CompositionRoot {
     resume: base.resume,
     export: base.export,
     conversation: createPreviewConversationService().service,
+    lastOpenedConversation: base.lastOpenedConversation,
     providers: base.providers,
     libraryChanges: base.libraryChanges,
     backup: base.backup,

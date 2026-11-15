@@ -18,7 +18,7 @@ export function storesForRoot(root: CompositionRoot): ConversationStores {
     conversation: {
       conversation: root.conversation,
       info: root.info,
-      settings: root.settings,
+      lastOpened: root.lastOpenedConversation,
       libraryChanges: root.libraryChanges,
     },
     providers: root.providers,

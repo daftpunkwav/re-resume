@@ -25,7 +25,6 @@ const APP_SETTINGS_ROW = {
     canvasZoom: 1,
     panels: { right: 'none', rightWidth: 400, collapsed: false },
     sampleDataSeeded: false,
-    lastConversationId: null,
     activeProviderId: null,
   }),
   updated_at: TEST_TIMESTAMP,
@@ -37,6 +36,26 @@ describe('parseBackupDocument', () => {
 
     expect(parseBackupDocument(document)).toEqual(document)
     expect(summarizeBackupDocument(document).tables.app_settings).toBe(1)
+  })
+
+  it('accepts a settings envelope from before the conversation pointer moved out', () => {
+    // The previous build kept `lastConversationId` in this object. The field is
+    // no longer part of the aggregate, but a document exported then still
+    // carries it; refusing the file would make an otherwise valid backup
+    // unimportable, so the validator reads the fields this build owns and
+    // ignores the ones it no longer does.
+    const settings = JSON.parse(APP_SETTINGS_ROW.settings_json) as Record<string, unknown>
+    settings.lastConversationId = 'conversation-1'
+    settings.themeId = 'doubao'
+    const document = backupDocument(
+      tablesWithRows({
+        app_settings: [
+          { ...APP_SETTINGS_ROW, settings_json: JSON.stringify(settings) },
+        ],
+      }),
+    )
+
+    expect(parseBackupDocument(document)).toEqual(document)
   })
 
   it('refuses a document version it does not know', () => {

@@ -14,6 +14,7 @@
 import { DEFAULT_APP_SETTINGS } from '../../domain/settings/AppSettings'
 import type { AppSettings } from '../../domain/settings/AppSettings'
 import type { AppSettingsRepository } from '../../domain/settings/ports/AppSettingsRepository'
+import type { ConversationId } from '../../domain/shared/branded-id'
 import type { ProviderConfig } from '../../domain/settings/ProviderConfig'
 import type { ProviderConfigRepository } from '../../domain/settings/ports/ProviderConfigRepository'
 import type { SecretStore } from '../../domain/generation/ports/SecretStore'
@@ -31,6 +32,23 @@ export class InMemoryAppSettingsRepository implements AppSettingsRepository {
 
   async write(settings: AppSettings): Promise<void> {
     this.#settings = settings
+  }
+}
+
+/** Window continuity for the preview: the fixture session starts restored. */
+export class InMemoryLastOpenedConversationStore {
+  #conversationId: ConversationId | null
+
+  constructor(initial: ConversationId | null = null) {
+    this.#conversationId = initial
+  }
+
+  read(): ConversationId | null {
+    return this.#conversationId
+  }
+
+  write(conversationId: ConversationId): void {
+    this.#conversationId = conversationId
   }
 }
 

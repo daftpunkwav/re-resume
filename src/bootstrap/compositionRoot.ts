@@ -72,6 +72,7 @@ import { StrongholdSecretStore } from '../infrastructure/security/StrongholdSecr
 import type { StrongholdSecretStoreOptions } from '../infrastructure/security/StrongholdSecretStore'
 import { SystemClock } from '../infrastructure/platform/systemClock'
 import { RandomIdGenerator } from '../infrastructure/platform/randomIdGenerator'
+import { BrowserLastOpenedConversationStore } from '../infrastructure/platform/lastOpenedConversation'
 import { createTauriHttpClient } from '../infrastructure/http/TauriHttpClient'
 
 /**
@@ -447,6 +448,7 @@ export async function createCompositionRoot(
     return {
       appInfo: describeAppInfo({ runtime: 'tauri', databaseFile: await resolveDatabaseFile() }),
       settings: createAppSettingsService({ repository: repositories.settings }),
+      lastOpenedConversation: new BrowserLastOpenedConversationStore(),
       backup,
       seed,
       ...library,

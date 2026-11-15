@@ -50,7 +50,6 @@ const SETTINGS_ROW = {
     canvasZoom: 1,
     panels: { right: 'none', rightWidth: 400, collapsed: false },
     sampleDataSeeded: false,
-    lastConversationId: null,
     activeProviderId: null,
   }),
   updated_at: TEST_TIMESTAMP,

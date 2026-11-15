@@ -33,7 +33,6 @@ const SETTINGS_JSON = JSON.stringify({
   canvasZoom: 1,
   panels: { right: 'none', rightWidth: 400, collapsed: false },
   sampleDataSeeded: false,
-  lastConversationId: null,
   activeProviderId: null,
 })
 
