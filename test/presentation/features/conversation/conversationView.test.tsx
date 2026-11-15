@@ -144,9 +144,16 @@ describe('the composer', () => {
     renderView(stubCompositionRoot({ conversation: conversationServiceFor(bed) }))
 
     expect(await screen.findByRole('heading', { name: '从一段对话开始' })).toBeInTheDocument()
+    // The mount connects the stores and starts the list read. A send that races
+    // that read can be undone by the listing's own empty-state settle, so wait
+    // for the stored state the composer acts on instead of for a timer.
+    await waitFor(() => expect(useConversationStore.getState().listStatus).toBe('ready'))
     const input = screen.getByRole('textbox', { name: '输入消息' })
 
     fireEvent.change(input, { target: { value: '帮我改简历' } })
+    // The commit the key handler reads carries the draft: the send control is
+    // enabled from the same `canSend` the handler evaluates.
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
     fireEvent.compositionStart(input)
     // The key belongs to the IME: the handler returns before preventing the
     // default, so nothing is sent. fireEvent reports that decision, which makes
