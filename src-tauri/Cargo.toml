@@ -43,6 +43,9 @@ tauri-plugin-stronghold = "2.4.0"
 # the crate has to be a dependency of this package rather than reachable only
 # through tauri.
 serde_json = "1"
+# The backup command answers with a derived struct instead of a formatted
+# string; the derive macro needs serde as a direct dependency.
+serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 codegen-units = 1
