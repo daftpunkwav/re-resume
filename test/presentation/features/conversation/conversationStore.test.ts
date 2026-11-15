@@ -201,6 +201,78 @@ describe('conversationStore loading', () => {
     expect(useConversationStore.getState().activeId).toBeNull()
     expect(useConversationStore.getState().draft).toBe(true)
   })
+
+  it('keeps the session created while the first listing was in flight', async () => {
+    const harness = createHarness()
+    const conversation = harness.services.conversation
+    const readList = conversation.listConversations.bind(conversation)
+    let releaseListing!: () => void
+    const listingGate = new Promise<void>((resolve) => {
+      releaseListing = resolve
+    })
+    // The first listing reads its answer before the send creates a row and
+    // lands after it: the stale answer the race hands back.
+    vi.spyOn(conversation, 'listConversations').mockImplementationOnce(async () => {
+      const listed = await readList()
+      await listingGate
+      return listed
+    })
+
+    let releaseTurn!: () => void
+    const turnGate = new Promise<void>((resolve) => {
+      releaseTurn = resolve
+    })
+    harness.bed.model.enqueue({
+      chunks: [{ type: 'text', textDelta: '收到。' }],
+      beforeEachChunk: () => turnGate,
+    })
+
+    await connect(harness)
+    expect(useConversationStore.getState().listStatus).toBe('loading')
+
+    useConversationStore.getState().setComposerText('先发这一条')
+    const sending = useConversationStore.getState().send()
+    for (let index = 0; index < 50 && !useRunStore.getState().started; index += 1) {
+      await flush()
+    }
+    expect(useRunStore.getState().started).toBe(true)
+    const createdId = useConversationStore.getState().activeId
+    expect(createdId).not.toBeNull()
+
+    releaseListing()
+    await flush()
+
+    const during = useConversationStore.getState()
+    expect(during.activeId).toBe(createdId)
+    expect(during.draft).toBe(false)
+    expect(useRunStore.getState().status).toBe('running')
+    expect(during.messages.some((message) => message.kind === 'user')).toBe(true)
+
+    releaseTurn()
+    await sending
+    await flush()
+
+    const settled = useConversationStore.getState()
+    expect(settled.activeId).toBe(createdId)
+    expect(settled.messages.at(-1)?.markdown).toBe('收到。')
+  })
+
+  it('clears a selection missing from a listing read after it was made', async () => {
+    const harness = createHarness()
+    const created = await harness.services.conversation.createConversation({ title: '会被删除的会话' })
+    await connect(harness)
+    await flush()
+
+    expect(useConversationStore.getState().activeId).toBe(created.id)
+
+    // Another window removed the row. The read runs after the selection existed,
+    // so the absent row is the deletion it reports.
+    await harness.bed.conversations.delete(created.id)
+    await useConversationStore.getState().loadConversations()
+
+    expect(useConversationStore.getState().activeId).toBeNull()
+    expect(useConversationStore.getState().draft).toBe(true)
+  })
 })
 
 describe('conversationStore send flow', () => {
