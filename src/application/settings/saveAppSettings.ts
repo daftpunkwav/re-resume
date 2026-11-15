@@ -96,10 +96,6 @@ function mergeSettings(current: AppSettings, patch: Partial<AppSettings>): AppSe
       patch.sampleDataSeeded === undefined
         ? current.sampleDataSeeded
         : patch.sampleDataSeeded,
-    lastConversationId:
-      patch.lastConversationId === undefined
-        ? current.lastConversationId
-        : patch.lastConversationId,
     activeProviderId:
       patch.activeProviderId === undefined
         ? current.activeProviderId

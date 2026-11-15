@@ -18,7 +18,6 @@ import {
 import { ModelCallError } from '../../../../src/infrastructure/http/ProviderAdapters/errors'
 import { createInfoService } from '../../../../src/bootstrap/wiring/info'
 import { createConversationService } from '../../../../src/bootstrap/wiring/conversation'
-import { createAppSettingsService } from '../../../../src/bootstrap/wiring/appSettings'
 import { ActiveRunRegistry } from '../../../../src/application/generation/activeRunRegistry'
 import { ResumeEntryReferences } from '../../../../src/infrastructure/persistence/resume/ResumeEntryReferences'
 import {
@@ -27,7 +26,7 @@ import {
   InMemoryEntryReferenceQuery,
   InMemoryInfoEntryRepository,
 } from '../../../../src/infrastructure/preview/inMemoryInfoRepositories'
-import { InMemoryAppSettingsRepository } from '../../../../src/infrastructure/preview/inMemoryRepositories'
+import { InMemoryLastOpenedConversationStore } from '../../../../src/infrastructure/preview/inMemoryRepositories'
 import { DEFAULT_APP_SETTINGS } from '../../../../src/domain/settings/AppSettings'
 import { useConversationStore } from '../../../../src/presentation/features/conversation/stores/conversationStore'
 import type { ConversationServices } from '../../../../src/presentation/features/conversation/stores/conversationStore'
@@ -42,6 +41,7 @@ import { MESSAGE_WINDOW } from '../../../../src/presentation/features/conversati
 interface Harness {
   readonly bed: ConversationBed
   readonly services: ConversationServices
+  readonly lastOpened: InMemoryLastOpenedConversationStore
   readonly undo: ReturnType<typeof vi.fn>
   readonly undoRevision: ReturnType<typeof vi.fn>
 }
@@ -88,17 +88,18 @@ function createHarness(): Harness {
     clock: infoClock,
     ids: infoIds,
   })
-  const settingsRepository = new InMemoryAppSettingsRepository(DEFAULT_APP_SETTINGS)
+  const lastOpened = new InMemoryLastOpenedConversationStore()
   const undo = vi.fn(async (input: { changeId: string }) => ({ id: input.changeId }) as unknown as ChangeRecord)
   const undoRevision = vi.fn(async () => ({ label: '修改' }))
   return {
     bed,
+    lastOpened,
     undo,
     undoRevision,
     services: {
       conversation,
       info,
-      settings: createAppSettingsService({ repository: settingsRepository }),
+      lastOpened,
       libraryChanges: { undo, undoRevision, readChange: async () => null },
     },
   }
@@ -149,6 +150,47 @@ describe('conversationStore loading', () => {
     expect(state.activeId).toBe(second.id)
     expect(state.messages.map((message) => message.markdown)).toEqual(['你好'])
     expect(first.id).not.toBe(second.id)
+  })
+
+  it('restores the session recorded as last opened instead of the newest', async () => {
+    const harness = createHarness()
+    const older = await harness.services.conversation.createConversation({ title: '更早的会话' })
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
+    const newer = await harness.services.conversation.createConversation({ title: '最新的会话' })
+    harness.lastOpened.write(older.id)
+
+    await connect(harness)
+    await flush()
+
+    expect(useConversationStore.getState().activeId).toBe(older.id)
+    expect(useConversationStore.getState().activeId).not.toBe(newer.id)
+  })
+
+  it('records the opened session and restores it on the next connect', async () => {
+    const harness = createHarness()
+    const older = await harness.services.conversation.createConversation({ title: '更早的会话' })
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
+    const newer = await harness.services.conversation.createConversation({ title: '最新的会话' })
+    await connect(harness)
+    await flush()
+
+    // The first connect had no preference and opened the newest session.
+    expect(useConversationStore.getState().activeId).toBe(newer.id)
+    expect(harness.lastOpened.read()).toBe(newer.id)
+
+    await useConversationStore.getState().openConversation(older.id)
+    expect(harness.lastOpened.read()).toBe(older.id)
+
+    // A new launch: the store is disconnected and the same services connect
+    // again, so the restore reads what the previous session recorded.
+    useConversationStore.getState().connect(null)
+    await connect(harness)
+    await flush()
+    expect(useConversationStore.getState().activeId).toBe(older.id)
   })
 
   it('keeps the draft when nothing is stored', async () => {

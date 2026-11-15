@@ -23,8 +23,8 @@
 
 import { create } from 'zustand'
 import type {
-  AppSettingsService,
   InfoService,
+  LastOpenedConversationStore,
   LibraryChangesService,
 } from '../../../../bootstrap/capabilities'
 import type { ConversationService } from '../../../../bootstrap/wiring/conversation'
@@ -54,7 +54,6 @@ import type { CustomModuleDefinition } from '../../../../domain/info/CustomModul
 import { describeError } from '../../../app/errorMessages'
 import type { ReadableError } from '../../../app/errorMessages'
 import { showToast } from '../../../app/stores/toastStore'
-import { useSettingsStore } from '../../../app/stores/settingsStore'
 import { publishWorkspaceSignal } from '../workspaceEvents'
 import { useRunStore } from './runStore'
 
@@ -84,7 +83,7 @@ export type AttachmentLoadStatus = 'loading' | 'ready' | 'failed'
 export interface ConversationServices {
   readonly conversation: ConversationService
   readonly info: InfoService
-  readonly settings: AppSettingsService
+  readonly lastOpened: LastOpenedConversationStore
   readonly libraryChanges: LibraryChangesService
 }
 
@@ -395,17 +394,13 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       return
     }
     if (get().draft) return
-    let lastConversationId: string | null = null
-    try {
-      const settings = await current.settings.read()
-      lastConversationId = settings.lastConversationId
-    } catch {
-      // The preference is a convenience: a window that cannot read it still
-      // opens the most recent session below.
-    }
-    if (!listReads.current(generation)) return
+    // Window continuity, not a preference: the conversation area owns the
+    // session the window restores, so restoring it does not rewrite the
+    // settings aggregate. A store with no answer falls through to the newest
+    // conversation below.
+    const lastOpenedId = current.lastOpened.read()
     const preferred =
-      listed.conversations.find((conversation) => conversation.id === lastConversationId) ??
+      listed.conversations.find((conversation) => conversation.id === lastOpenedId) ??
       listed.conversations[0]
     if (preferred === undefined) {
       // The empty library is not a user action; a failure already shown for a
@@ -449,10 +444,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       error: null,
       enterIds: new Set<string>(),
     })
-    // The preference is written through the settings store, which owns the
-    // applied value and its cache; a direct save would be overwritten by the
-    // next debounced settings write.
-    useSettingsStore.getState().update({ lastConversationId: conversationId })
+    // Recorded where the conversation area owns it: a window-continuity value,
+    // not a settings preference.
+    current.lastOpened.write(conversationId)
     await Promise.all([get().loadMessagesFor(conversationId), get().refreshContextEntries()])
   },
 
@@ -677,7 +671,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         const created = await current.conversation.createConversation({})
         conversationId = created.id
         set({ activeId: created.id, draft: false })
-        useSettingsStore.getState().update({ lastConversationId: created.id })
+        current.lastOpened.write(created.id)
       } catch (failure) {
         // The draft is untouched: the text, its chips and its place in the
         // composer are exactly what the user handed over.

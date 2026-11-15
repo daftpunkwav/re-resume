@@ -36,7 +36,7 @@ async function connect(root: CompositionRoot): Promise<void> {
   useConversationStore.getState().connect({
     conversation: root.conversation,
     info: root.info,
-    settings: root.settings,
+    lastOpened: root.lastOpenedConversation,
     libraryChanges: root.libraryChanges,
   })
   await new Promise((resolve) => {
