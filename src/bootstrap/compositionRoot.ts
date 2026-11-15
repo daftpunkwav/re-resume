@@ -109,8 +109,9 @@ async function recordPreMigrationBackup(): Promise<void> {
   try {
     const outcome = await backupDatabaseBeforeMigration(invoke)
     // An operational record, not trace output: the answer says whether a copy
-    // of the pre-rebuild database was made.
-    console.info(`[startup] database backup: ${outcome.status} (${outcome.detail})`)
+    // of the pre-rebuild database was made, and where it lives when one was.
+    const destination = outcome.path === null ? '' : ` (${outcome.path})`
+    console.info(`[startup] database backup: ${outcome.status}${destination}`)
   } catch (failure) {
     console.warn(
       '[startup] the pre-migration database backup could not be made; continuing without it.',
