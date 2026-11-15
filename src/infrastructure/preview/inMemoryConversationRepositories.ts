@@ -78,11 +78,17 @@ export class InMemoryAgentRunRepository implements AgentRunRepository {
 
   async create(run: AgentRun): Promise<void> {
     if (this.rows.has(run.id)) throw new Error(`Agent run ${run.id} already exists.`)
-    // No mirror of idx_run_one_running here: the raw create path serves the
-    // job-posting parse, which runs mid-turn for the same conversation and
-    // would collide with the turn's own running run if the index rule were
-    // mirrored. See the documented divergence in the contract suite and the
-    // tracking issue for the native runtime.
+    // Mirrors idx_run_one_running: a raw create may not add a second running run
+    // for one conversation. A run without a conversation (a standalone
+    // job-posting parse) is independent, exactly as its NULL is in the index.
+    if (run.conversationId !== null && run.status === 'running') {
+      const running = await this.findRunningByConversation(run.conversationId)
+      if (running !== null) {
+        throw new Error(
+          `Agent run ${running.id} is still running for conversation ${run.conversationId}.`,
+        )
+      }
+    }
     this.rows.set(run.id, run)
   }
 
