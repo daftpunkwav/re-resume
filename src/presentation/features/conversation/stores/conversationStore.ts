@@ -345,6 +345,20 @@ async function ingestImageFiles(
   return { accepted, errors }
 }
 
+/**
+ * Whether the listing that just resolved proves the open session is gone. A read
+ * can prove that only for the selection it started after: a session created or
+ * opened while it was in flight is absent even though its row exists.
+ */
+function listingProvesOpenSessionDeleted(
+  listed: ListConversationsOutput,
+  activeId: Conversation['id'],
+  selectedBeforeRead: Conversation['id'] | null,
+): boolean {
+  if (activeId !== selectedBeforeRead) return false
+  return !listed.conversations.some((conversation) => conversation.id === activeId)
+}
+
 export const useConversationStore = create<ConversationState>((set, get) => ({
   ...EMPTY,
 
@@ -369,6 +383,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     const current = services
     if (current === null) return
     const generation = listReads.next()
+    // Captured before the await: only a selection that predates the answer can
+    // be judged by it.
+    const selectedBeforeRead = get().activeId
     set({ listStatus: 'loading' })
     let listed: ListConversationsOutput
     try {
@@ -388,7 +405,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (activeId !== null) {
       // A session deleted elsewhere (or by this window) leaves the region empty
       // rather than showing a transcript that no longer has a row.
-      if (!listed.conversations.some((conversation) => conversation.id === activeId)) {
+      if (listingProvesOpenSessionDeleted(listed, activeId, selectedBeforeRead)) {
         get().startDraft()
       }
       return
