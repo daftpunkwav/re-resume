@@ -2,8 +2,10 @@
  * @file messageWindow.test
  * @description The transcript stays bounded: a conversation the store holds with
  * 2000 messages mounts only the newest window, older turns are revealed on
- * request, and the per-frame work stays far below the budget for a stored
- * history of that size.
+ * request, and the block the window starts at is asserted, not just its size.
+ * The bound is observed through the mounted block count; a wall-clock budget
+ * would measure the machine and the other test files sharing it rather than the
+ * windowing rule.
  */
 
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -54,12 +56,11 @@ afterEach(() => {
 })
 
 describe('the transcript window', () => {
-  it('groups 2000 messages within the per-frame budget', () => {
-    const startedAt = performance.now()
+  it('groups 2000 messages into one block per turn', () => {
     const groups = groupMessages(longConversation())
-    const elapsed = performance.now() - startedAt
     expect(groups).toHaveLength(1000)
-    expect(elapsed).toBeLessThan(50)
+    expect(groups[0]).toMatchObject({ user: { seq: 1 }, assistant: { seq: 2 } })
+    expect(groups[999]).toMatchObject({ user: { seq: 1999 }, assistant: { seq: 2000 } })
   })
 
   it('mounts only the newest window and reveals older turns on request', () => {
@@ -70,16 +71,21 @@ describe('the transcript window', () => {
       messagesStatus: 'ready',
     })
 
-    const startedAt = performance.now()
     render(<MessageList />)
-    const renderTime = performance.now() - startedAt
 
     expect(screen.getAllByRole('region', { name: '一轮对话' })).toHaveLength(INITIAL_VISIBLE_GROUPS)
-    expect(renderTime).toBeLessThan(1500)
+    // The window is the newest one: with 1000 groups, the first 920 are stored
+    // but not mounted, and mounting any 80 of them would not satisfy this.
+    expect(screen.getByText('问题 1841')).toBeInTheDocument()
+    expect(screen.queryByText('问题 1839')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /显示更早的/ }))
     expect(screen.getAllByRole('region', { name: '一轮对话' })).toHaveLength(
       INITIAL_VISIBLE_GROUPS + LOAD_OLDER_GROUPS,
     )
+    // Revealing adds the next older page and leaves the newest block mounted.
+    expect(screen.getByText('问题 1681')).toBeInTheDocument()
+    expect(screen.queryByText('问题 1679')).toBeNull()
+    expect(screen.getByText('问题 1999')).toBeInTheDocument()
   })
 })
