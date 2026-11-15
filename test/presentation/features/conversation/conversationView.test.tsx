@@ -71,12 +71,6 @@ function conversationServiceFor(bed: ConversationBed) {
   })
 }
 
-async function settle(): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, 0)
-  })
-}
-
 beforeEach(() => {
   useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS, status: 'ready', error: null })
   useShellStore.setState({ draftEpoch: 0, settingsOpen: false, rightPanel: 'none' })
@@ -154,13 +148,16 @@ describe('the composer', () => {
 
     fireEvent.change(input, { target: { value: '帮我改简历' } })
     fireEvent.compositionStart(input)
-    fireEvent.keyDown(input, { key: 'Enter' })
-    await settle()
-    expect(useRunStore.getState().status).toBe('idle')
-    expect(useRunStore.getState().started).toBe(false)
+    // The key belongs to the IME: the handler returns before preventing the
+    // default, so nothing is sent. fireEvent reports that decision, which makes
+    // this assertion synchronous. Sampling the run store after a timer instead
+    // made the case depend on how the scheduler interleaved the send chain.
+    expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true)
+    expect(useConversationStore.getState().composer.text).toBe('帮我改简历')
 
     fireEvent.compositionEnd(input)
-    fireEvent.keyDown(input, { key: 'Enter' })
+    // Now the key is the composer's: the handler prevents the default and sends.
+    expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(false)
 
     await waitFor(() => expect(useRunStore.getState().started).toBe(true))
     expect((await screen.findAllByText('帮我改简历')).length).toBeGreaterThan(0)
