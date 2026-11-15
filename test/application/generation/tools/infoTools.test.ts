@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { asAgentRunId } from '../../../../src/domain/shared/branded-id'
 import { anAttachment } from '../../../support/resumeFixtures'
 import { createToolBed, createToolConversation, invokeTool, toolContextOf } from '../../../support/toolBed'
 
@@ -179,6 +180,44 @@ describe('analyzeJobDescription', () => {
       ok: false,
       error: expect.stringContaining('invalidFieldValue'),
     })
+  })
+
+  it('parses a posting while a turn already owns the conversation run slot', async () => {
+    const { bed, context } = await harness()
+    // The turn this tool runs inside has its own running run for the
+    // conversation; the parse must not try to claim that slot too.
+    const turnRun = await bed.messages.createRun({
+      id: asAgentRunId('turn-run'),
+      conversationId: context.conversationId,
+      resumeId: null,
+      jobPostingId: null,
+      status: 'running',
+      errorText: null,
+      promptTokens: null,
+      completionTokens: null,
+      startedAt: bed.clock.now(),
+      endedAt: null,
+    })
+    bed.model.enqueue(parsedAnswer())
+
+    const result = await invokeTool(
+      bed,
+      'analyzeJobDescription',
+      { text: '负责订单链路开发。要求熟悉 TypeScript。' },
+      context,
+    )
+
+    const value = result.value as { jobPostingId: string; parsed: { title: string } }
+    expect(value.parsed.title).toBe('后端开发工程师')
+    const posting = await bed.jobPostings.findById(value.jobPostingId as never)
+    expect(posting?.parsedByRunId).not.toBeNull()
+    const parseRun = await bed.runs.findById(asAgentRunId(String(posting?.parsedByRunId)))
+    expect(parseRun).toMatchObject({
+      conversationId: null,
+      jobPostingId: posting?.id,
+      status: 'completed',
+    })
+    await expect(bed.runs.findRunningByConversation(context.conversationId)).resolves.toEqual(turnRun)
   })
 
   it('asks for text or an attachment when both are missing', async () => {

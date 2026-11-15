@@ -18,6 +18,11 @@
  * - The image path (a screenshot transcribed by the model) is not part of this
  *   use case; a posting without text is rejected rather than sent as an empty
  *   prompt.
+ * - The parse run carries no conversation. The posting row keeps its
+ *   conversation link and `parsedByRunId` names the run, while the
+ *   conversation's one running slot belongs to the agent turn a tool may be
+ *   called from. A parse run that claimed the slot would collide with the turn
+ *   that triggered it.
  */
 
 import { z } from 'zod'
@@ -141,7 +146,11 @@ export async function parseJobPosting(
 async function startRun(deps: ParseJobPostingDeps, posting: JobPosting): Promise<AgentRun> {
   const run: AgentRun = {
     id: asAgentRunId(deps.ids.next()),
-    conversationId: posting.conversationId,
+    // The posting row carries the conversation and `parsedByRunId` carries this
+    // run, so provenance is complete without it. The conversation's running
+    // slot belongs to the agent turn that may have called this parse: claiming
+    // it here would fail against the one-running-run index.
+    conversationId: null,
     resumeId: posting.resumeId,
     jobPostingId: posting.id,
     status: 'running',

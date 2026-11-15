@@ -475,6 +475,22 @@ function describeRunGateContract(flavor: Flavor): void {
       await expect(bed.runs.findById(solo.id)).resolves.toEqual(solo)
       await expect(bed.runs.findById(another.id)).resolves.toEqual(another)
     })
+
+    it('refuses a second running run through the raw create path', async () => {
+      // The gate on createRun returns the winner; the raw create bypasses that
+      // lookup, so the storage rule itself is what refuses a second running run
+      // for one conversation. SQLite uses idx_run_one_running; the memory store
+      // applies the same rule.
+      const conversationId = asConversationId('conversation-1')
+      await bed.conversations.insert(aConversation('conversation-1'))
+      const first = aRun('run-1', conversationId)
+      await expect(bed.runs.create(first)).resolves.toBeUndefined()
+
+      await expect(bed.runs.create(aRun('run-2', conversationId))).rejects.toThrow()
+
+      await expect(bed.runs.findById(asAgentRunId('run-2'))).resolves.toBeNull()
+      await expect(bed.runs.listRunning()).resolves.toEqual([first])
+    })
   })
 }
 
@@ -596,64 +612,3 @@ for (const flavor of FLAVORS) {
   describeRunGateContract(flavor)
   describeInfoEntryOrderContract(flavor)
 }
-
-/**
- * Behaviour the two flavors do not share. Each case pins what its flavor does
- * today; the port the case exercises declares the shared rule, so a divergence
- * here is a known gap of one implementation rather than a second contract.
- */
-describe('documented divergences between the flavors', () => {
-  describe('sqlite repositories', () => {
-    let bed: ContractBed
-
-    beforeEach(() => {
-      bed = createSqliteBed()
-    })
-
-    afterEach(() => {
-      bed.close()
-    })
-
-    it('backs the raw create path with the partial unique index', async () => {
-      // The gate on createRun consults the running row and returns the winner;
-      // a raw AgentRunRepository.create bypasses that check, and
-      // idx_run_one_running is what refuses a second running run. The memory
-      // store has no index, so only its createRun gate enforces the rule.
-      await bed.conversations.insert(aConversation('conversation-1'))
-      await bed.runs.create(aRun('run-1', asConversationId('conversation-1')))
-
-      await expect(
-        bed.runs.create(aRun('run-2', asConversationId('conversation-1'))),
-      ).rejects.toThrow(/UNIQUE constraint failed/u)
-    })
-  })
-
-  describe('in-memory repositories', () => {
-    let bed: ContractBed
-
-    beforeEach(() => {
-      bed = createInMemoryBed()
-    })
-
-    afterEach(() => {
-      bed.close()
-    })
-
-    it('leaves the raw create path unguarded', async () => {
-      // Divergence from SQLite, and it is load-bearing: the job-posting parse
-      // (parseJobPosting.startRun) uses the raw create for a run that carries
-      // the current conversation while the turn's own run is still running, so
-      // mirroring the index in the memory store would fail the scripted tool
-      // chain the preview exists to exercise. On the native runtime the same
-      // call meets idx_run_one_running — see the tracking issue.
-      await bed.conversations.insert(aConversation('conversation-1'))
-      await bed.runs.create(aRun('run-1', asConversationId('conversation-1')))
-
-      await expect(
-        bed.runs.create(aRun('run-2', asConversationId('conversation-1'))),
-      ).resolves.toBeUndefined()
-      await expect(bed.runs.findById(asAgentRunId('run-2'))).resolves.not.toBeNull()
-      await expect(bed.runs.listRunning()).resolves.toHaveLength(2)
-    })
-  })
-})

@@ -11,7 +11,7 @@ import { parseJobPosting } from '../../../src/application/job/parseJobPosting'
 import type { JobPosting } from '../../../src/domain/generation/JobPosting'
 import { parseDateTime } from '../../../src/domain/shared/DateTime'
 import type { DateTime } from '../../../src/domain/shared/DateTime'
-import { asJobPostingId } from '../../../src/domain/shared/branded-id'
+import { asConversationId, asJobPostingId } from '../../../src/domain/shared/branded-id'
 import { createConversationBed } from '../../support/conversationBed'
 
 const AT: DateTime = parseDateTime('2026-01-01T00:00:00.000Z') as DateTime
@@ -63,8 +63,32 @@ describe('parseJobPosting', () => {
     })
   })
 
-  it('reports an unknown posting without a model call', async () => {
+  it('attributes the run to the posting without claiming the conversation slot', async () => {
     const bed = createConversationBed()
+    const conversationId = asConversationId('conversation-1')
+    await bed.jobPostings.insert(aPosting({ conversationId }))
+    bed.model.enqueue(
+      answer(
+        '{"title":"前端工程师","company":null,"responsibilities":["负责前端页面开发"],"requirements":["要求熟悉 TypeScript 与浏览器性能优化"],"keywords":[]}',
+      ),
+    )
+
+    const outcome = await parseJobPosting(
+      { model: bed.model, jobPostings: bed.jobPostings, runs: bed.runs, clock: bed.clock, ids: bed.ids },
+      { jobPostingId: asJobPostingId('posting-1') },
+    )
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    // The posting keeps the conversation link and the parse run is named on the
+    // posting; the conversation's running slot is left to an agent turn.
+    expect(outcome.value.run.conversationId).toBeNull()
+    expect(outcome.value.run.jobPostingId).toBe('posting-1')
+    expect(outcome.value.jobPosting.conversationId).toBe(conversationId)
+    expect(outcome.value.run.id).toBe(outcome.value.jobPosting.parsedByRunId)
+  })
+
+  it('reports an unknown posting without a model call', async () => {    const bed = createConversationBed()
     const outcome = await parseJobPosting(
       { model: bed.model, jobPostings: bed.jobPostings, runs: bed.runs, clock: bed.clock, ids: bed.ids },
       { jobPostingId: asJobPostingId('missing') },
